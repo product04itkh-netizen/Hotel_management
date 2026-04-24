@@ -1,0 +1,828 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>LPT Hotel Management System — Demo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet"/>
+<style>
+  :root {
+    --navy: #004AAD;
+    --dark-navy: #002D6E;
+    --gold: #C89B3C;
+    --gold-light: #F0D080;
+    --bg: #F7F5F0;
+    --surface: #FFFFFF;
+    --surface2: #F0EDE6;
+    --border: #E2DDD4;
+    --text: #1A1714;
+    --text-muted: #6B665E;
+    --text-light: #9E9A93;
+    --success: #1A7A4A;
+    --success-bg: #E8F5EE;
+    --warning: #A05C00;
+    --warning-bg: #FFF3E0;
+    --danger: #B83232;
+    --danger-bg: #FDEAEA;
+    --info: #004AAD;
+    --info-bg: #E8F0FB;
+    --radius: 10px;
+    --radius-lg: 16px;
+    --shadow: 0 1px 4px rgba(0,0,0,0.07), 0 4px 16px rgba(0,0,0,0.05);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; display: flex; }
+
+  /* ── SIDEBAR ── */
+  #sidebar {
+    width: 240px; min-height: 100vh; background: var(--dark-navy);
+    display: flex; flex-direction: column; flex-shrink: 0; position: sticky; top: 0; height: 100vh;
+  }
+  .sidebar-logo {
+    padding: 28px 24px 20px;
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+  }
+  .sidebar-logo .brand { font-family: 'DM Serif Display', serif; color: #fff; font-size: 20px; line-height: 1; }
+  .sidebar-logo .sub { font-size: 11px; color: var(--gold-light); letter-spacing: 0.12em; text-transform: uppercase; margin-top: 4px; }
+  .sidebar-nav { flex: 1; padding: 16px 12px; overflow-y: auto; }
+  .nav-section-label { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: rgba(255,255,255,0.3); padding: 8px 12px 4px; }
+  .nav-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 12px; border-radius: 8px; cursor: pointer;
+    color: rgba(255,255,255,0.65); font-size: 13.5px; font-weight: 400;
+    transition: all 0.15s; margin-bottom: 2px; border: none; background: none; width: 100%; text-align: left;
+  }
+  .nav-item:hover { background: rgba(255,255,255,0.07); color: #fff; }
+  .nav-item.active { background: var(--navy); color: #fff; font-weight: 500; }
+  .nav-item .icon { font-size: 16px; width: 20px; text-align: center; flex-shrink: 0; }
+  .sidebar-footer { padding: 16px 20px; border-top: 1px solid rgba(255,255,255,0.08); }
+  .user-pill { display: flex; align-items: center; gap: 10px; }
+  .user-avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--gold); display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; color: var(--dark-navy); flex-shrink: 0; }
+  .user-name { font-size: 13px; color: rgba(255,255,255,0.8); font-weight: 500; }
+  .user-role { font-size: 11px; color: rgba(255,255,255,0.4); }
+
+  /* ── MAIN ── */
+  #main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .topbar {
+    background: var(--surface); border-bottom: 1px solid var(--border);
+    padding: 0 32px; height: 60px; display: flex; align-items: center; justify-content: space-between;
+    position: sticky; top: 0; z-index: 10;
+  }
+  .topbar-title { font-family: 'DM Serif Display', serif; font-size: 20px; color: var(--dark-navy); }
+  .topbar-meta { font-size: 12px; color: var(--text-muted); }
+  .topbar-right { display: flex; align-items: center; gap: 12px; }
+  .badge { display: inline-flex; align-items: center; padding: 4px 10px; border-radius: 20px; font-size: 11.5px; font-weight: 500; }
+  .badge-success { background: var(--success-bg); color: var(--success); }
+  .badge-warning { background: var(--warning-bg); color: var(--warning); }
+  .badge-danger { background: var(--danger-bg); color: var(--danger); }
+  .badge-info { background: var(--info-bg); color: var(--info); }
+  .badge-gray { background: var(--surface2); color: var(--text-muted); }
+
+  .content { padding: 28px 32px; flex: 1; }
+
+  /* ── SECTIONS ── */
+  .section { display: none; }
+  .section.active { display: block; animation: fadeIn 0.2s ease; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+
+  /* ── CARDS ── */
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 20px 24px; box-shadow: var(--shadow); }
+  .card-title { font-family: 'DM Serif Display', serif; font-size: 17px; color: var(--dark-navy); margin-bottom: 4px; }
+  .card-sub { font-size: 12.5px; color: var(--text-muted); margin-bottom: 16px; }
+
+  /* ── STAT GRID ── */
+  .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+  .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 20px; box-shadow: var(--shadow); position: relative; overflow: hidden; }
+  .stat-card::before { content: ''; position: absolute; top: 0; left: 0; width: 4px; height: 100%; background: var(--accent, var(--navy)); border-radius: 4px 0 0 4px; }
+  .stat-label { font-size: 11.5px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 500; }
+  .stat-value { font-family: 'DM Serif Display', serif; font-size: 32px; color: var(--dark-navy); line-height: 1.1; margin: 6px 0 4px; }
+  .stat-sub { font-size: 12px; color: var(--text-muted); }
+
+  /* ── TABLE ── */
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  th { text-align: left; padding: 10px 14px; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); border-bottom: 1px solid var(--border); background: var(--surface2); }
+  td { padding: 11px 14px; border-bottom: 1px solid var(--border); color: var(--text); vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: #FAFAF8; }
+
+  /* ── GRID LAYOUTS ── */
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+
+  /* ── ROOM GRID ── */
+  .room-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-top: 8px; }
+  .room-cell {
+    border-radius: 8px; padding: 10px 8px; text-align: center; cursor: pointer;
+    border: 1.5px solid transparent; transition: all 0.15s; font-size: 12px; font-weight: 500;
+  }
+  .room-cell:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+  .room-cell .room-no { font-weight: 600; font-size: 14px; }
+  .room-cell .room-type { font-size: 10px; margin-top: 2px; opacity: 0.7; }
+  .room-available { background: var(--success-bg); border-color: #A8D8BE; color: var(--success); }
+  .room-occupied { background: var(--info-bg); border-color: #9DBFE8; color: var(--info); }
+  .room-cleaning { background: var(--warning-bg); border-color: #F5C97A; color: var(--warning); }
+  .room-maintenance { background: var(--danger-bg); border-color: #ECA9A9; color: var(--danger); }
+
+  /* ── FLOOR LABEL ── */
+  .floor-block { margin-bottom: 20px; }
+  .floor-label { font-size: 11.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); margin-bottom: 8px; }
+
+  /* ── LEGEND ── */
+  .legend { display: flex; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-muted); }
+  .legend-dot { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
+
+  /* ── FORM ── */
+  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+  .form-group { display: flex; flex-direction: column; gap: 5px; }
+  label { font-size: 12.5px; font-weight: 500; color: var(--text-muted); }
+  input, select, textarea {
+    border: 1px solid var(--border); border-radius: 8px; padding: 9px 12px;
+    font-family: 'DM Sans', sans-serif; font-size: 13.5px; color: var(--text);
+    background: var(--bg); transition: border 0.15s; outline: none;
+  }
+  input:focus, select:focus, textarea:focus { border-color: var(--navy); background: #fff; }
+  .btn {
+    padding: 9px 20px; border-radius: 8px; font-family: 'DM Sans', sans-serif;
+    font-size: 13.5px; font-weight: 500; cursor: pointer; border: none; transition: all 0.15s;
+  }
+  .btn-primary { background: var(--navy); color: #fff; }
+  .btn-primary:hover { background: var(--dark-navy); }
+  .btn-ghost { background: transparent; color: var(--navy); border: 1px solid var(--border); }
+  .btn-ghost:hover { background: var(--surface2); }
+  .btn-danger { background: var(--danger-bg); color: var(--danger); border: 1px solid #ECA9A9; }
+
+  /* ── PROGRESS BAR ── */
+  .prog-bar { height: 6px; background: var(--surface2); border-radius: 4px; overflow: hidden; margin-top: 6px; }
+  .prog-fill { height: 100%; border-radius: 4px; background: var(--navy); transition: width 0.4s; }
+
+  /* ── TIMELINE ── */
+  .timeline { border-left: 2px solid var(--border); margin-left: 8px; padding-left: 18px; }
+  .tl-item { position: relative; margin-bottom: 18px; }
+  .tl-item::before { content: ''; position: absolute; left: -24px; top: 4px; width: 10px; height: 10px; border-radius: 50%; background: var(--navy); border: 2px solid var(--surface); }
+  .tl-time { font-size: 11px; color: var(--text-light); }
+  .tl-text { font-size: 13.5px; color: var(--text); margin-top: 2px; }
+  .tl-sub { font-size: 12px; color: var(--text-muted); }
+
+  /* ── MODAL ── */
+  .modal-backdrop { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.35); z-index: 100; align-items: center; justify-content: center; }
+  .modal-backdrop.open { display: flex; }
+  .modal { background: var(--surface); border-radius: var(--radius-lg); padding: 28px; width: 480px; max-width: 95vw; box-shadow: 0 8px 40px rgba(0,0,0,0.18); }
+  .modal-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 20px; }
+  .modal-close { background: none; border: none; font-size: 20px; cursor: pointer; color: var(--text-muted); padding: 2px 6px; border-radius: 6px; }
+  .modal-close:hover { background: var(--surface2); }
+
+  /* ── NOTIFICATION DOT ── */
+  .notif-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #E84040; margin-left: 4px; vertical-align: middle; }
+
+  /* ── CHART ── */
+  .bar-chart { display: flex; align-items: flex-end; gap: 8px; height: 100px; padding: 0 4px; }
+  .bar-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .bar { width: 100%; border-radius: 4px 4px 0 0; background: var(--navy); transition: height 0.4s; min-height: 4px; }
+  .bar.gold { background: var(--gold); }
+  .bar-label { font-size: 10px; color: var(--text-muted); }
+
+  /* ── SECTION HEADER ── */
+  .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+  .section-header h2 { font-family: 'DM Serif Display', serif; font-size: 22px; color: var(--dark-navy); }
+  .section-header p { font-size: 13px; color: var(--text-muted); margin-top: 2px; }
+</style>
+</head>
+<body>
+
+<!-- SIDEBAR -->
+<aside id="sidebar">
+  <div class="sidebar-logo">
+    <div class="brand">HMS</div>
+    <div class="sub">Hotel Management System</div>
+  </div>
+  <nav class="sidebar-nav">
+    <div class="nav-section-label">Overview</div>
+    <button class="nav-item active" onclick="showSection('dashboard', this)">
+      <span class="icon">📊</span> Dashboard
+    </button>
+    <div class="nav-section-label" style="margin-top:8px">Operations</div>
+    <button class="nav-item" onclick="showSection('reservations', this)">
+      <span class="icon">📅</span> Reservations
+    </button>
+    <button class="nav-item" onclick="showSection('frontdesk', this)">
+      <span class="icon">🏨</span> Front Desk
+    </button>
+    <button class="nav-item" onclick="showSection('rooms', this)">
+      <span class="icon">🛏</span> Room Status
+    </button>
+    <button class="nav-item" onclick="showSection('housekeeping', this)">
+      <span class="icon">🧹</span> Housekeeping
+    </button>
+    <div class="nav-section-label" style="margin-top:8px">Finance</div>
+    <button class="nav-item" onclick="showSection('billing', this)">
+      <span class="icon">💳</span> Billing
+    </button>
+    <div class="nav-section-label" style="margin-top:8px">Management</div>
+    <button class="nav-item" onclick="showSection('reports', this)">
+      <span class="icon">📈</span> Reports
+    </button>
+    <button class="nav-item" onclick="showSection('staff', this)">
+      <span class="icon">👥</span> Staff & Users
+    </button>
+  </nav>
+  <div class="sidebar-footer">
+    <div class="user-pill">
+      <div class="user-avatar">JR</div>
+      <div>
+        <div class="user-name">Jea</div>
+        <div class="user-role">Operations Lead</div>
+      </div>
+    </div>
+  </div>
+</aside>
+
+<!-- MAIN -->
+<main id="main">
+  <!-- TOP BAR -->
+  <div class="topbar">
+    <div>
+      <div class="topbar-title" id="page-title">Dashboard</div>
+      <div class="topbar-meta" id="page-meta">Thursday, 24 April 2026</div>
+    </div>
+    <div class="topbar-right">
+      <span class="badge badge-success">● System Online</span>
+      <span style="font-size:12px;color:var(--text-muted)">Grand Palms Hotel</span>
+    </div>
+  </div>
+
+  <div class="content">
+
+  <!-- ═══════════════════════════════════════════ DASHBOARD -->
+  <div id="sec-dashboard" class="section active">
+    <div class="stat-grid">
+      <div class="stat-card" style="--accent:#004AAD">
+        <div class="stat-label">Occupancy Rate</div>
+        <div class="stat-value">78%</div>
+        <div class="prog-bar"><div class="prog-fill" style="width:78%"></div></div>
+        <div class="stat-sub" style="margin-top:6px">62 / 80 rooms occupied</div>
+      </div>
+      <div class="stat-card" style="--accent:#C89B3C">
+        <div class="stat-label">Today's Revenue</div>
+        <div class="stat-value">$4,820</div>
+        <div class="stat-sub">↑ 12% vs yesterday</div>
+      </div>
+      <div class="stat-card" style="--accent:#1A7A4A">
+        <div class="stat-label">Check-ins Today</div>
+        <div class="stat-value">14</div>
+        <div class="stat-sub">8 pending arrival</div>
+      </div>
+      <div class="stat-card" style="--accent:#B83232">
+        <div class="stat-label">Check-outs Today</div>
+        <div class="stat-value">9</div>
+        <div class="stat-sub">3 pending billing</div>
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-title">Weekly Occupancy</div>
+        <div class="card-sub">Room occupancy % — current week</div>
+        <div class="bar-chart">
+          <div class="bar-col"><div class="bar" style="height:60%"></div><span class="bar-label">Mon</span></div>
+          <div class="bar-col"><div class="bar" style="height:72%"></div><span class="bar-label">Tue</span></div>
+          <div class="bar-col"><div class="bar" style="height:65%"></div><span class="bar-label">Wed</span></div>
+          <div class="bar-col"><div class="bar" style="height:80%"></div><span class="bar-label">Thu</span></div>
+          <div class="bar-col"><div class="bar gold" style="height:78%"></div><span class="bar-label">Fri</span></div>
+          <div class="bar-col"><div class="bar gold" style="height:90%"></div><span class="bar-label">Sat</span></div>
+          <div class="bar-col"><div class="bar gold" style="height:85%"></div><span class="bar-label">Sun</span></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Recent Activity</div>
+        <div class="card-sub">Latest system events</div>
+        <div class="timeline">
+          <div class="tl-item">
+            <div class="tl-time">10:42 AM</div>
+            <div class="tl-text">Check-in: <strong>Sophia Chen</strong> — Room 305</div>
+            <div class="tl-sub">Deluxe Double · 3 nights</div>
+          </div>
+          <div class="tl-item">
+            <div class="tl-time">09:58 AM</div>
+            <div class="tl-text">Invoice paid: <strong>INV-2041</strong> · $620.00</div>
+            <div class="tl-sub">Marcus Webb — Cash</div>
+          </div>
+          <div class="tl-item">
+            <div class="tl-time">09:30 AM</div>
+            <div class="tl-text">Room 212 marked <span class="badge badge-success" style="padding:2px 7px;font-size:11px">Clean</span></div>
+            <div class="tl-sub">Assigned to Nary (Housekeeping)</div>
+          </div>
+          <div class="tl-item">
+            <div class="tl-time">08:15 AM</div>
+            <div class="tl-text">New booking: <strong>RES-0088</strong></div>
+            <div class="tl-sub">Suite 501 · Apr 26–29</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:20px">
+      <div class="card-title">Today's Arrivals & Departures</div>
+      <div class="card-sub">Quick at-a-glance for front desk</div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Guest</th><th>Room</th><th>Type</th><th>Dates</th><th>Status</th><th>Action</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><strong>Sophia Chen</strong></td>
+              <td>305</td>
+              <td>Deluxe Double</td>
+              <td>Apr 24 – 27</td>
+              <td><span class="badge badge-success">Checked In</span></td>
+              <td><button class="btn btn-ghost" style="padding:5px 12px;font-size:12px">View</button></td>
+            </tr>
+            <tr>
+              <td><strong>James Kowalski</strong></td>
+              <td>110</td>
+              <td>Standard Single</td>
+              <td>Apr 24 – 25</td>
+              <td><span class="badge badge-warning">Arriving</span></td>
+              <td><button class="btn btn-primary" style="padding:5px 12px;font-size:12px" onclick="openModal('checkin-modal')">Check In</button></td>
+            </tr>
+            <tr>
+              <td><strong>Anika Patel</strong></td>
+              <td>501</td>
+              <td>Executive Suite</td>
+              <td>Apr 21 – 24</td>
+              <td><span class="badge badge-danger">Checking Out</span></td>
+              <td><button class="btn btn-ghost" style="padding:5px 12px;font-size:12px">Checkout</button></td>
+            </tr>
+            <tr>
+              <td><strong>Tom Nguyen</strong></td>
+              <td>208</td>
+              <td>Deluxe Twin</td>
+              <td>Apr 24 – 26</td>
+              <td><span class="badge badge-info">Reserved</span></td>
+              <td><button class="btn btn-primary" style="padding:5px 12px;font-size:12px" onclick="openModal('checkin-modal')">Check In</button></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════ RESERVATIONS -->
+  <div id="sec-reservations" class="section">
+    <div class="section-header">
+      <div>
+        <h2>Reservations</h2>
+        <p>Manage all bookings — online, walk-in, phone</p>
+      </div>
+      <button class="btn btn-primary" onclick="openModal('new-reservation-modal')">+ New Reservation</button>
+    </div>
+    <div class="card">
+      <div style="display:flex;gap:10px;margin-bottom:16px">
+        <input type="text" placeholder="Search by guest name or booking ID..." style="flex:1"/>
+        <select style="width:160px"><option>All Status</option><option>Confirmed</option><option>Pending</option><option>Cancelled</option></select>
+        <select style="width:140px"><option>All Room Types</option><option>Standard</option><option>Deluxe</option><option>Suite</option></select>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Booking ID</th><th>Guest</th><th>Room</th><th>Check-in</th><th>Check-out</th><th>Nights</th><th>Amount</th><th>Status</th></tr></thead>
+          <tbody>
+            <tr><td><strong>RES-0091</strong></td><td>Lindy Saunders</td><td>402 – Deluxe</td><td>Apr 25</td><td>Apr 28</td><td>3</td><td>$540</td><td><span class="badge badge-info">Confirmed</span></td></tr>
+            <tr><td><strong>RES-0090</strong></td><td>Marcus Webb</td><td>115 – Standard</td><td>Apr 24</td><td>Apr 25</td><td>1</td><td>$120</td><td><span class="badge badge-success">Checked Out</span></td></tr>
+            <tr><td><strong>RES-0089</strong></td><td>Sophia Chen</td><td>305 – Deluxe Double</td><td>Apr 24</td><td>Apr 27</td><td>3</td><td>$480</td><td><span class="badge badge-success">Checked In</span></td></tr>
+            <tr><td><strong>RES-0088</strong></td><td>Tom Nguyen</td><td>208 – Deluxe Twin</td><td>Apr 24</td><td>Apr 26</td><td>2</td><td>$340</td><td><span class="badge badge-warning">Arriving</span></td></tr>
+            <tr><td><strong>RES-0087</strong></td><td>Priya Mehta</td><td>501 – Suite</td><td>Apr 26</td><td>Apr 30</td><td>4</td><td>$1,200</td><td><span class="badge badge-info">Confirmed</span></td></tr>
+            <tr><td><strong>RES-0086</strong></td><td>Chris Taylor</td><td>310 – Deluxe</td><td>Apr 27</td><td>Apr 29</td><td>2</td><td>$360</td><td><span class="badge badge-gray">Pending</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════ FRONT DESK -->
+  <div id="sec-frontdesk" class="section">
+    <div class="section-header">
+      <div><h2>Front Desk</h2><p>Check-in, check-out, and guest management</p></div>
+    </div>
+    <div class="grid-2" style="margin-bottom:20px">
+      <div class="card" style="border-top:3px solid var(--success)">
+        <div class="card-title">Pending Check-ins</div>
+        <div class="card-sub">Guests arriving today</div>
+        <div style="display:flex;flex-direction:column;gap:10px;margin-top:4px">
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:var(--bg);border-radius:8px">
+            <div>
+              <div style="font-weight:600;font-size:14px">James Kowalski</div>
+              <div style="font-size:12px;color:var(--text-muted)">Room 110 · Standard · 1 night</div>
+            </div>
+            <button class="btn btn-primary" style="font-size:12px;padding:6px 14px" onclick="openModal('checkin-modal')">Check In</button>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:var(--bg);border-radius:8px">
+            <div>
+              <div style="font-weight:600;font-size:14px">Tom Nguyen</div>
+              <div style="font-size:12px;color:var(--text-muted)">Room 208 · Deluxe Twin · 2 nights</div>
+            </div>
+            <button class="btn btn-primary" style="font-size:12px;padding:6px 14px" onclick="openModal('checkin-modal')">Check In</button>
+          </div>
+        </div>
+      </div>
+      <div class="card" style="border-top:3px solid var(--danger)">
+        <div class="card-title">Pending Check-outs</div>
+        <div class="card-sub">Guests departing today</div>
+        <div style="display:flex;flex-direction:column;gap:10px;margin-top:4px">
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:var(--bg);border-radius:8px">
+            <div>
+              <div style="font-weight:600;font-size:14px">Anika Patel</div>
+              <div style="font-size:12px;color:var(--text-muted)">Room 501 · Suite · Balance: $1,200</div>
+            </div>
+            <button class="btn btn-ghost" style="font-size:12px;padding:6px 14px">Checkout</button>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:var(--bg);border-radius:8px">
+            <div>
+              <div style="font-weight:600;font-size:14px">Marcus Webb</div>
+              <div style="font-size:12px;color:var(--text-muted)">Room 115 · Standard · Paid ✓</div>
+            </div>
+            <span class="badge badge-success">Cleared</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Currently In-House Guests</div>
+      <div class="card-sub">All guests currently checked in</div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Guest</th><th>Room</th><th>Check-in</th><th>Check-out</th><th>Folio Balance</th><th>Status</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Sophia Chen</strong></td><td>305</td><td>Apr 24</td><td>Apr 27</td><td>$480</td><td><span class="badge badge-success">In House</span></td></tr>
+            <tr><td><strong>Carlos Rivera</strong></td><td>204</td><td>Apr 22</td><td>Apr 25</td><td>$360</td><td><span class="badge badge-success">In House</span></td></tr>
+            <tr><td><strong>Emma Walsh</strong></td><td>312</td><td>Apr 23</td><td>Apr 26</td><td>$520</td><td><span class="badge badge-success">In House</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════ ROOM STATUS -->
+  <div id="sec-rooms" class="section">
+    <div class="section-header">
+      <div><h2>Room Status</h2><p>Visual floor plan — live room availability</p></div>
+    </div>
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot" style="background:#A8D8BE"></div> Available</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#9DBFE8"></div> Occupied</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#F5C97A"></div> Cleaning</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#ECA9A9"></div> Maintenance</div>
+    </div>
+    <div class="card">
+      <div class="floor-block">
+        <div class="floor-label">Floor 1 — Standard Rooms</div>
+        <div class="room-grid">
+          <div class="room-cell room-occupied"><div class="room-no">101</div><div class="room-type">Standard</div></div>
+          <div class="room-cell room-available"><div class="room-no">102</div><div class="room-type">Standard</div></div>
+          <div class="room-cell room-occupied"><div class="room-no">103</div><div class="room-type">Standard</div></div>
+          <div class="room-cell room-cleaning"><div class="room-no">104</div><div class="room-type">Standard</div></div>
+          <div class="room-cell room-available"><div class="room-no">105</div><div class="room-type">Standard</div></div>
+          <div class="room-cell room-occupied"><div class="room-no">110</div><div class="room-type">Standard</div></div>
+          <div class="room-cell room-available"><div class="room-no">111</div><div class="room-type">Standard</div></div>
+          <div class="room-cell room-maintenance"><div class="room-no">112</div><div class="room-type">Standard</div></div>
+          <div class="room-cell room-occupied"><div class="room-no">113</div><div class="room-type">Standard</div></div>
+          <div class="room-cell room-available"><div class="room-no">115</div><div class="room-type">Standard</div></div>
+        </div>
+      </div>
+      <div class="floor-block">
+        <div class="floor-label">Floor 2 — Deluxe Rooms</div>
+        <div class="room-grid">
+          <div class="room-cell room-occupied"><div class="room-no">201</div><div class="room-type">Deluxe</div></div>
+          <div class="room-cell room-occupied"><div class="room-no">204</div><div class="room-type">Deluxe</div></div>
+          <div class="room-cell room-available"><div class="room-no">206</div><div class="room-type">Deluxe</div></div>
+          <div class="room-cell room-occupied"><div class="room-no">208</div><div class="room-type">Deluxe Twin</div></div>
+          <div class="room-cell room-cleaning"><div class="room-no">210</div><div class="room-type">Deluxe</div></div>
+          <div class="room-cell room-available"><div class="room-no">212</div><div class="room-type">Deluxe</div></div>
+          <div class="room-cell room-occupied"><div class="room-no">215</div><div class="room-type">Deluxe</div></div>
+          <div class="room-cell room-available"><div class="room-no">218</div><div class="room-type">Deluxe</div></div>
+          <div class="room-cell room-cleaning"><div class="room-no">220</div><div class="room-type">Deluxe</div></div>
+          <div class="room-cell room-available"><div class="room-no">222</div><div class="room-type">Deluxe</div></div>
+        </div>
+      </div>
+      <div class="floor-block">
+        <div class="floor-label">Floor 3 — Deluxe Double</div>
+        <div class="room-grid">
+          <div class="room-cell room-occupied"><div class="room-no">301</div><div class="room-type">Deluxe Dbl</div></div>
+          <div class="room-cell room-available"><div class="room-no">303</div><div class="room-type">Deluxe Dbl</div></div>
+          <div class="room-cell room-occupied"><div class="room-no">305</div><div class="room-type">Deluxe Dbl</div></div>
+          <div class="room-cell room-cleaning"><div class="room-no">307</div><div class="room-type">Deluxe Dbl</div></div>
+          <div class="room-cell room-available"><div class="room-no">309</div><div class="room-type">Deluxe Dbl</div></div>
+          <div class="room-cell room-occupied"><div class="room-no">310</div><div class="room-type">Deluxe Dbl</div></div>
+          <div class="room-cell room-available"><div class="room-no">312</div><div class="room-type">Deluxe Dbl</div></div>
+          <div class="room-cell room-occupied"><div class="room-no">315</div><div class="room-type">Deluxe Dbl</div></div>
+          <div class="room-cell room-maintenance"><div class="room-no">318</div><div class="room-type">Deluxe Dbl</div></div>
+          <div class="room-cell room-available"><div class="room-no">320</div><div class="room-type">Deluxe Dbl</div></div>
+        </div>
+      </div>
+      <div class="floor-block">
+        <div class="floor-label">Floor 5 — Executive Suites</div>
+        <div class="room-grid" style="grid-template-columns:repeat(4,1fr)">
+          <div class="room-cell room-occupied"><div class="room-no">501</div><div class="room-type">Suite</div></div>
+          <div class="room-cell room-available"><div class="room-no">502</div><div class="room-type">Suite</div></div>
+          <div class="room-cell room-available"><div class="room-no">503</div><div class="room-type">Suite</div></div>
+          <div class="room-cell room-occupied"><div class="room-no">504</div><div class="room-type">Suite</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════ HOUSEKEEPING -->
+  <div id="sec-housekeeping" class="section">
+    <div class="section-header">
+      <div><h2>Housekeeping</h2><p>Assign and track room cleaning tasks</p></div>
+      <button class="btn btn-primary">+ Assign Task</button>
+    </div>
+    <div class="grid-3" style="margin-bottom:20px">
+      <div class="stat-card" style="--accent:#1A7A4A"><div class="stat-label">Clean & Ready</div><div class="stat-value">54</div></div>
+      <div class="stat-card" style="--accent:#A05C00"><div class="stat-label">In Progress</div><div class="stat-value">6</div></div>
+      <div class="stat-card" style="--accent:#B83232"><div class="stat-label">Pending Cleaning</div><div class="stat-value">8</div></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Today's Cleaning Tasks</div>
+      <div class="card-sub">Assigned to housekeeping staff</div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Room</th><th>Type</th><th>Priority</th><th>Assigned To</th><th>Status</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td><strong>104</strong></td><td>Standard</td><td><span class="badge badge-danger">High</span></td><td>Nary Sok</td><td><span class="badge badge-warning">In Progress</span></td><td>Late checkout</td></tr>
+            <tr><td><strong>210</strong></td><td>Deluxe</td><td><span class="badge badge-warning">Medium</span></td><td>Nary Sok</td><td><span class="badge badge-warning">In Progress</span></td><td>—</td></tr>
+            <tr><td><strong>212</strong></td><td>Deluxe</td><td><span class="badge badge-success">Normal</span></td><td>Vanny Kim</td><td><span class="badge badge-success">Done</span></td><td>—</td></tr>
+            <tr><td><strong>307</strong></td><td>Deluxe Dbl</td><td><span class="badge badge-danger">High</span></td><td>Vanny Kim</td><td><span class="badge badge-gray">Pending</span></td><td>New arrival at 3pm</td></tr>
+            <tr><td><strong>220</strong></td><td>Deluxe</td><td><span class="badge badge-success">Normal</span></td><td>Pich Ratha</td><td><span class="badge badge-gray">Pending</span></td><td>—</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════ BILLING -->
+  <div id="sec-billing" class="section">
+    <div class="section-header">
+      <div><h2>Billing & Payments</h2><p>Invoices, charges, and payment records</p></div>
+      <button class="btn btn-primary" onclick="openModal('invoice-modal')">+ Create Invoice</button>
+    </div>
+    <div class="grid-3" style="margin-bottom:20px">
+      <div class="stat-card" style="--accent:#C89B3C"><div class="stat-label">Today's Collections</div><div class="stat-value">$3,240</div></div>
+      <div class="stat-card" style="--accent:#004AAD"><div class="stat-label">Pending Payment</div><div class="stat-value">$2,580</div></div>
+      <div class="stat-card" style="--accent:#B83232"><div class="stat-label">Overdue</div><div class="stat-value">$0</div></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Invoice List</div>
+      <div class="card-sub">All invoices — current period</div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Invoice #</th><th>Guest</th><th>Room</th><th>Amount</th><th>Method</th><th>Date</th><th>Status</th></tr></thead>
+          <tbody>
+            <tr><td><strong>INV-2041</strong></td><td>Marcus Webb</td><td>115</td><td>$120.00</td><td>Cash</td><td>Apr 24</td><td><span class="badge badge-success">Paid</span></td></tr>
+            <tr><td><strong>INV-2040</strong></td><td>Carlos Rivera</td><td>204</td><td>$360.00</td><td>Card</td><td>Apr 24</td><td><span class="badge badge-success">Paid</span></td></tr>
+            <tr><td><strong>INV-2039</strong></td><td>Anika Patel</td><td>501</td><td>$1,200.00</td><td>—</td><td>Apr 24</td><td><span class="badge badge-warning">Pending</span></td></tr>
+            <tr><td><strong>INV-2038</strong></td><td>Sophia Chen</td><td>305</td><td>$480.00</td><td>—</td><td>Apr 24</td><td><span class="badge badge-info">In-House</span></td></tr>
+            <tr><td><strong>INV-2037</strong></td><td>Emma Walsh</td><td>312</td><td>$520.00</td><td>Card</td><td>Apr 23</td><td><span class="badge badge-success">Paid</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════ REPORTS -->
+  <div id="sec-reports" class="section">
+    <div class="section-header">
+      <div><h2>Reports & Analytics</h2><p>Performance metrics and business intelligence</p></div>
+    </div>
+    <div class="grid-2" style="margin-bottom:20px">
+      <div class="card">
+        <div class="card-title">Monthly Revenue</div>
+        <div class="card-sub">Apr 2026 — by room category</div>
+        <div class="bar-chart" style="height:120px;margin-top:8px">
+          <div class="bar-col"><div class="bar" style="height:45%;background:#9DBFE8"></div><span class="bar-label">Standard</span></div>
+          <div class="bar-col"><div class="bar" style="height:75%;background:var(--navy)"></div><span class="bar-label">Deluxe</span></div>
+          <div class="bar-col"><div class="bar" style="height:60%;background:var(--navy)"></div><span class="bar-label">Dbl</span></div>
+          <div class="bar-col"><div class="bar" style="height:90%;background:var(--gold)"></div><span class="bar-label">Suite</span></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Key KPIs</div>
+        <div class="card-sub">April 2026</div>
+        <div style="display:flex;flex-direction:column;gap:14px;margin-top:8px">
+          <div>
+            <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px"><span>Occupancy Rate</span><strong>78%</strong></div>
+            <div class="prog-bar"><div class="prog-fill" style="width:78%"></div></div>
+          </div>
+          <div>
+            <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px"><span>ADR (Avg Daily Rate)</span><strong>$155</strong></div>
+            <div class="prog-bar"><div class="prog-fill" style="width:62%;background:var(--gold)"></div></div>
+          </div>
+          <div>
+            <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px"><span>RevPAR</span><strong>$121</strong></div>
+            <div class="prog-bar"><div class="prog-fill" style="width:55%;background:#1A7A4A"></div></div>
+          </div>
+          <div>
+            <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px"><span>Guest Satisfaction</span><strong>4.6 / 5</strong></div>
+            <div class="prog-bar"><div class="prog-fill" style="width:92%;background:#B83232"></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Booking Source Breakdown</div>
+      <div class="card-sub">Where reservations came from this month</div>
+      <div class="table-wrap" style="margin-top:8px">
+        <table>
+          <thead><tr><th>Source</th><th>Bookings</th><th>Revenue</th><th>% Share</th></tr></thead>
+          <tbody>
+            <tr><td>Direct (Walk-in / Phone)</td><td>48</td><td>$7,200</td><td><div style="display:flex;align-items:center;gap:8px"><div class="prog-bar" style="width:100px"><div class="prog-fill" style="width:40%"></div></div>40%</div></td></tr>
+            <tr><td>Website / Online</td><td>36</td><td>$5,400</td><td><div style="display:flex;align-items:center;gap:8px"><div class="prog-bar" style="width:100px"><div class="prog-fill" style="width:30%;background:var(--gold)"></div></div>30%</div></td></tr>
+            <tr><td>OTA (Booking.com, etc.)</td><td>28</td><td>$4,200</td><td><div style="display:flex;align-items:center;gap:8px"><div class="prog-bar" style="width:100px"><div class="prog-fill" style="width:23%;background:#1A7A4A"></div></div>23%</div></td></tr>
+            <tr><td>Corporate / B2B</td><td>8</td><td>$2,400</td><td><div style="display:flex;align-items:center;gap:8px"><div class="prog-bar" style="width:100px"><div class="prog-fill" style="width:7%;background:#B83232"></div></div>7%</div></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════ STAFF -->
+  <div id="sec-staff" class="section">
+    <div class="section-header">
+      <div><h2>Staff & User Management</h2><p>Roles, permissions, and staff accounts</p></div>
+      <button class="btn btn-primary">+ Add Staff</button>
+    </div>
+    <div class="card">
+      <div class="card-title">System Roles</div>
+      <div class="card-sub">Access levels defined for each role</div>
+      <div class="grid-3" style="margin-top:8px">
+        <div style="border:1px solid var(--border);border-radius:10px;padding:16px">
+          <div style="font-weight:600;font-size:14px;margin-bottom:4px">🔑 Administrator</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Full system access</div>
+          <div style="font-size:12px;line-height:1.8;color:var(--text-muted)">✓ All modules<br>✓ User management<br>✓ Reports & billing<br>✓ System settings</div>
+        </div>
+        <div style="border:1px solid var(--border);border-radius:10px;padding:16px">
+          <div style="font-weight:600;font-size:14px;margin-bottom:4px">🏨 Front Desk Staff</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Operational access</div>
+          <div style="font-size:12px;line-height:1.8;color:var(--text-muted)">✓ Reservations<br>✓ Check-in / out<br>✓ Room status view<br>✗ Reports / Finance</div>
+        </div>
+        <div style="border:1px solid var(--border);border-radius:10px;padding:16px">
+          <div style="font-weight:600;font-size:14px;margin-bottom:4px">🧹 Housekeeping</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Task-only access</div>
+          <div style="font-size:12px;line-height:1.8;color:var(--text-muted)">✓ View assigned rooms<br>✓ Update room status<br>✗ Reservations<br>✗ Billing / Reports</div>
+        </div>
+      </div>
+    </div>
+    <div class="card" style="margin-top:20px">
+      <div class="card-title">Staff Accounts</div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Name</th><th>Role</th><th>Department</th><th>Status</th><th>Last Login</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Jea (You)</strong></td><td>Administrator</td><td>Operations</td><td><span class="badge badge-success">Active</span></td><td>Today, 08:00</td></tr>
+            <tr><td><strong>Dara Heng</strong></td><td>Front Desk Staff</td><td>Reception</td><td><span class="badge badge-success">Active</span></td><td>Today, 08:30</td></tr>
+            <tr><td><strong>Sokha Ly</strong></td><td>Front Desk Staff</td><td>Reception</td><td><span class="badge badge-success">Active</span></td><td>Today, 07:50</td></tr>
+            <tr><td><strong>Nary Sok</strong></td><td>Housekeeping</td><td>Housekeeping</td><td><span class="badge badge-success">Active</span></td><td>Today, 09:00</td></tr>
+            <tr><td><strong>Vanny Kim</strong></td><td>Housekeeping</td><td>Housekeeping</td><td><span class="badge badge-success">Active</span></td><td>Today, 09:05</td></tr>
+            <tr><td><strong>Pich Ratha</strong></td><td>Housekeeping</td><td>Housekeeping</td><td><span class="badge badge-gray">Off Duty</span></td><td>Yesterday</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  </div><!-- end .content -->
+</main>
+
+<!-- ═══════════════════════════════════════════ MODALS -->
+
+<!-- Check-in Modal -->
+<div class="modal-backdrop" id="checkin-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <div>
+        <div class="card-title">Guest Check-in</div>
+        <div class="card-sub" style="margin-bottom:0">Confirm guest details and issue room key</div>
+      </div>
+      <button class="modal-close" onclick="closeModal('checkin-modal')">✕</button>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Guest Name</label><input type="text" value="James Kowalski"/></div>
+      <div class="form-group"><label>ID / Passport No.</label><input type="text" placeholder="Enter ID number"/></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Room</label><input type="text" value="110 — Standard Single" readonly style="background:var(--surface2)"/></div>
+      <div class="form-group"><label>Check-out Date</label><input type="date" value="2026-04-25"/></div>
+    </div>
+    <div class="form-group" style="margin-bottom:16px">
+      <label>Special Requests</label>
+      <textarea rows="2" placeholder="e.g. extra pillows, high floor..."></textarea>
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn btn-ghost" onclick="closeModal('checkin-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="closeModal('checkin-modal');alert('✅ Check-in successful! Room key issued for Room 110.')">Confirm Check-in</button>
+    </div>
+  </div>
+</div>
+
+<!-- New Reservation Modal -->
+<div class="modal-backdrop" id="new-reservation-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <div>
+        <div class="card-title">New Reservation</div>
+        <div class="card-sub" style="margin-bottom:0">Create a booking for a guest</div>
+      </div>
+      <button class="modal-close" onclick="closeModal('new-reservation-modal')">✕</button>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Guest Full Name</label><input type="text" placeholder="Enter full name"/></div>
+      <div class="form-group"><label>Phone / Email</label><input type="text" placeholder="Contact info"/></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Room Type</label>
+        <select><option>Standard Single</option><option>Standard Twin</option><option>Deluxe Double</option><option>Deluxe Twin</option><option>Executive Suite</option></select>
+      </div>
+      <div class="form-group"><label>No. of Guests</label>
+        <select><option>1</option><option>2</option><option>3</option><option>4</option></select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Check-in Date</label><input type="date"/></div>
+      <div class="form-group"><label>Check-out Date</label><input type="date"/></div>
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn btn-ghost" onclick="closeModal('new-reservation-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="closeModal('new-reservation-modal');alert('✅ Reservation created! Confirmation sent.')">Create Reservation</button>
+    </div>
+  </div>
+</div>
+
+<!-- Invoice Modal -->
+<div class="modal-backdrop" id="invoice-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <div>
+        <div class="card-title">Create Invoice</div>
+        <div class="card-sub" style="margin-bottom:0">Generate billing for a guest</div>
+      </div>
+      <button class="modal-close" onclick="closeModal('invoice-modal')">✕</button>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Guest</label>
+        <select><option>Sophia Chen — Room 305</option><option>Anika Patel — Room 501</option><option>Emma Walsh — Room 312</option></select>
+      </div>
+      <div class="form-group"><label>Payment Method</label>
+        <select><option>Cash</option><option>Credit Card</option><option>Bank Transfer</option></select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Room Charges ($)</label><input type="number" value="480"/></div>
+      <div class="form-group"><label>Extra Charges ($)</label><input type="number" value="0"/></div>
+    </div>
+    <div style="background:var(--surface2);border-radius:8px;padding:12px 14px;margin-bottom:14px;font-size:13px">
+      <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span>Room charges</span><span>$480.00</span></div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:4px;color:var(--text-muted)"><span>Tax (10%)</span><span>$48.00</span></div>
+      <div style="display:flex;justify-content:space-between;font-weight:600;border-top:1px solid var(--border);padding-top:6px;margin-top:4px"><span>Total</span><span>$528.00</span></div>
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn btn-ghost" onclick="closeModal('invoice-modal')">Cancel</button>
+      <button class="btn btn-primary" onclick="closeModal('invoice-modal');alert('✅ Invoice INV-2042 created and sent to guest.')">Issue Invoice</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  const sections = {
+    dashboard: { title: 'Dashboard', meta: 'Thursday, 24 April 2026' },
+    reservations: { title: 'Reservations', meta: 'All bookings — manage & search' },
+    frontdesk: { title: 'Front Desk', meta: 'Check-ins & check-outs for today' },
+    rooms: { title: 'Room Status', meta: 'Live floor plan — 80 rooms total' },
+    housekeeping: { title: 'Housekeeping', meta: 'Cleaning tasks — today\'s schedule' },
+    billing: { title: 'Billing & Payments', meta: 'Invoices and payment records' },
+    reports: { title: 'Reports & Analytics', meta: 'April 2026 performance overview' },
+    staff: { title: 'Staff & Users', meta: 'System access and role management' },
+  };
+
+  function showSection(id, btn) {
+    document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+    document.getElementById('sec-' + id).classList.add('active');
+    btn.classList.add('active');
+    document.getElementById('page-title').textContent = sections[id].title;
+    document.getElementById('page-meta').textContent = sections[id].meta;
+  }
+
+  function openModal(id) {
+    document.getElementById(id).classList.add('open');
+  }
+  function closeModal(id) {
+    document.getElementById(id).classList.remove('open');
+  }
+  // close on backdrop click
+  document.querySelectorAll('.modal-backdrop').forEach(m => {
+    m.addEventListener('click', e => { if (e.target === m) m.classList.remove('open'); });
+  });
+</script>
+</body>
+</html>
