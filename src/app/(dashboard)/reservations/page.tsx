@@ -7,7 +7,7 @@ import { Modal } from '@/components/ui/Modal'
 import { createClient } from '@/lib/supabase/client'
 import { formatDate, calculateNights, generateReservationNumber, formatCurrency, capitalize } from '@/lib/utils'
 import { toast } from '@/components/ui/Toast'
-import type { Reservation, Room, Guest } from '@/types'
+import type { Reservation, Room } from '@/types'
 
 const STATUSES = ['all', 'pending', 'confirmed', 'checked_in', 'checked_out', 'cancelled', 'no_show']
 const SOURCES = ['walk_in', 'phone', 'online', 'ota', 'referral']
@@ -22,7 +22,6 @@ export default function ReservationsPage() {
   const supabase = createClient()
   const [reservations, setReservations] = useState<Reservation[]>([])
   const [rooms, setRooms] = useState<Room[]>([])
-  const [guests, setGuests] = useState<Guest[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
@@ -36,14 +35,12 @@ export default function ReservationsPage() {
   }, [])
 
   async function loadData() {
-    const [resRes, roomRes, guestRes] = await Promise.all([
+    const [resRes, roomRes] = await Promise.all([
       supabase.from('reservations').select('*, guest:guests(full_name, email, phone), room:rooms(room_number, room_type, price_per_night)').order('created_at', { ascending: false }),
       supabase.from('rooms').select('*').in('status', ['available', 'occupied']).order('room_number'),
-      supabase.from('guests').select('id, full_name, email, phone').order('full_name'),
     ])
     setReservations((resRes.data ?? []) as unknown as Reservation[])
-    setRooms(roomRes.data ?? [])
-    setGuests(guestRes.data ?? [])
+    setRooms((roomRes.data ?? []) as unknown as Room[])
     setLoading(false)
   }
 

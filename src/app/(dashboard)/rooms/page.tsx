@@ -37,7 +37,7 @@ export default function RoomsPage() {
 
   async function loadRooms() {
     const { data } = await supabase.from('rooms').select('*').order('floor').order('room_number')
-    setRooms(data ?? [])
+    setRooms((data ?? []) as unknown as Room[])
     setLoading(false)
   }
 

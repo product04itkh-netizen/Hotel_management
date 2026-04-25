@@ -41,7 +41,7 @@ export default function FrontDeskPage() {
     ])
     setArrivals((arrRes.data ?? []) as unknown as Reservation[])
     setDepartures((depRes.data ?? []) as unknown as Reservation[])
-    setRooms(roomRes.data ?? [])
+    setRooms((roomRes.data ?? []) as unknown as Room[])
     setLoading(false)
   }
 

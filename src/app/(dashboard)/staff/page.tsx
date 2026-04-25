@@ -32,7 +32,7 @@ export default function StaffPage() {
 
   async function loadStaff() {
     const { data } = await supabase.from('staff').select('*').order('full_name')
-    setStaff(data ?? [])
+    setStaff((data ?? []) as unknown as Staff[])
     setLoading(false)
   }
 
