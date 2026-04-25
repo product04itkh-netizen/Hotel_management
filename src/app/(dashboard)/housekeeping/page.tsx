@@ -37,8 +37,8 @@ export default function HousekeepingPage() {
       supabase.from('staff').select('id, full_name, role').eq('status', 'active').in('role', ['housekeeping', 'maintenance', 'manager']).order('full_name'),
     ])
     setTasks((taskRes.data ?? []) as unknown as HousekeepingTask[])
-    setRooms(roomRes.data ?? [])
-    setStaff(staffRes.data ?? [])
+    setRooms((roomRes.data ?? []) as unknown as Room[])
+    setStaff((staffRes.data ?? []) as unknown as Staff[])
     setLoading(false)
   }
 
