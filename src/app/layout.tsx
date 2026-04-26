@@ -4,6 +4,7 @@ import './globals.css'
 export const metadata: Metadata = {
   title: 'LPT Hotel Management System',
   description: 'Professional hotel management system with reservations, front desk, housekeeping, billing and more.',
+  icons: { icon: '/favicon.svg' },
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

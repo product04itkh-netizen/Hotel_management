@@ -1,6 +1,7 @@
 'use client'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { useEffect, useState } from 'react'
 import { cn } from '@/lib/utils'
 
 const navItems = [
@@ -30,6 +31,11 @@ interface SidebarProps {
 
 export function Sidebar({ userName = 'Tann Pisey & Hong Lim', userRole = 'Owner' }: SidebarProps) {
   const pathname = usePathname()
+  const [pendingHref, setPendingHref] = useState<string | null>(null)
+
+  useEffect(() => {
+    setPendingHref(null)
+  }, [pathname])
 
   return (
     <aside className="w-60 min-h-screen bg-dark-navy flex flex-col flex-shrink-0 sticky top-0 h-screen">
@@ -48,19 +54,28 @@ export function Sidebar({ userName = 'Tann Pisey & Hong Lim', userRole = 'Owner'
             </p>
             {group.items.map((item) => {
               const active = pathname === item.href
+              const pending = pendingHref === item.href && !active
               return (
                 <Link
                   key={item.href}
                   href={item.href}
+                  onClick={() => { if (!active) setPendingHref(item.href) }}
                   className={cn(
-                    'flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-[13.5px] font-normal transition-all mb-0.5',
+                    'flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-[13.5px] font-normal transition-all duration-150 mb-0.5',
                     active
                       ? 'bg-navy text-white font-medium'
-                      : 'text-white/65 hover:bg-white/8 hover:text-white'
+                      : pending
+                        ? 'bg-navy/60 text-white/90'
+                        : 'text-white/65 hover:bg-white/8 hover:text-white'
                   )}
                 >
-                  <span className="text-base w-5 text-center flex-shrink-0">{item.icon}</span>
+                  <span className={cn('text-base w-5 text-center flex-shrink-0 transition-transform duration-150', pending && 'scale-110')}>
+                    {item.icon}
+                  </span>
                   {item.label}
+                  {pending && (
+                    <span className="ml-auto w-1.5 h-1.5 rounded-full bg-gold animate-pulse flex-shrink-0" />
+                  )}
                 </Link>
               )
             })}
