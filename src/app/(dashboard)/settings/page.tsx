@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/Button'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from '@/components/ui/Toast'
 import type { HotelSettings } from '@/types'
+import { useBranch } from '@/context/BranchContext'
 
 const NOTIFICATION_EVENTS = [
   { key: 'new_reservation', label: 'New Reservation' },
@@ -18,12 +19,13 @@ const NOTIFICATION_EVENTS = [
 
 export default function SettingsPage() {
   const supabase = createClient()
+  const { activeBranch } = useBranch()
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [testingTelegram, setTestingTelegram] = useState(false)
   const [settingsId, setSettingsId] = useState<string | null>(null)
   const [form, setForm] = useState({
-    hotel_name: 'Grand Palms Hotel',
+    hotel_name: 'OnlyOne Homestay',
     hotel_address: '',
     hotel_phone: '',
     hotel_email: '',
@@ -37,14 +39,15 @@ export default function SettingsPage() {
     check_out_time: '12:00',
   })
 
-  useEffect(() => { loadSettings() }, [])
+  useEffect(() => { if (activeBranch) loadSettings() }, [activeBranch]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadSettings() {
-    const { data } = await supabase.from('hotel_settings').select('*').limit(1).single()
+    if (!activeBranch) return
+    const { data } = await supabase.from('hotel_settings').select('*').eq('branch_id', activeBranch.id).single()
     if (data) {
       setSettingsId(data.id)
       setForm({
-        hotel_name: data.hotel_name ?? 'Grand Palms Hotel',
+        hotel_name: data.hotel_name ?? 'OnlyOne Homestay',
         hotel_address: data.hotel_address ?? '',
         hotel_phone: data.hotel_phone ?? '',
         hotel_email: data.hotel_email ?? '',
@@ -82,7 +85,7 @@ export default function SettingsPage() {
       const { error } = await supabase.from('hotel_settings').update(payload).eq('id', settingsId)
       if (error) { toast(error.message, 'error'); setSaving(false); return }
     } else {
-      const { data, error } = await supabase.from('hotel_settings').insert(payload).select().single()
+      const { data, error } = await supabase.from('hotel_settings').insert({ ...payload, branch_id: activeBranch?.id ?? null }).select().single()
       if (error) { toast(error.message, 'error'); setSaving(false); return }
       setSettingsId(data?.id ?? null)
     }
@@ -140,16 +143,16 @@ export default function SettingsPage() {
 
   return (
     <>
-      <TopBar title="Settings" subtitle="Hotel configuration & integrations" />
+      <TopBar title="Settings" subtitle="Property configuration & integrations" />
       <div className="p-8 flex-1 section-enter max-w-3xl">
         <div className="space-y-6">
           {/* Hotel Info */}
           <div className="bg-white border border-hborder rounded-2xl p-6 shadow-card">
-            <h3 className="font-serif text-lg text-dark-navy mb-4">Hotel Information</h3>
+            <h3 className="font-serif text-lg text-dark-navy mb-4">Property Information</h3>
             <div className="space-y-3">
               <div className="grid grid-cols-2 gap-3">
                 <div className="col-span-2">
-                  <label className="block text-xs text-hmuted mb-1">Hotel Name</label>
+                  <label className="block text-xs text-hmuted mb-1">Property Name</label>
                   <input
                     value={form.hotel_name}
                     onChange={e => setForm(f => ({ ...f, hotel_name: e.target.value }))}

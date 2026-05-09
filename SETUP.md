@@ -1,10 +1,11 @@
-# LPT Hotel Management System — Setup Guide
+# OnlyOne Homestay — Management System Setup Guide
 
 ## Stack
 - **Framework**: Next.js 14 (App Router + TypeScript)
 - **Database**: Supabase (PostgreSQL)
 - **Styling**: Tailwind CSS
 - **Notifications**: Telegram Bot API
+- **Branches**: OnlyOne Homestay (Kampot) · OnlyOne Homestay (Srae Ambel)
 
 ---
 
@@ -22,8 +23,10 @@ npm install
 2. In the **SQL Editor**, run the migration file:
    ```
    supabase/migrations/001_initial.sql
+   supabase/migrations/002_add_branches.sql
    ```
-   This creates all tables, RLS policies, indexes, and seeds demo rooms + staff.
+   This creates all tables, RLS policies, indexes, seeds rooms + staff,
+   and creates the **two branch records** (Kampot & Srae Ambel).
 
 3. In **Authentication > Providers**, make sure **Email** is enabled
 4. Create your admin user in **Authentication > Users** (Add User)
@@ -83,7 +86,25 @@ Open [http://localhost:3000](http://localhost:3000) and sign in with your Supaba
 | Billing | `/billing` | Invoices and payment recording |
 | Reports | `/reports` | Revenue charts, KPIs, analytics |
 | Staff | `/staff` | Staff directory and role management |
-| Settings | `/settings` | Hotel config + Telegram setup |
+| Settings | `/settings` | Property config + Telegram setup |
+
+---
+
+## Multi-Branch Architecture
+
+All core data tables carry a `branch_id` foreign key that links every record to a specific branch.
+
+| Table | Branch Isolation |
+|---|---|
+| `branches` | Master list of branches (Kampot, Srae Ambel) |
+| `rooms` | Each room belongs to one branch |
+| `staff` | Each staff member is assigned to one branch |
+| `reservations` | Each booking is scoped to one branch |
+| `invoices` | Invoices inherit the branch of their reservation |
+| `housekeeping_tasks` | Tasks are branch-scoped |
+| `hotel_settings` | One settings row per branch (name, Telegram, timings) |
+
+> **Never mix data across branches.** Always filter queries by `branch_id` when displaying branch-specific views.
 
 ---
 

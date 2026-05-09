@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { TopBar } from '@/components/layout/TopBar'
 import { createClient } from '@/lib/supabase/client'
 import { formatCurrency } from '@/lib/utils'
+import { useBranch } from '@/context/BranchContext'
 
 interface MonthlyData {
   month: string
@@ -15,23 +16,25 @@ const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov
 
 export default function ReportsPage() {
   const supabase = createClient()
+  const { activeBranch } = useBranch()
   const [monthlyData, setMonthlyData] = useState<MonthlyData[]>([])
   const [roomTypeStats, setRoomTypeStats] = useState<{ type: string; count: number }[]>([])
   const [sourceStats, setSourceStats] = useState<{ source: string; count: number }[]>([])
   const [loading, setLoading] = useState(true)
   const [kpis, setKpis] = useState({ totalRevenue: 0, totalGuests: 0, avgStay: 0, adr: 0, revpar: 0 })
 
-  useEffect(() => { loadReports() }, [])
+  useEffect(() => { if (activeBranch) loadReports() }, [activeBranch]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadReports() {
+    if (!activeBranch) return
     const sixMonthsAgo = new Date()
     sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 5)
     const startDate = sixMonthsAgo.toISOString().split('T')[0]
 
     const [invRes, resRes, roomRes] = await Promise.all([
-      supabase.from('invoices').select('total, paid_at').eq('status', 'paid').gte('paid_at', startDate),
-      supabase.from('reservations').select('source, check_in_date, check_out_date, status, room:rooms(room_type)').gte('created_at', startDate),
-      supabase.from('rooms').select('room_type, status'),
+      supabase.from('invoices').select('total, paid_at').eq('status', 'paid').eq('branch_id', activeBranch.id).gte('paid_at', startDate),
+      supabase.from('reservations').select('source, check_in_date, check_out_date, status, room:rooms(room_type)').eq('branch_id', activeBranch.id).gte('created_at', startDate),
+      supabase.from('rooms').select('room_type, status').eq('branch_id', activeBranch.id),
     ])
 
     const invoices = invRes.data ?? []
@@ -94,7 +97,7 @@ export default function ReportsPage() {
 
   return (
     <>
-      <TopBar title="Reports & Analytics" subtitle="Occupancy, revenue & KPIs" />
+      <TopBar title="Reports & Analytics" subtitle={`Occupancy, revenue & KPIs — ${activeBranch?.location ?? ''}`} />
       <div className="p-8 flex-1 section-enter">
         {/* KPIs */}
         <div className="grid grid-cols-5 gap-4 mb-6">

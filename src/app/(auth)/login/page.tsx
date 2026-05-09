@@ -31,11 +31,12 @@ export default function LoginPage() {
       <div className="w-full max-w-sm">
         {/* Logo */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-14 h-14 bg-dark-navy rounded-2xl mb-4">
-            <span className="font-serif text-white text-lg">LPT</span>
-          </div>
-          <h1 className="font-serif text-2xl text-dark-navy">Hotel Management</h1>
-          <p className="text-sm text-hmuted mt-1">Sign in to your account</p>
+          <img
+            src="/logo.jpg"
+            alt="OnlyOne Homestay"
+            className="h-28 w-auto object-contain mx-auto mb-3 drop-shadow-sm"
+          />
+          <p className="text-sm text-hmuted">Management System — Sign in</p>
         </div>
 
         {/* Card */}
@@ -85,7 +86,7 @@ export default function LoginPage() {
         </div>
 
         <p className="text-center text-xs text-hlight mt-6">
-          LPT Hotel Management System © {new Date().getFullYear()}
+          OnlyOne Homestay © {new Date().getFullYear()}
         </p>
       </div>
     </div>

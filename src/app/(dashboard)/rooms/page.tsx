@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/Badge'
 import { createClient } from '@/lib/supabase/client'
 import { formatCurrency, capitalize } from '@/lib/utils'
 import { toast } from '@/components/ui/Toast'
+import { useBranch } from '@/context/BranchContext'
 import type { Room, RoomStatus, RoomType } from '@/types'
 
 const ROOM_TYPES: RoomType[] = ['standard', 'deluxe', 'suite', 'presidential']
@@ -24,6 +25,7 @@ const emptyRoom = { room_number: '', room_type: 'standard' as RoomType, floor: 1
 
 export default function RoomsPage() {
   const supabase = createClient()
+  const { activeBranch } = useBranch()
   const [rooms, setRooms] = useState<Room[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedRoom, setSelectedRoom] = useState<Room | null>(null)
@@ -33,10 +35,15 @@ export default function RoomsPage() {
   const [saving, setSaving] = useState(false)
   const [filterStatus, setFilterStatus] = useState<string>('all')
 
-  useEffect(() => { loadRooms() }, [])
+  useEffect(() => { if (activeBranch) loadRooms() }, [activeBranch]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadRooms() {
-    const { data } = await supabase.from('rooms').select('*').order('floor').order('room_number')
+    if (!activeBranch) return
+    const { data } = await supabase.from('rooms')
+      .select('*')
+      .eq('branch_id', activeBranch.id)
+      .order('floor')
+      .order('room_number')
     setRooms((data ?? []) as unknown as Room[])
     setLoading(false)
   }
@@ -88,7 +95,7 @@ export default function RoomsPage() {
       if (error) { toast(error.message, 'error'); setSaving(false); return }
       toast('Room updated')
     } else {
-      const { error } = await supabase.from('rooms').insert({ ...payload, status: 'available' })
+      const { error } = await supabase.from('rooms').insert({ ...payload, status: 'available', branch_id: activeBranch?.id ?? null })
       if (error) { toast(error.message, 'error'); setSaving(false); return }
       toast('Room added')
     }
@@ -122,7 +129,7 @@ export default function RoomsPage() {
 
   return (
     <>
-      <TopBar title="Room Management" subtitle="Types, floors, pricing & availability" />
+      <TopBar title="Room Management" subtitle={`Types, floors, pricing & availability — ${activeBranch?.location ?? ''}`} />
       <div className="p-8 flex-1 section-enter">
         {/* Summary + actions */}
         <div className="flex items-center justify-between mb-6">

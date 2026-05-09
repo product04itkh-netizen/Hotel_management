@@ -7,6 +7,7 @@ import { Modal } from '@/components/ui/Modal'
 import { createClient } from '@/lib/supabase/client'
 import { formatDate, capitalize } from '@/lib/utils'
 import { toast } from '@/components/ui/Toast'
+import { useBranch } from '@/context/BranchContext'
 import type { HousekeepingTask, Room, Staff } from '@/types'
 
 const TASK_TYPES = ['cleaning', 'turndown', 'inspection', 'maintenance', 'special']
@@ -15,6 +16,7 @@ const TABS = ['all', 'pending', 'in_progress', 'completed']
 
 export default function HousekeepingPage() {
   const supabase = createClient()
+  const { activeBranch } = useBranch()
   const [tasks, setTasks] = useState<HousekeepingTask[]>([])
   const [rooms, setRooms] = useState<Room[]>([])
   const [staff, setStaff] = useState<Staff[]>([])
@@ -26,15 +28,25 @@ export default function HousekeepingPage() {
     room_id: '', task_type: 'cleaning', priority: 'normal', assigned_to: '', notes: '', due_date: '',
   })
 
-  useEffect(() => { loadData() }, [])
+  useEffect(() => { if (activeBranch) loadData() }, [activeBranch]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadData() {
+    if (!activeBranch) return
     const [taskRes, roomRes, staffRes] = await Promise.all([
       supabase.from('housekeeping_tasks')
         .select('*, room:rooms(room_number, room_type, floor), staff:staff(full_name)')
+        .eq('branch_id', activeBranch.id)
         .order('created_at', { ascending: false }),
-      supabase.from('rooms').select('id, room_number, room_type, floor').order('room_number'),
-      supabase.from('staff').select('id, full_name, role').eq('status', 'active').in('role', ['housekeeping', 'maintenance', 'manager']).order('full_name'),
+      supabase.from('rooms')
+        .select('id, room_number, room_type, floor')
+        .eq('branch_id', activeBranch.id)
+        .order('room_number'),
+      supabase.from('staff')
+        .select('id, full_name, role')
+        .eq('branch_id', activeBranch.id)
+        .eq('status', 'active')
+        .in('role', ['housekeeping', 'maintenance', 'manager'])
+        .order('full_name'),
     ])
     setTasks((taskRes.data ?? []) as unknown as HousekeepingTask[])
     setRooms((roomRes.data ?? []) as unknown as Room[])
@@ -81,6 +93,7 @@ export default function HousekeepingPage() {
       assigned_to: form.assigned_to || null,
       notes: form.notes || null,
       due_date: form.due_date || null,
+      branch_id: activeBranch?.id ?? null,
       status: 'pending',
     })
     if (error) { toast(error.message, 'error'); setSaving(false); return }
@@ -100,7 +113,7 @@ export default function HousekeepingPage() {
 
   return (
     <>
-      <TopBar title="Housekeeping" subtitle="Room status & task management" />
+      <TopBar title="Housekeeping" subtitle={`Room status & task management — ${activeBranch?.location ?? ''}`} />
       <div className="p-8 flex-1 section-enter">
         <div className="flex items-center justify-between mb-5">
           <div className="flex gap-1 bg-hsurface2 rounded-xl p-1">

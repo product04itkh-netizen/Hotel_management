@@ -7,10 +7,12 @@ import { Modal } from '@/components/ui/Modal'
 import { createClient } from '@/lib/supabase/client'
 import { formatDate, generateReservationNumber, formatCurrency, calculateNights } from '@/lib/utils'
 import { toast } from '@/components/ui/Toast'
+import { useBranch } from '@/context/BranchContext'
 import type { Reservation, Room } from '@/types'
 
 export default function FrontDeskPage() {
   const supabase = createClient()
+  const { activeBranch } = useBranch()
   const [arrivals, setArrivals] = useState<Reservation[]>([])
   const [departures, setDepartures] = useState<Reservation[]>([])
   const [rooms, setRooms] = useState<Room[]>([])
@@ -22,22 +24,29 @@ export default function FrontDeskPage() {
     room_id: '', check_out_date: '', adults: 1, children: 0,
   })
 
-  useEffect(() => { loadData() }, [])
+  useEffect(() => { if (activeBranch) loadData() }, [activeBranch]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadData() {
+    if (!activeBranch) return
     const today = new Date().toISOString().split('T')[0]
     const [arrRes, depRes, roomRes] = await Promise.all([
       supabase.from('reservations')
         .select('*, guest:guests(full_name, email, phone), room:rooms(room_number, room_type, floor)')
+        .eq('branch_id', activeBranch.id)
         .eq('check_in_date', today)
         .in('status', ['confirmed', 'pending'])
         .order('created_at'),
       supabase.from('reservations')
         .select('*, guest:guests(full_name, email, phone), room:rooms(room_number, room_type, floor)')
+        .eq('branch_id', activeBranch.id)
         .eq('check_out_date', today)
         .eq('status', 'checked_in')
         .order('created_at'),
-      supabase.from('rooms').select('*').eq('status', 'available').order('room_number'),
+      supabase.from('rooms')
+        .select('*')
+        .eq('branch_id', activeBranch.id)
+        .eq('status', 'available')
+        .order('room_number'),
     ])
     setArrivals((arrRes.data ?? []) as unknown as Reservation[])
     setDepartures((depRes.data ?? []) as unknown as Reservation[])
@@ -77,12 +86,13 @@ export default function FrontDeskPage() {
     }).eq('id', res.id)
     if (res.room_id) {
       await supabase.from('rooms').update({ status: 'cleaning', updated_at: new Date().toISOString() }).eq('id', res.room_id)
-      // Create housekeeping task
+      // Create housekeeping task with branch_id
       await supabase.from('housekeeping_tasks').insert({
         room_id: res.room_id,
         task_type: 'cleaning',
         status: 'pending',
         priority: 'high',
+        branch_id: activeBranch?.id ?? null,
         due_date: new Date().toISOString().split('T')[0],
         notes: `Post-checkout cleaning for reservation ${res.reservation_number}`,
       })
@@ -121,6 +131,7 @@ export default function FrontDeskPage() {
       reservation_number: generateReservationNumber(),
       guest_id: guest?.id,
       room_id: walkIn.room_id,
+      branch_id: activeBranch?.id ?? null,
       check_in_date: today,
       check_out_date: walkIn.check_out_date,
       adults: walkIn.adults,
@@ -145,7 +156,7 @@ export default function FrontDeskPage() {
 
   return (
     <>
-      <TopBar title="Front Desk" subtitle="Check-in & check-out operations" />
+      <TopBar title="Front Desk" subtitle={`Check-in & check-out — ${activeBranch?.location ?? ''}`} />
       <div className="p-8 flex-1 section-enter">
         <div className="flex justify-end mb-6">
           <Button onClick={() => setWalkInOpen(true)}>+ Walk-in Check-in</Button>

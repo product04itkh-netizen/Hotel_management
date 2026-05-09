@@ -1,5 +1,6 @@
 -- ============================================================
--- LPT Hotel Management System — Initial Schema
+-- OnlyOne Homestay Management System — Initial Schema
+-- Safe to re-run: uses IF NOT EXISTS and ON CONFLICT guards
 -- ============================================================
 
 -- Enable UUID extension
@@ -19,7 +20,7 @@ $$ LANGUAGE plpgsql;
 -- ─────────────────────────────────────────
 -- ROOMS
 -- ─────────────────────────────────────────
-CREATE TABLE rooms (
+CREATE TABLE IF NOT EXISTS rooms (
   id               UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
   room_number      VARCHAR(10)    NOT NULL UNIQUE,
   room_type        VARCHAR(50)    NOT NULL DEFAULT 'standard',
@@ -35,14 +36,15 @@ CREATE TABLE rooms (
   updated_at       TIMESTAMPTZ    DEFAULT NOW()
 );
 
+DROP TRIGGER IF EXISTS rooms_updated_at ON rooms;
 CREATE TRIGGER rooms_updated_at BEFORE UPDATE ON rooms FOR EACH ROW EXECUTE FUNCTION update_updated_at();
-CREATE INDEX idx_rooms_status ON rooms(status);
-CREATE INDEX idx_rooms_floor  ON rooms(floor);
+CREATE INDEX IF NOT EXISTS idx_rooms_status ON rooms(status);
+CREATE INDEX IF NOT EXISTS idx_rooms_floor  ON rooms(floor);
 
 -- ─────────────────────────────────────────
 -- GUESTS
 -- ─────────────────────────────────────────
-CREATE TABLE guests (
+CREATE TABLE IF NOT EXISTS guests (
   id             UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
   full_name      VARCHAR(200) NOT NULL,
   email          VARCHAR(200),
@@ -58,14 +60,15 @@ CREATE TABLE guests (
   updated_at     TIMESTAMPTZ DEFAULT NOW()
 );
 
+DROP TRIGGER IF EXISTS guests_updated_at ON guests;
 CREATE TRIGGER guests_updated_at BEFORE UPDATE ON guests FOR EACH ROW EXECUTE FUNCTION update_updated_at();
-CREATE INDEX idx_guests_name  ON guests(full_name);
-CREATE INDEX idx_guests_email ON guests(email);
+CREATE INDEX IF NOT EXISTS idx_guests_name  ON guests(full_name);
+CREATE INDEX IF NOT EXISTS idx_guests_email ON guests(email);
 
 -- ─────────────────────────────────────────
 -- STAFF
 -- ─────────────────────────────────────────
-CREATE TABLE staff (
+CREATE TABLE IF NOT EXISTS staff (
   id           UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
   full_name    VARCHAR(200) NOT NULL,
   role         VARCHAR(50)  NOT NULL DEFAULT 'receptionist'
@@ -81,14 +84,15 @@ CREATE TABLE staff (
   updated_at   TIMESTAMPTZ  DEFAULT NOW()
 );
 
+DROP TRIGGER IF EXISTS staff_updated_at ON staff;
 CREATE TRIGGER staff_updated_at BEFORE UPDATE ON staff FOR EACH ROW EXECUTE FUNCTION update_updated_at();
-CREATE INDEX idx_staff_role   ON staff(role);
-CREATE INDEX idx_staff_status ON staff(status);
+CREATE INDEX IF NOT EXISTS idx_staff_role   ON staff(role);
+CREATE INDEX IF NOT EXISTS idx_staff_status ON staff(status);
 
 -- ─────────────────────────────────────────
 -- RESERVATIONS
 -- ─────────────────────────────────────────
-CREATE TABLE reservations (
+CREATE TABLE IF NOT EXISTS reservations (
   id                   UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
   reservation_number   VARCHAR(30)    NOT NULL UNIQUE,
   guest_id             UUID REFERENCES guests(id) ON DELETE SET NULL,
@@ -111,16 +115,17 @@ CREATE TABLE reservations (
   updated_at           TIMESTAMPTZ    DEFAULT NOW()
 );
 
+DROP TRIGGER IF EXISTS reservations_updated_at ON reservations;
 CREATE TRIGGER reservations_updated_at BEFORE UPDATE ON reservations FOR EACH ROW EXECUTE FUNCTION update_updated_at();
-CREATE INDEX idx_res_guest_id      ON reservations(guest_id);
-CREATE INDEX idx_res_room_id       ON reservations(room_id);
-CREATE INDEX idx_res_check_in_date ON reservations(check_in_date);
-CREATE INDEX idx_res_status        ON reservations(status);
+CREATE INDEX IF NOT EXISTS idx_res_guest_id      ON reservations(guest_id);
+CREATE INDEX IF NOT EXISTS idx_res_room_id       ON reservations(room_id);
+CREATE INDEX IF NOT EXISTS idx_res_check_in_date ON reservations(check_in_date);
+CREATE INDEX IF NOT EXISTS idx_res_status        ON reservations(status);
 
 -- ─────────────────────────────────────────
 -- INVOICES
 -- ─────────────────────────────────────────
-CREATE TABLE invoices (
+CREATE TABLE IF NOT EXISTS invoices (
   id               UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
   invoice_number   VARCHAR(30)    NOT NULL UNIQUE,
   reservation_id   UUID REFERENCES reservations(id) ON DELETE SET NULL,
@@ -141,15 +146,16 @@ CREATE TABLE invoices (
   updated_at       TIMESTAMPTZ    DEFAULT NOW()
 );
 
+DROP TRIGGER IF EXISTS invoices_updated_at ON invoices;
 CREATE TRIGGER invoices_updated_at BEFORE UPDATE ON invoices FOR EACH ROW EXECUTE FUNCTION update_updated_at();
-CREATE INDEX idx_invoices_status     ON invoices(status);
-CREATE INDEX idx_invoices_guest_id   ON invoices(guest_id);
-CREATE INDEX idx_invoices_paid_at    ON invoices(paid_at);
+CREATE INDEX IF NOT EXISTS idx_invoices_status     ON invoices(status);
+CREATE INDEX IF NOT EXISTS idx_invoices_guest_id   ON invoices(guest_id);
+CREATE INDEX IF NOT EXISTS idx_invoices_paid_at    ON invoices(paid_at);
 
 -- ─────────────────────────────────────────
 -- HOUSEKEEPING TASKS
 -- ─────────────────────────────────────────
-CREATE TABLE housekeeping_tasks (
+CREATE TABLE IF NOT EXISTS housekeeping_tasks (
   id           UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
   room_id      UUID REFERENCES rooms(id) ON DELETE CASCADE,
   task_type    VARCHAR(50)  NOT NULL DEFAULT 'cleaning'
@@ -166,17 +172,18 @@ CREATE TABLE housekeeping_tasks (
   updated_at   TIMESTAMPTZ  DEFAULT NOW()
 );
 
+DROP TRIGGER IF EXISTS housekeeping_tasks_updated_at ON housekeeping_tasks;
 CREATE TRIGGER housekeeping_tasks_updated_at BEFORE UPDATE ON housekeeping_tasks FOR EACH ROW EXECUTE FUNCTION update_updated_at();
-CREATE INDEX idx_hk_room_id ON housekeeping_tasks(room_id);
-CREATE INDEX idx_hk_status  ON housekeeping_tasks(status);
-CREATE INDEX idx_hk_assigned_to ON housekeeping_tasks(assigned_to);
+CREATE INDEX IF NOT EXISTS idx_hk_room_id    ON housekeeping_tasks(room_id);
+CREATE INDEX IF NOT EXISTS idx_hk_status     ON housekeeping_tasks(status);
+CREATE INDEX IF NOT EXISTS idx_hk_assigned_to ON housekeeping_tasks(assigned_to);
 
 -- ─────────────────────────────────────────
 -- HOTEL SETTINGS
 -- ─────────────────────────────────────────
-CREATE TABLE hotel_settings (
+CREATE TABLE IF NOT EXISTS hotel_settings (
   id                   UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-  hotel_name           VARCHAR(200)  DEFAULT 'Grand Palms Hotel',
+  hotel_name           VARCHAR(200)  DEFAULT 'OnlyOne Homestay',
   hotel_address        TEXT,
   hotel_phone          VARCHAR(50),
   hotel_email          VARCHAR(200),
@@ -192,11 +199,13 @@ CREATE TABLE hotel_settings (
   updated_at           TIMESTAMPTZ   DEFAULT NOW()
 );
 
+DROP TRIGGER IF EXISTS hotel_settings_updated_at ON hotel_settings;
 CREATE TRIGGER hotel_settings_updated_at BEFORE UPDATE ON hotel_settings FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
--- Seed default settings row
+-- Seed default settings row (skipped if already exists)
 INSERT INTO hotel_settings (hotel_name, tax_rate, currency, check_in_time, check_out_time)
-VALUES ('Grand Palms Hotel', 10, 'USD', '14:00', '12:00');
+SELECT 'OnlyOne Homestay (Kampot)', 10, 'USD', '14:00', '12:00'
+WHERE NOT EXISTS (SELECT 1 FROM hotel_settings LIMIT 1);
 
 -- ─────────────────────────────────────────
 -- ROW LEVEL SECURITY
@@ -209,30 +218,43 @@ ALTER TABLE invoices            ENABLE ROW LEVEL SECURITY;
 ALTER TABLE housekeeping_tasks  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE hotel_settings      ENABLE ROW LEVEL SECURITY;
 
--- Allow all operations for authenticated users
-CREATE POLICY "Authenticated users can do everything on rooms"
-  ON rooms FOR ALL TO authenticated USING (true) WITH CHECK (true);
-
-CREATE POLICY "Authenticated users can do everything on guests"
-  ON guests FOR ALL TO authenticated USING (true) WITH CHECK (true);
-
-CREATE POLICY "Authenticated users can do everything on staff"
-  ON staff FOR ALL TO authenticated USING (true) WITH CHECK (true);
-
-CREATE POLICY "Authenticated users can do everything on reservations"
-  ON reservations FOR ALL TO authenticated USING (true) WITH CHECK (true);
-
-CREATE POLICY "Authenticated users can do everything on invoices"
-  ON invoices FOR ALL TO authenticated USING (true) WITH CHECK (true);
-
-CREATE POLICY "Authenticated users can do everything on housekeeping_tasks"
-  ON housekeeping_tasks FOR ALL TO authenticated USING (true) WITH CHECK (true);
-
-CREATE POLICY "Authenticated users can do everything on hotel_settings"
-  ON hotel_settings FOR ALL TO authenticated USING (true) WITH CHECK (true);
+-- Allow all operations for authenticated users (skipped if already exists)
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename='rooms' AND policyname='Authenticated users can do everything on rooms') THEN
+    CREATE POLICY "Authenticated users can do everything on rooms"
+      ON rooms FOR ALL TO authenticated USING (true) WITH CHECK (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename='guests' AND policyname='Authenticated users can do everything on guests') THEN
+    CREATE POLICY "Authenticated users can do everything on guests"
+      ON guests FOR ALL TO authenticated USING (true) WITH CHECK (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename='staff' AND policyname='Authenticated users can do everything on staff') THEN
+    CREATE POLICY "Authenticated users can do everything on staff"
+      ON staff FOR ALL TO authenticated USING (true) WITH CHECK (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename='reservations' AND policyname='Authenticated users can do everything on reservations') THEN
+    CREATE POLICY "Authenticated users can do everything on reservations"
+      ON reservations FOR ALL TO authenticated USING (true) WITH CHECK (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename='invoices' AND policyname='Authenticated users can do everything on invoices') THEN
+    CREATE POLICY "Authenticated users can do everything on invoices"
+      ON invoices FOR ALL TO authenticated USING (true) WITH CHECK (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename='housekeeping_tasks' AND policyname='Authenticated users can do everything on housekeeping_tasks') THEN
+    CREATE POLICY "Authenticated users can do everything on housekeeping_tasks"
+      ON housekeeping_tasks FOR ALL TO authenticated USING (true) WITH CHECK (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename='hotel_settings' AND policyname='Authenticated users can do everything on hotel_settings') THEN
+    CREATE POLICY "Authenticated users can do everything on hotel_settings"
+      ON hotel_settings FOR ALL TO authenticated USING (true) WITH CHECK (true);
+  END IF;
+END;
+$$;
 
 -- ─────────────────────────────────────────
 -- SEED DEMO DATA
+-- Skipped automatically if data already exists (ON CONFLICT DO NOTHING)
 -- ─────────────────────────────────────────
 
 -- Sample rooms (3 floors, 5 rooms each)
@@ -251,15 +273,17 @@ INSERT INTO rooms (room_number, room_type, floor, status, price_per_night, max_a
   ('302', 'suite',        3, 'available',  249.00, 3, 2, ARRAY['WiFi','AC','TV','Minibar','Jacuzzi']),
   ('303', 'presidential', 3, 'available',  499.00, 4, 2, ARRAY['WiFi','AC','TV','Minibar','Jacuzzi','Private Pool','Butler']),
   ('304', 'suite',        3, 'cleaning',   249.00, 3, 2, ARRAY['WiFi','AC','TV','Minibar']),
-  ('305', 'presidential', 3, 'occupied',   499.00, 4, 2, ARRAY['WiFi','AC','TV','Minibar','Jacuzzi','Private Pool','Butler']);
+  ('305', 'presidential', 3, 'occupied',   499.00, 4, 2, ARRAY['WiFi','AC','TV','Minibar','Jacuzzi','Private Pool','Butler'])
+ON CONFLICT (room_number) DO NOTHING;
 
 -- Sample staff
 INSERT INTO staff (full_name, role, email, phone, status, department, hire_date) VALUES
-  ('Tann Pisey',      'admin',          'tann@grandpalms.com',     '+855 12 345 678', 'active', 'Management',   '2020-01-01'),
-  ('Hong Lim',        'manager',        'honglim@grandpalms.com',  '+855 12 345 679', 'active', 'Management',   '2020-01-01'),
-  ('Sophea Chan',     'receptionist',   'sophea@grandpalms.com',   '+855 12 345 680', 'active', 'Front Office', '2021-03-15'),
-  ('Dara Meas',       'receptionist',   'dara@grandpalms.com',     '+855 12 345 681', 'active', 'Front Office', '2022-06-01'),
-  ('Srey Neang',      'housekeeping',   'srey@grandpalms.com',     '+855 12 345 682', 'active', 'Housekeeping', '2021-09-10'),
-  ('Ratha Pich',      'housekeeping',   'ratha@grandpalms.com',    '+855 12 345 683', 'active', 'Housekeeping', '2022-02-14'),
-  ('Vuthy Keo',       'maintenance',    'vuthy@grandpalms.com',    '+855 12 345 684', 'active', 'Maintenance',  '2021-11-01'),
-  ('Maly Sok',        'accounting',     'maly@grandpalms.com',     '+855 12 345 685', 'active', 'Finance',      '2023-01-05');
+  ('Tann Pisey',      'admin',          'tann@onlyone.com',     '+855 12 345 678', 'active', 'Management',   '2020-01-01'),
+  ('Hong Lim',        'manager',        'honglim@onlyone.com',  '+855 12 345 679', 'active', 'Management',   '2020-01-01'),
+  ('Sophea Chan',     'receptionist',   'sophea@onlyone.com',   '+855 12 345 680', 'active', 'Front Office', '2021-03-15'),
+  ('Dara Meas',       'receptionist',   'dara@onlyone.com',     '+855 12 345 681', 'active', 'Front Office', '2022-06-01'),
+  ('Srey Neang',      'housekeeping',   'srey@onlyone.com',     '+855 12 345 682', 'active', 'Housekeeping', '2021-09-10'),
+  ('Ratha Pich',      'housekeeping',   'ratha@onlyone.com',    '+855 12 345 683', 'active', 'Housekeeping', '2022-02-14'),
+  ('Vuthy Keo',       'maintenance',    'vuthy@onlyone.com',    '+855 12 345 684', 'active', 'Maintenance',  '2021-11-01'),
+  ('Maly Sok',        'accounting',     'maly@onlyone.com',     '+855 12 345 685', 'active', 'Finance',      '2023-01-05')
+ON CONFLICT (email) DO NOTHING;

@@ -7,12 +7,14 @@ import { Modal } from '@/components/ui/Modal'
 import { createClient } from '@/lib/supabase/client'
 import { formatDate, formatCurrency, generateInvoiceNumber, calculateNights, capitalize } from '@/lib/utils'
 import { toast } from '@/components/ui/Toast'
+import { useBranch } from '@/context/BranchContext'
 import type { Invoice, Reservation, InvoiceItem } from '@/types'
 
 const PAYMENT_METHODS = ['cash', 'card', 'bank_transfer', 'qr', 'online']
 
 export default function BillingPage() {
   const supabase = createClient()
+  const { activeBranch } = useBranch()
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [reservations, setReservations] = useState<Reservation[]>([])
   const [loading, setLoading] = useState(true)
@@ -30,18 +32,21 @@ export default function BillingPage() {
   })
   const [payForm, setPayForm] = useState({ payment_method: 'cash', amount_paid: 0 })
 
-  useEffect(() => { loadData() }, [])
+  useEffect(() => { if (activeBranch) loadData() }, [activeBranch]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadData() {
+    if (!activeBranch) return
     const [invRes, resRes, settingsRes] = await Promise.all([
       supabase.from('invoices')
         .select('*, reservation:reservations(reservation_number, check_in_date, check_out_date), guest:guests(full_name, phone)')
+        .eq('branch_id', activeBranch.id)
         .order('created_at', { ascending: false }),
       supabase.from('reservations')
         .select('*, guest:guests(full_name)')
+        .eq('branch_id', activeBranch.id)
         .in('status', ['checked_in', 'checked_out'])
         .order('created_at', { ascending: false }),
-      supabase.from('hotel_settings').select('tax_rate').single(),
+      supabase.from('hotel_settings').select('tax_rate').eq('branch_id', activeBranch.id).single(),
     ])
     setInvoices((invRes.data ?? []) as unknown as Invoice[])
     setReservations((resRes.data ?? []) as unknown as Reservation[])
@@ -90,6 +95,7 @@ export default function BillingPage() {
       invoice_number: generateInvoiceNumber(),
       reservation_id: form.reservation_id || null,
       guest_id: guestId,
+      branch_id: activeBranch?.id ?? null,
       subtotal,
       tax_rate: taxRate,
       tax_amount: taxAmount,
@@ -153,7 +159,7 @@ export default function BillingPage() {
 
   return (
     <>
-      <TopBar title="Billing & Payments" subtitle="Invoices & transactions" />
+      <TopBar title="Billing & Payments" subtitle={`Invoices & transactions — ${activeBranch?.location ?? ''}`} />
       <div className="p-8 flex-1 section-enter">
         {/* Summary */}
         <div className="grid grid-cols-3 gap-4 mb-6">

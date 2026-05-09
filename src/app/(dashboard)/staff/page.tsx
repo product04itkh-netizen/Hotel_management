@@ -7,6 +7,7 @@ import { Modal } from '@/components/ui/Modal'
 import { createClient } from '@/lib/supabase/client'
 import { formatDate, capitalize } from '@/lib/utils'
 import { toast } from '@/components/ui/Toast'
+import { useBranch } from '@/context/BranchContext'
 import type { Staff, StaffRole, StaffStatus } from '@/types'
 
 const ROLES: StaffRole[] = ['admin', 'manager', 'receptionist', 'housekeeping', 'maintenance', 'accounting']
@@ -19,6 +20,7 @@ const emptyForm = {
 
 export default function StaffPage() {
   const supabase = createClient()
+  const { activeBranch } = useBranch()
   const [staff, setStaff] = useState<Staff[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -28,10 +30,14 @@ export default function StaffPage() {
   const [form, setForm] = useState({ ...emptyForm })
   const [saving, setSaving] = useState(false)
 
-  useEffect(() => { loadStaff() }, [])
+  useEffect(() => { if (activeBranch) loadStaff() }, [activeBranch]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadStaff() {
-    const { data } = await supabase.from('staff').select('*').order('full_name')
+    if (!activeBranch) return
+    const { data } = await supabase.from('staff')
+      .select('*')
+      .eq('branch_id', activeBranch.id)
+      .order('full_name')
     setStaff((data ?? []) as unknown as Staff[])
     setLoading(false)
   }
@@ -80,7 +86,7 @@ export default function StaffPage() {
       if (error) { toast(error.message, 'error'); setSaving(false); return }
       toast('Staff member updated')
     } else {
-      const { error } = await supabase.from('staff').insert(payload)
+      const { error } = await supabase.from('staff').insert({ ...payload, branch_id: activeBranch?.id ?? null })
       if (error) { toast(error.message, 'error'); setSaving(false); return }
       toast('Staff member added')
     }
@@ -105,7 +111,7 @@ export default function StaffPage() {
 
   return (
     <>
-      <TopBar title="Staff & Users" subtitle="Roles & permissions management" />
+      <TopBar title="Staff & Users" subtitle={`Roles & permissions — ${activeBranch?.location ?? ''}`} />
       <div className="p-8 flex-1 section-enter">
         {/* Role summary */}
         <div className="grid grid-cols-6 gap-3 mb-6">

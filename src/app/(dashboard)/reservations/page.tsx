@@ -7,6 +7,7 @@ import { Modal } from '@/components/ui/Modal'
 import { createClient } from '@/lib/supabase/client'
 import { formatDate, calculateNights, generateReservationNumber, formatCurrency, capitalize } from '@/lib/utils'
 import { toast } from '@/components/ui/Toast'
+import { useBranch } from '@/context/BranchContext'
 import type { Reservation, Room } from '@/types'
 
 const STATUSES = ['all', 'pending', 'confirmed', 'checked_in', 'checked_out', 'cancelled', 'no_show']
@@ -20,6 +21,7 @@ const emptyForm = {
 
 export default function ReservationsPage() {
   const supabase = createClient()
+  const { activeBranch } = useBranch()
   const [reservations, setReservations] = useState<Reservation[]>([])
   const [rooms, setRooms] = useState<Room[]>([])
   const [loading, setLoading] = useState(true)
@@ -31,13 +33,21 @@ export default function ReservationsPage() {
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
-    loadData()
-  }, [])
+    if (activeBranch) loadData()
+  }, [activeBranch]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadData() {
+    if (!activeBranch) return
     const [resRes, roomRes] = await Promise.all([
-      supabase.from('reservations').select('*, guest:guests(full_name, email, phone), room:rooms(room_number, room_type, price_per_night)').order('created_at', { ascending: false }),
-      supabase.from('rooms').select('*').in('status', ['available', 'occupied']).order('room_number'),
+      supabase.from('reservations')
+        .select('*, guest:guests(full_name, email, phone), room:rooms(room_number, room_type, price_per_night)')
+        .eq('branch_id', activeBranch.id)
+        .order('created_at', { ascending: false }),
+      supabase.from('rooms')
+        .select('*')
+        .eq('branch_id', activeBranch.id)
+        .in('status', ['available', 'occupied'])
+        .order('room_number'),
     ])
     setReservations((resRes.data ?? []) as unknown as Reservation[])
     setRooms((roomRes.data ?? []) as unknown as Room[])
@@ -81,6 +91,7 @@ export default function ReservationsPage() {
     if (!form.check_in_date || !form.check_out_date || !form.room_id) {
       toast('Please fill in all required fields', 'error'); return
     }
+    if (!activeBranch) { toast('No branch selected', 'error'); return }
     setSaving(true)
 
     const selectedRoom = rooms.find(r => r.id === form.room_id)
@@ -120,6 +131,7 @@ export default function ReservationsPage() {
         reservation_number: generateReservationNumber(),
         guest_id: guestId,
         room_id: form.room_id,
+        branch_id: activeBranch.id,
         check_in_date: form.check_in_date,
         check_out_date: form.check_out_date,
         adults: form.adults,
@@ -172,7 +184,7 @@ export default function ReservationsPage() {
 
   return (
     <>
-      <TopBar title="Reservations" subtitle="Manage bookings & availability" />
+      <TopBar title="Reservations" subtitle={`Manage bookings — ${activeBranch?.location ?? ''}`} />
       <div className="p-8 flex-1 section-enter">
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
@@ -275,7 +287,7 @@ export default function ReservationsPage() {
                 <input
                   value={form.guest_phone}
                   onChange={e => setForm(f => ({ ...f, guest_phone: e.target.value }))}
-                  placeholder="+1 234 567 8900"
+                  placeholder="+855 12 345 678"
                   className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg"
                 />
               </div>

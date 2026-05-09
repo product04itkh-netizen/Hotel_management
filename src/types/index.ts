@@ -1,3 +1,17 @@
+// ─── Branch ───────────────────────────────────────────────────────────────
+export interface Branch {
+  id: string
+  name: string
+  location: string
+  address?: string
+  phone?: string
+  email?: string
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+// ─── Room ──────────────────────────────────────────────────────────────────
 export type RoomStatus = 'available' | 'occupied' | 'cleaning' | 'maintenance' | 'out_of_order'
 export type RoomType = 'standard' | 'deluxe' | 'suite' | 'presidential'
 
@@ -12,6 +26,8 @@ export interface Room {
   max_children: number
   amenities: string[]
   description?: string
+  branch_id?: string
+  branch?: Branch
   created_at: string
   updated_at: string
 }
@@ -31,6 +47,7 @@ export interface Guest {
   created_at: string
   updated_at: string
 }
+
 
 export type ReservationStatus = 'pending' | 'confirmed' | 'checked_in' | 'checked_out' | 'cancelled' | 'no_show'
 export type BookingSource = 'walk_in' | 'phone' | 'online' | 'ota' | 'referral'
@@ -52,6 +69,8 @@ export interface Reservation {
   source: BookingSource
   notes?: string
   created_by?: string
+  branch_id?: string
+  branch?: Branch
   created_at: string
   updated_at: string
   guest?: Guest
@@ -84,6 +103,8 @@ export interface Invoice {
   paid_at?: string
   items: InvoiceItem[]
   notes?: string
+  branch_id?: string
+  branch?: Branch
   created_at: string
   updated_at: string
   reservation?: Reservation
@@ -104,6 +125,8 @@ export interface HousekeepingTask {
   notes?: string
   due_date?: string
   completed_at?: string
+  branch_id?: string
+  branch?: Branch
   created_at: string
   updated_at: string
   room?: Room
@@ -123,6 +146,8 @@ export interface Staff {
   department?: string
   hire_date?: string
   auth_user_id?: string
+  branch_id?: string
+  branch?: Branch
   created_at: string
   updated_at: string
 }
@@ -141,6 +166,8 @@ export interface HotelSettings {
   currency: string
   check_in_time: string
   check_out_time: string
+  branch_id?: string
+  branch?: Branch
   created_at: string
   updated_at: string
 }

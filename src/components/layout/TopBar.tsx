@@ -1,6 +1,7 @@
 'use client'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import { useBranch } from '@/context/BranchContext'
 
 interface TopBarProps {
   title: string
@@ -10,6 +11,7 @@ interface TopBarProps {
 export function TopBar({ title, subtitle }: TopBarProps) {
   const router = useRouter()
   const supabase = createClient()
+  const { activeBranch } = useBranch()
 
   const today = new Date().toLocaleDateString('en-US', {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
@@ -21,11 +23,16 @@ export function TopBar({ title, subtitle }: TopBarProps) {
     router.refresh()
   }
 
+  // Display label: "OnlyOne Homestay · Kampot" or fall back while loading
+  const branchLabel = activeBranch
+    ? `${activeBranch.name} · ${activeBranch.location}`
+    : 'OnlyOne Homestay'
+
   return (
     <header className="bg-white border-b border-hborder px-8 h-[60px] flex items-center justify-between sticky top-0 z-10">
       <div>
         <h1 className="font-serif text-xl text-dark-navy leading-none">{title}</h1>
-        {subtitle && <p className="text-xs text-hmuted mt-0.5">{subtitle ?? today}</p>}
+        {subtitle && <p className="text-xs text-hmuted mt-0.5">{subtitle}</p>}
         {!subtitle && <p className="text-xs text-hmuted mt-0.5">{today}</p>}
       </div>
       <div className="flex items-center gap-3">
@@ -33,7 +40,12 @@ export function TopBar({ title, subtitle }: TopBarProps) {
           <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
           System Online
         </span>
-        <span className="text-xs text-hmuted">Grand Palms Hotel</span>
+        {/* Dynamic branch label */}
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-[#E8F0FB] text-navy rounded-full text-xs font-medium">
+          <span className="text-[10px]">📍</span>
+          {branchLabel}
+        </span>
+        <img src="/logo.jpg" alt="OnlyOne Homestay" className="h-7 w-auto object-contain rounded-md" />
         <button
           onClick={handleLogout}
           className="text-xs text-hmuted hover:text-htext border border-hborder px-3 py-1.5 rounded-lg hover:bg-hsurface2 transition-colors"
