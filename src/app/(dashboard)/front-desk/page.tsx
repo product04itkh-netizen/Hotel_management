@@ -66,7 +66,7 @@ export default function FrontDeskPage() {
     }
     fetch('/api/telegram/notify', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ event: 'checkin', data: {
+      body: JSON.stringify({ event: 'checkin', branch_id: activeBranch?.id, data: {
         guest_name: (res.guest as any)?.full_name,
         room_number: (res.room as any)?.room_number,
         time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
@@ -99,7 +99,7 @@ export default function FrontDeskPage() {
     }
     fetch('/api/telegram/notify', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ event: 'checkout', data: {
+      body: JSON.stringify({ event: 'checkout', branch_id: activeBranch?.id, data: {
         guest_name: (res.guest as any)?.full_name,
         room_number: (res.room as any)?.room_number,
         time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),

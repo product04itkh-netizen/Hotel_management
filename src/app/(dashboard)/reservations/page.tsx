@@ -152,6 +152,7 @@ export default function ReservationsPage() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             event: 'new_reservation',
+            branch_id: activeBranch?.id,
             data: {
               guest_name: form.guest_name,
               room_number: selectedRoom?.room_number,

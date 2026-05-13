@@ -65,7 +65,7 @@ export default function HousekeepingPage() {
         await supabase.from('rooms').update({ status: 'available', updated_at: new Date().toISOString() }).eq('id', task.room_id)
         fetch('/api/telegram/notify', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ event: 'housekeeping_complete', data: {
+          body: JSON.stringify({ event: 'housekeeping_complete', branch_id: activeBranch?.id, data: {
             room_number: (task.room as any)?.room_number,
             staff_name: (task.staff as any)?.full_name ?? 'Staff',
           }})

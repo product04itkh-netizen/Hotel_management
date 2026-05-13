@@ -5,6 +5,7 @@ import { StatCard } from '@/components/ui/StatCard'
 import { Badge } from '@/components/ui/Badge'
 import { createClient } from '@/lib/supabase/client'
 import { formatCurrency, formatDate } from '@/lib/utils'
+import { useBranch } from '@/context/BranchContext'
 import type { Reservation } from '@/types'
 
 interface Stats {
@@ -22,6 +23,7 @@ const WEEK_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
 export default function DashboardPage() {
   const supabase = createClient()
+  const { activeBranch } = useBranch()
   const [stats, setStats] = useState<Stats>({
     totalRooms: 0, occupiedRooms: 0, todayRevenue: 0,
     todayCheckIns: 0, todayCheckOuts: 0, pendingHousekeeping: 0,
@@ -32,19 +34,20 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    loadDashboard()
-  }, [])
+    if (activeBranch) loadDashboard()
+  }, [activeBranch?.id])
 
   async function loadDashboard() {
+    if (!activeBranch) return
     const today = new Date().toISOString().split('T')[0]
 
     const [roomsRes, checkInsRes, checkOutsRes, revenueRes, housekeepingRes, reservationsRes] = await Promise.all([
-      supabase.from('rooms').select('status'),
-      supabase.from('reservations').select('id').eq('check_in_date', today).in('status', ['confirmed', 'checked_in']),
-      supabase.from('reservations').select('id').eq('check_out_date', today).eq('status', 'checked_in'),
-      supabase.from('invoices').select('total').eq('status', 'paid').gte('paid_at', today + 'T00:00:00').lte('paid_at', today + 'T23:59:59'),
-      supabase.from('housekeeping_tasks').select('id').in('status', ['pending', 'in_progress']),
-      supabase.from('reservations').select('*, guest:guests(full_name, phone), room:rooms(room_number, room_type)').order('created_at', { ascending: false }).limit(6),
+      supabase.from('rooms').select('status').eq('branch_id', activeBranch.id),
+      supabase.from('reservations').select('id').eq('branch_id', activeBranch.id).eq('check_in_date', today).in('status', ['confirmed', 'checked_in']),
+      supabase.from('reservations').select('id').eq('branch_id', activeBranch.id).eq('check_out_date', today).eq('status', 'checked_in'),
+      supabase.from('invoices').select('total').eq('branch_id', activeBranch.id).eq('status', 'paid').gte('paid_at', today + 'T00:00:00').lte('paid_at', today + 'T23:59:59'),
+      supabase.from('housekeeping_tasks').select('id').eq('branch_id', activeBranch.id).in('status', ['pending', 'in_progress']),
+      supabase.from('reservations').select('*, guest:guests(full_name, phone), room:rooms(room_number, room_type)').eq('branch_id', activeBranch.id).order('created_at', { ascending: false }).limit(6),
     ])
 
     const rooms = roomsRes.data ?? []

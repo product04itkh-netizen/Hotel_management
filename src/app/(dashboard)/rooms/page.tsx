@@ -109,7 +109,7 @@ export default function RoomsPage() {
     if (newStatus === 'maintenance') {
       fetch('/api/telegram/notify', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ event: 'room_maintenance', data: {
+        body: JSON.stringify({ event: 'room_maintenance', branch_id: activeBranch?.id, data: {
           room_number: rooms.find(r => r.id === roomId)?.room_number,
           priority: 'normal',
         }})

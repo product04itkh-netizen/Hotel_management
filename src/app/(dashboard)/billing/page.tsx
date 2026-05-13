@@ -138,7 +138,7 @@ export default function BillingPage() {
     if (newStatus === 'paid') {
       fetch('/api/telegram/notify', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ event: 'payment', data: {
+        body: JSON.stringify({ event: 'payment', branch_id: activeBranch?.id, data: {
           guest_name: (selectedInvoice.guest as any)?.full_name ?? 'Guest',
           amount: formatCurrency(selectedInvoice.total),
           method: capitalize(payForm.payment_method),

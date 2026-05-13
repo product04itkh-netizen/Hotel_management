@@ -5,9 +5,10 @@ import { sendTelegramNotification, type TelegramEvent } from '@/lib/telegram'
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { event, data, override_token, override_chat_id } = body as {
+    const { event, data, branch_id, override_token, override_chat_id } = body as {
       event: TelegramEvent
       data: Record<string, string | number | undefined>
+      branch_id?: string
       override_token?: string
       override_chat_id?: string
     }
@@ -17,7 +18,9 @@ export async function POST(request: NextRequest) {
 
     if (!botToken || !chatId) {
       const supabase = createClient()
-      const { data: settings } = await supabase.from('hotel_settings').select('telegram_bot_token, telegram_chat_id, telegram_enabled, notification_events, hotel_name').limit(1).single()
+      let settingsQuery = supabase.from('hotel_settings').select('telegram_bot_token, telegram_chat_id, telegram_enabled, notification_events, hotel_name')
+      if (branch_id) settingsQuery = settingsQuery.eq('branch_id', branch_id)
+      const { data: settings } = await settingsQuery.limit(1).single()
 
       if (!settings?.telegram_enabled && !override_token) {
         return NextResponse.json({ ok: false, error: 'Telegram notifications are disabled' })
