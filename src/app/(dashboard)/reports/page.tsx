@@ -4,12 +4,26 @@ import { TopBar } from '@/components/layout/TopBar'
 import { createClient } from '@/lib/supabase/client'
 import { formatCurrency } from '@/lib/utils'
 import { useBranch } from '@/context/BranchContext'
+import jsPDF from 'jspdf'
 
 interface MonthlyData {
   month: string
   revenue: number
   reservations: number
   occupancyRate: number
+}
+
+interface BalanceSheet {
+  cashCollected: number
+  accountsReceivable: number
+  totalAssets: number
+  unpaidTotal: number
+  partialBalance: number
+  refundsIssued: number
+  totalLiabilities: number
+  grossBilling: number
+  totalDiscounts: number
+  netRevenue: number
 }
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
@@ -22,6 +36,11 @@ export default function ReportsPage() {
   const [sourceStats, setSourceStats] = useState<{ source: string; count: number }[]>([])
   const [loading, setLoading] = useState(true)
   const [kpis, setKpis] = useState({ totalRevenue: 0, totalGuests: 0, avgStay: 0, adr: 0, revpar: 0 })
+  const [balance, setBalance] = useState<BalanceSheet>({
+    cashCollected: 0, accountsReceivable: 0, totalAssets: 0,
+    unpaidTotal: 0, partialBalance: 0, refundsIssued: 0, totalLiabilities: 0,
+    grossBilling: 0, totalDiscounts: 0, netRevenue: 0,
+  })
 
   useEffect(() => { if (activeBranch) loadReports() }, [activeBranch]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -31,15 +50,17 @@ export default function ReportsPage() {
     sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 5)
     const startDate = sixMonthsAgo.toISOString().split('T')[0]
 
-    const [invRes, resRes, roomRes] = await Promise.all([
+    const [invRes, resRes, roomRes, allInvRes] = await Promise.all([
       supabase.from('invoices').select('total, paid_at').eq('status', 'paid').eq('branch_id', activeBranch.id).gte('paid_at', startDate),
       supabase.from('reservations').select('source, check_in_date, check_out_date, status, room:rooms(room_type)').eq('branch_id', activeBranch.id).gte('created_at', startDate),
       supabase.from('rooms').select('room_type, status').eq('branch_id', activeBranch.id),
+      supabase.from('invoices').select('total, amount_paid, status, discount_amount').eq('branch_id', activeBranch.id),
     ])
 
     const invoices = invRes.data ?? []
     const reservations = resRes.data ?? []
     const allRooms = roomRes.data ?? []
+    const allInvoices = allInvRes.data ?? []
 
     // Monthly breakdown
     const months: MonthlyData[] = []
@@ -83,7 +104,186 @@ export default function ReportsPage() {
     const revpar = allRooms.length > 0 ? totalRevenue / (allRooms.length * 180) : 0
 
     setKpis({ totalRevenue, totalGuests, avgStay: Math.round(avgStay * 10) / 10, adr, revpar })
+
+    // Balance sheet
+    const cashCollected = allInvoices
+      .filter(i => !['void'].includes(i.status))
+      .reduce((s, i) => s + Number(i.amount_paid), 0)
+    const accountsReceivable = allInvoices
+      .filter(i => ['unpaid', 'partial'].includes(i.status))
+      .reduce((s, i) => s + (Number(i.total) - Number(i.amount_paid)), 0)
+    const unpaidTotal = allInvoices
+      .filter(i => i.status === 'unpaid')
+      .reduce((s, i) => s + Number(i.total), 0)
+    const partialBalance = allInvoices
+      .filter(i => i.status === 'partial')
+      .reduce((s, i) => s + (Number(i.total) - Number(i.amount_paid)), 0)
+    const refundsIssued = allInvoices
+      .filter(i => i.status === 'refunded')
+      .reduce((s, i) => s + Number(i.amount_paid), 0)
+    const grossBilling = allInvoices
+      .filter(i => !['void'].includes(i.status))
+      .reduce((s, i) => s + Number(i.total), 0)
+    const totalDiscounts = allInvoices.reduce((s, i) => s + Number(i.discount_amount ?? 0), 0)
+    setBalance({
+      cashCollected,
+      accountsReceivable,
+      totalAssets: cashCollected + accountsReceivable,
+      unpaidTotal,
+      partialBalance,
+      refundsIssued,
+      totalLiabilities: unpaidTotal + partialBalance + refundsIssued,
+      grossBilling,
+      totalDiscounts,
+      netRevenue: cashCollected - refundsIssued,
+    })
     setLoading(false)
+  }
+
+  function exportBalancePDF() {
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
+    const pageW = 210
+    const marginL = 20
+    const marginR = 20
+    const contentW = pageW - marginL - marginR
+    const now = new Date()
+    const dateStr = now.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
+    const branchName = activeBranch?.name ?? 'Hotel'
+    const branchLocation = activeBranch?.location ?? ''
+
+    // ── Header ──────────────────────────────────────────────
+    doc.setFillColor(0, 74, 173)        // #004AAD navy
+    doc.rect(0, 0, pageW, 28, 'F')
+    doc.setTextColor(255, 255, 255)
+    doc.setFontSize(16)
+    doc.setFont('helvetica', 'bold')
+    doc.text(branchName, marginL, 12)
+    doc.setFontSize(9)
+    doc.setFont('helvetica', 'normal')
+    doc.text(branchLocation, marginL, 18)
+    doc.setFontSize(11)
+    doc.setFont('helvetica', 'bold')
+    doc.text('Financial Balance Sheet Report', pageW - marginR, 12, { align: 'right' })
+    doc.setFontSize(8)
+    doc.setFont('helvetica', 'normal')
+    doc.text(`As of ${dateStr}`, pageW - marginR, 18, { align: 'right' })
+
+    doc.setTextColor(30, 30, 30)
+    let y = 38
+
+    // ── Helper: section title ────────────────────────────────
+    function sectionTitle(label: string, r: number, g: number, b: number) {
+      doc.setFillColor(r, g, b)
+      doc.rect(marginL, y, contentW, 7, 'F')
+      doc.setTextColor(255, 255, 255)
+      doc.setFontSize(8)
+      doc.setFont('helvetica', 'bold')
+      doc.text(label.toUpperCase(), marginL + 3, y + 5)
+      doc.setTextColor(30, 30, 30)
+      y += 10
+    }
+
+    // ── Helper: row ──────────────────────────────────────────
+    function row(label: string, value: string, bold = false, highlight = false) {
+      if (highlight) {
+        doc.setFillColor(245, 247, 250)
+        doc.rect(marginL, y - 1, contentW, 7, 'F')
+      }
+      doc.setFontSize(9)
+      doc.setFont('helvetica', bold ? 'bold' : 'normal')
+      doc.text(label, marginL + 4, y + 4)
+      doc.text(value, pageW - marginR - 4, y + 4, { align: 'right' })
+      y += 7
+    }
+
+    // ── Helper: divider line ─────────────────────────────────
+    function divider(color = [220, 220, 220] as [number, number, number]) {
+      doc.setDrawColor(...color)
+      doc.setLineWidth(0.3)
+      doc.line(marginL, y, pageW - marginR, y)
+      y += 4
+    }
+
+    // ── Helper: total row ────────────────────────────────────
+    function totalRow(label: string, value: string, r: number, g: number, b: number) {
+      doc.setFillColor(r, g, b)
+      doc.setFillColor(r, g, b)
+      doc.rect(marginL, y, contentW, 8, 'F')
+      doc.setTextColor(255, 255, 255)
+      doc.setFontSize(10)
+      doc.setFont('helvetica', 'bold')
+      doc.text(label, marginL + 4, y + 5.5)
+      doc.text(value, pageW - marginR - 4, y + 5.5, { align: 'right' })
+      doc.setTextColor(30, 30, 30)
+      y += 12
+    }
+
+    // ── ASSETS ───────────────────────────────────────────────
+    sectionTitle('Assets', 26, 122, 74)          // green
+    row('Cash Collected', formatCurrency(balance.cashCollected))
+    row('Accounts Receivable', formatCurrency(balance.accountsReceivable))
+    divider()
+    totalRow('Total Assets', formatCurrency(balance.totalAssets), 26, 122, 74)
+
+    // ── LIABILITIES ──────────────────────────────────────────
+    sectionTitle('Liabilities', 184, 50, 50)     // red
+    row('Outstanding (Unpaid)', formatCurrency(balance.unpaidTotal))
+    row('Partial Balance Due', formatCurrency(balance.partialBalance))
+    row('Refunds Issued', formatCurrency(balance.refundsIssued))
+    divider()
+    totalRow('Total Liabilities', formatCurrency(balance.totalLiabilities), 184, 50, 50)
+
+    // ── NET POSITION ─────────────────────────────────────────
+    sectionTitle('Net Position', 0, 74, 173)     // navy blue
+    row('Gross Billing', formatCurrency(balance.grossBilling))
+    row('Less: Discounts', `(${formatCurrency(balance.totalDiscounts)})`)
+    row('Less: Refunds', `(${formatCurrency(balance.refundsIssued)})`)
+    divider()
+    totalRow('Net Revenue', formatCurrency(balance.netRevenue), 0, 74, 173)
+
+    // ── KPI Summary strip ────────────────────────────────────
+    y += 2
+    doc.setFontSize(8)
+    doc.setFont('helvetica', 'bold')
+    doc.setTextColor(100, 100, 100)
+    doc.text('KPI SUMMARY (LAST 6 MONTHS)', marginL, y)
+    y += 6
+    doc.setFillColor(248, 249, 251)
+    doc.rect(marginL, y, contentW, 16, 'F')
+    doc.setDrawColor(220, 220, 220)
+    doc.setLineWidth(0.3)
+    doc.rect(marginL, y, contentW, 16)
+    const kpiItems = [
+      { label: 'Total Revenue', value: formatCurrency(kpis.totalRevenue) },
+      { label: 'Total Guests', value: String(kpis.totalGuests) },
+      { label: 'Avg Stay', value: `${kpis.avgStay} nights` },
+      { label: 'ADR', value: formatCurrency(kpis.adr) },
+    ]
+    const colW = contentW / kpiItems.length
+    kpiItems.forEach((k, i) => {
+      const cx = marginL + colW * i + colW / 2
+      doc.setFontSize(7)
+      doc.setFont('helvetica', 'normal')
+      doc.setTextColor(120, 120, 120)
+      doc.text(k.label.toUpperCase(), cx, y + 5, { align: 'center' })
+      doc.setFontSize(9)
+      doc.setFont('helvetica', 'bold')
+      doc.setTextColor(30, 30, 30)
+      doc.text(k.value, cx, y + 12, { align: 'center' })
+    })
+    y += 22
+
+    // ── Footer ───────────────────────────────────────────────
+    const pageH = 297
+    doc.setFillColor(245, 247, 250)
+    doc.rect(0, pageH - 12, pageW, 12, 'F')
+    doc.setFontSize(7)
+    doc.setFont('helvetica', 'normal')
+    doc.setTextColor(150, 150, 150)
+    doc.text(`Generated on ${now.toLocaleString()} · ${branchName} · Confidential`, pageW / 2, pageH - 4, { align: 'center' })
+
+    const filename = `balance-sheet-${branchName.replace(/\s+/g, '-').toLowerCase()}-${now.toISOString().split('T')[0]}.pdf`
+    doc.save(filename)
   }
 
   const maxRevenue = Math.max(...monthlyData.map(m => m.revenue), 1)
@@ -114,6 +314,97 @@ export default function ReportsPage() {
               <p className="font-serif text-2xl text-dark-navy mt-1 pl-2">{k.value}</p>
             </div>
           ))}
+        </div>
+
+        {/* Balance Sheet */}
+        <div className="bg-white border border-hborder rounded-2xl shadow-card mb-5 overflow-hidden">
+          <div className="px-6 py-4 border-b border-hborder flex items-center justify-between">
+            <div>
+              <h3 className="font-serif text-[17px] text-dark-navy">Financial Balance Sheet</h3>
+              <p className="text-xs text-hmuted mt-0.5">Assets, liabilities & net position — all-time</p>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-hmuted">
+                As of {new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+              </span>
+              <button
+                onClick={exportBalancePDF}
+                className="flex items-center gap-1.5 text-xs font-semibold text-white bg-[#004AAD] hover:bg-[#003a8a] active:bg-[#002d6e] px-3 py-1.5 rounded-lg transition-colors"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3M3 17V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
+                </svg>
+                Export PDF
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 divide-x divide-hborder">
+            {/* Assets */}
+            <div className="p-5">
+              <p className="text-[11px] font-semibold tracking-widest text-[#1A7A4A] uppercase mb-3">Assets</p>
+              <div className="space-y-2.5">
+                <div className="flex justify-between text-sm">
+                  <span className="text-hmuted">Cash Collected</span>
+                  <span className="font-semibold text-dark-navy">{formatCurrency(balance.cashCollected)}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-hmuted">Accounts Receivable</span>
+                  <span className="font-semibold text-dark-navy">{formatCurrency(balance.accountsReceivable)}</span>
+                </div>
+                <div className="flex justify-between text-sm border-t border-hborder pt-2.5 mt-1">
+                  <span className="font-semibold text-[#1A7A4A]">Total Assets</span>
+                  <span className="font-bold text-[#1A7A4A] text-base">{formatCurrency(balance.totalAssets)}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Liabilities */}
+            <div className="p-5">
+              <p className="text-[11px] font-semibold tracking-widest text-[#B83232] uppercase mb-3">Liabilities</p>
+              <div className="space-y-2.5">
+                <div className="flex justify-between text-sm">
+                  <span className="text-hmuted">Outstanding (Unpaid)</span>
+                  <span className="font-semibold text-dark-navy">{formatCurrency(balance.unpaidTotal)}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-hmuted">Partial Balance Due</span>
+                  <span className="font-semibold text-dark-navy">{formatCurrency(balance.partialBalance)}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-hmuted">Refunds Issued</span>
+                  <span className="font-semibold text-dark-navy">{formatCurrency(balance.refundsIssued)}</span>
+                </div>
+                <div className="flex justify-between text-sm border-t border-hborder pt-2.5 mt-1">
+                  <span className="font-semibold text-[#B83232]">Total Liabilities</span>
+                  <span className="font-bold text-[#B83232] text-base">{formatCurrency(balance.totalLiabilities)}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Net Position */}
+            <div className="p-5 bg-hsurface2/40">
+              <p className="text-[11px] font-semibold tracking-widest text-[#004AAD] uppercase mb-3">Net Position</p>
+              <div className="space-y-2.5">
+                <div className="flex justify-between text-sm">
+                  <span className="text-hmuted">Gross Billing</span>
+                  <span className="font-semibold text-dark-navy">{formatCurrency(balance.grossBilling)}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-hmuted">Less: Discounts</span>
+                  <span className="font-semibold text-dark-navy">({formatCurrency(balance.totalDiscounts)})</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-hmuted">Less: Refunds</span>
+                  <span className="font-semibold text-dark-navy">({formatCurrency(balance.refundsIssued)})</span>
+                </div>
+                <div className="flex justify-between text-sm border-t border-hborder pt-2.5 mt-1">
+                  <span className="font-semibold text-[#004AAD]">Net Revenue</span>
+                  <span className="font-bold text-[#004AAD] text-base">{formatCurrency(balance.netRevenue)}</span>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div className="grid grid-cols-2 gap-5 mb-5">
