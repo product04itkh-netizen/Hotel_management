@@ -45,7 +45,7 @@ export default function HousekeepingPage() {
         .select('id, full_name, role')
         .eq('branch_id', activeBranch.id)
         .eq('status', 'active')
-        .in('role', ['housekeeping', 'maintenance', 'manager'])
+        .eq('role', 'housekeeping')
         .order('full_name'),
     ])
     setTasks((taskRes.data ?? []) as unknown as HousekeepingTask[])
