@@ -353,7 +353,7 @@ export default function BillingPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-hsurface2">
-                {['Invoice #', 'Guest', 'House', 'Subtotal', 'Tax', 'Total', 'Paid', 'Balance', 'Status', 'Date', 'Actions'].map(h => (
+                {['Invoice #', 'Guest', 'House', 'Subtotal', 'Tax', 'Total', 'Paid', 'Balance', 'Status', 'Date Issued', 'Actions'].map(h => (
                   <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide whitespace-nowrap">{h}</th>
                 ))}
               </tr>
