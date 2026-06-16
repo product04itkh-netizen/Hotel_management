@@ -372,6 +372,10 @@ export default function AccountingPage() {
   }
 
   async function voidJournalEntry(entry: JournalEntry) {
+    if (entry.reference_type === 'void') {
+      toast('Cannot void a reversing entry — the original is already cancelled.', 'error')
+      return
+    }
     if (!confirm(`Void ${entry.entry_number}? A reversing entry will be posted.`)) return
     let lines: any[] = entryLines[entry.id] ?? []
     if (lines.length === 0) {
@@ -402,6 +406,33 @@ export default function AccountingPage() {
       voided_at: new Date().toISOString(),
       void_entry_id: reversal.id,
     }).eq('id', entry.id)
+
+    // Roll back invoice + reservation when a payment JE is voided
+    if (entry.reference_type === 'invoice' && entry.reference && activeBranch) {
+      const paymentAmount = lines.reduce((s: number, l: any) => s + Number(l.debit || 0), 0)
+      const { data: inv } = await supabase.from('invoices')
+        .select('id, total, amount_paid, reservation_id')
+        .eq('invoice_number', entry.reference)
+        .eq('branch_id', activeBranch.id)
+        .maybeSingle()
+      if (inv) {
+        const newPaid = Math.max(0, Number(inv.amount_paid) - paymentAmount)
+        const newStatus = newPaid <= 0 ? 'unpaid' : newPaid >= Number(inv.total) ? 'paid' : 'partial'
+        await supabase.from('invoices').update({
+          amount_paid: newPaid,
+          status: newStatus,
+          paid_at: newStatus === 'paid' ? new Date().toISOString() : null,
+          updated_at: new Date().toISOString(),
+        }).eq('id', inv.id)
+        if (inv.reservation_id) {
+          await supabase.from('reservations').update({
+            deposit: newPaid,
+            updated_at: new Date().toISOString(),
+          }).eq('id', inv.reservation_id)
+        }
+      }
+    }
+
     toast(`${entry.entry_number} voided — ${reversal.entry_number} posted`)
     setEntryLines({})
     loadEntries()
