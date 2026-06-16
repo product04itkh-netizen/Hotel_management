@@ -298,16 +298,16 @@ export default function ReservationsPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-hsurface2">
-                  {['Ref', 'Guest', 'House', 'Check-in', 'Check-out', 'Pax', 'Add-ons', 'Total', 'Deposit', 'Status', 'Actions'].map(h => (
+                  {['Ref', 'Guest', 'House', 'Check-in', 'Check-out', 'Pax', 'Add-ons', 'Total', 'Deposit', 'Remaining', 'Status', 'Actions'].map(h => (
                     <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td colSpan={11} className="px-5 py-10 text-center text-hmuted">Loading…</td></tr>
+                  <tr><td colSpan={12} className="px-5 py-10 text-center text-hmuted">Loading…</td></tr>
                 ) : filtered.length === 0 ? (
-                  <tr><td colSpan={11} className="px-5 py-10 text-center text-hmuted">No reservations found</td></tr>
+                  <tr><td colSpan={12} className="px-5 py-10 text-center text-hmuted">No reservations found</td></tr>
                 ) : filtered.map(res => {
                   const itemCount = (res.line_items ?? []).length
                   const dep = res.deposit ?? 0
@@ -337,6 +337,16 @@ export default function ReservationsPage() {
                         {dep > 0 ? (
                           <span className="text-green-700 font-medium">{formatCurrency(dep)}</span>
                         ) : '—'}
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        {res.total_amount != null ? (() => {
+                          const remaining = (res.total_amount ?? 0) - dep
+                          return remaining > 0
+                            ? <span className="text-red-600 font-medium">{formatCurrency(remaining)}</span>
+                            : remaining === 0
+                              ? <span className="text-green-700 font-medium">Paid</span>
+                              : '—'
+                        })() : '—'}
                       </td>
                       <td className="px-4 py-3"><Badge status={res.status} /></td>
                       <td className="px-4 py-3">
