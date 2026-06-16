@@ -5,23 +5,23 @@ import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 import { createClient } from '@/lib/supabase/client'
-import { formatDate, generateReservationNumber, formatCurrency, calculateNights } from '@/lib/utils'
+import { formatDate, generateReservationNumber, formatCurrency, calculateNights, capitalize } from '@/lib/utils'
 import { toast } from '@/components/ui/Toast'
 import { useBranch } from '@/context/BranchContext'
-import type { Reservation, Room } from '@/types'
+import type { Reservation, House } from '@/types'
 
 export default function FrontDeskPage() {
   const supabase = createClient()
   const { activeBranch } = useBranch()
   const [arrivals, setArrivals] = useState<Reservation[]>([])
   const [departures, setDepartures] = useState<Reservation[]>([])
-  const [rooms, setRooms] = useState<Room[]>([])
+  const [houses, setHouses] = useState<House[]>([])
   const [loading, setLoading] = useState(true)
   const [walkInOpen, setWalkInOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [walkIn, setWalkIn] = useState({
     guest_name: '', guest_phone: '', guest_email: '',
-    room_id: '', check_out_date: '', adults: 1, children: 0,
+    house_id: '', check_out_date: '', adults: 1, children: 0,
   })
 
   useEffect(() => { if (activeBranch) loadData() }, [activeBranch]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -29,28 +29,28 @@ export default function FrontDeskPage() {
   async function loadData() {
     if (!activeBranch) return
     const today = new Date().toISOString().split('T')[0]
-    const [arrRes, depRes, roomRes] = await Promise.all([
+    const [arrRes, depRes, houseRes] = await Promise.all([
       supabase.from('reservations')
-        .select('*, guest:guests(full_name, email, phone), room:rooms(room_number, room_type, floor)')
+        .select('*, guest:guests(full_name, email, phone), house:houses(name, house_type, capacity)')
         .eq('branch_id', activeBranch.id)
         .eq('check_in_date', today)
         .in('status', ['confirmed', 'pending'])
         .order('created_at'),
       supabase.from('reservations')
-        .select('*, guest:guests(full_name, email, phone), room:rooms(room_number, room_type, floor)')
+        .select('*, guest:guests(full_name, email, phone), house:houses(name, house_type, capacity)')
         .eq('branch_id', activeBranch.id)
         .eq('check_out_date', today)
         .eq('status', 'checked_in')
         .order('created_at'),
-      supabase.from('rooms')
+      supabase.from('houses')
         .select('*')
         .eq('branch_id', activeBranch.id)
         .eq('status', 'available')
-        .order('room_number'),
+        .order('name'),
     ])
     setArrivals((arrRes.data ?? []) as unknown as Reservation[])
     setDepartures((depRes.data ?? []) as unknown as Reservation[])
-    setRooms((roomRes.data ?? []) as unknown as Room[])
+    setHouses((houseRes.data ?? []) as unknown as House[])
     setLoading(false)
   }
 
@@ -61,14 +61,14 @@ export default function FrontDeskPage() {
       actual_check_in: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     }).eq('id', res.id)
-    if (res.room_id) {
-      await supabase.from('rooms').update({ status: 'occupied', updated_at: new Date().toISOString() }).eq('id', res.room_id)
+    if (res.house_id) {
+      await supabase.from('houses').update({ status: 'occupied', updated_at: new Date().toISOString() }).eq('id', res.house_id)
     }
     fetch('/api/telegram/notify', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ event: 'checkin', branch_id: activeBranch?.id, data: {
         guest_name: (res.guest as any)?.full_name,
-        room_number: (res.room as any)?.room_number,
+        house_name: (res.house as any)?.name,
         time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
         reservation_number: res.reservation_number,
       }})
@@ -84,24 +84,44 @@ export default function FrontDeskPage() {
       actual_check_out: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     }).eq('id', res.id)
-    if (res.room_id) {
-      await supabase.from('rooms').update({ status: 'cleaning', updated_at: new Date().toISOString() }).eq('id', res.room_id)
-      // Create housekeeping task with branch_id
-      await supabase.from('housekeeping_tasks').insert({
-        room_id: res.room_id,
-        task_type: 'cleaning',
-        status: 'pending',
-        priority: 'high',
-        branch_id: activeBranch?.id ?? null,
-        due_date: new Date().toISOString().split('T')[0],
-        notes: `Post-checkout cleaning for reservation ${res.reservation_number}`,
-      })
+
+    if (res.house_id) {
+      // Set house back to available
+      await supabase.from('houses').update({ status: 'available', updated_at: new Date().toISOString() }).eq('id', res.house_id)
+      // Load all rooms in this house and create a cleaning task for each
+      const { data: houseRooms } = await supabase.from('rooms').select('id').eq('house_id', res.house_id)
+      if (houseRooms && houseRooms.length > 0) {
+        await supabase.from('rooms').update({ status: 'cleaning', updated_at: new Date().toISOString() }).eq('house_id', res.house_id)
+        await supabase.from('housekeeping_tasks').insert(
+          houseRooms.map(room => ({
+            room_id: room.id,
+            task_type: 'cleaning',
+            status: 'pending',
+            priority: 'high',
+            branch_id: activeBranch?.id ?? null,
+            due_date: new Date().toISOString().split('T')[0],
+            notes: `Post-checkout cleaning for reservation ${res.reservation_number}`,
+          }))
+        )
+      } else {
+        // No rooms set up: just create a generic housekeeping note
+        await supabase.from('housekeeping_tasks').insert({
+          room_id: null,
+          task_type: 'cleaning',
+          status: 'pending',
+          priority: 'high',
+          branch_id: activeBranch?.id ?? null,
+          due_date: new Date().toISOString().split('T')[0],
+          notes: `Post-checkout cleaning — ${(res.house as any)?.name ?? 'house'} — reservation ${res.reservation_number}`,
+        })
+      }
     }
+
     fetch('/api/telegram/notify', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ event: 'checkout', branch_id: activeBranch?.id, data: {
         guest_name: (res.guest as any)?.full_name,
-        room_number: (res.room as any)?.room_number,
+        house_name: (res.house as any)?.name,
         time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
         reservation_number: res.reservation_number,
       }})
@@ -111,14 +131,14 @@ export default function FrontDeskPage() {
   }
 
   async function handleWalkIn() {
-    if (!walkIn.guest_name || !walkIn.room_id || !walkIn.check_out_date) {
+    if (!walkIn.guest_name || !walkIn.house_id || !walkIn.check_out_date) {
       toast('Please fill required fields', 'error'); return
     }
     setSaving(true)
     const today = new Date().toISOString().split('T')[0]
-    const selectedRoom = rooms.find(r => r.id === walkIn.room_id)
+    const selectedHouse = houses.find(h => h.id === walkIn.house_id)
     const nights = calculateNights(today, walkIn.check_out_date)
-    const total = selectedRoom ? selectedRoom.price_per_night * nights : 0
+    const total = selectedHouse ? selectedHouse.base_rate_per_night * nights : 0
 
     const { data: guest } = await supabase.from('guests').insert({
       full_name: walkIn.guest_name,
@@ -130,7 +150,7 @@ export default function FrontDeskPage() {
     const { error } = await supabase.from('reservations').insert({
       reservation_number: generateReservationNumber(),
       guest_id: guest?.id,
-      room_id: walkIn.room_id,
+      house_id: walkIn.house_id,
       branch_id: activeBranch?.id ?? null,
       check_in_date: today,
       check_out_date: walkIn.check_out_date,
@@ -143,10 +163,10 @@ export default function FrontDeskPage() {
     })
 
     if (!error) {
-      await supabase.from('rooms').update({ status: 'occupied', updated_at: new Date().toISOString() }).eq('id', walkIn.room_id)
+      await supabase.from('houses').update({ status: 'occupied', updated_at: new Date().toISOString() }).eq('id', walkIn.house_id)
       toast('Walk-in guest checked in')
       setWalkInOpen(false)
-      setWalkIn({ guest_name: '', guest_phone: '', guest_email: '', room_id: '', check_out_date: '', adults: 1, children: 0 })
+      setWalkIn({ guest_name: '', guest_phone: '', guest_email: '', house_id: '', check_out_date: '', adults: 1, children: 0 })
       loadData()
     } else {
       toast(error.message, 'error')
@@ -180,24 +200,27 @@ export default function FrontDeskPage() {
               <p className="px-5 py-8 text-sm text-hmuted text-center">No arrivals today</p>
             ) : (
               <div className="divide-y divide-hborder">
-                {arrivals.map(res => (
-                  <div key={res.id} className="px-5 py-4 flex items-center justify-between hover:bg-hbg/50">
-                    <div className="min-w-0 mr-3">
-                      <p className="font-medium text-htext truncate">{(res.guest as any)?.full_name ?? '—'}</p>
-                      <p className="text-xs text-hmuted">
-                        Room {(res.room as any)?.room_number ?? '?'} · {(res.guest as any)?.phone ?? 'No phone'}
-                      </p>
-                      <p className="text-xs text-hmuted mt-0.5">
-                        Until {formatDate(res.check_out_date)} · {res.adults} adult{res.adults > 1 ? 's' : ''}
-                        {res.children > 0 ? `, ${res.children} child` : ''}
-                      </p>
+                {arrivals.map(res => {
+                  const pax = res.pax_count ?? (res.adults + res.children)
+                  return (
+                    <div key={res.id} className="px-5 py-4 flex items-center justify-between hover:bg-hbg/50">
+                      <div className="min-w-0 mr-3">
+                        <p className="font-medium text-htext truncate">{(res.guest as any)?.full_name ?? '—'}</p>
+                        <p className="text-xs text-hmuted">
+                          {(res.house as any)?.name ?? '?'} · {(res.guest as any)?.phone ?? 'No phone'}
+                        </p>
+                        <p className="text-xs text-hmuted mt-0.5">
+                          Until {formatDate(res.check_out_date)} · {pax} pax
+                          {res.arrival_time ? ` · ETA ${res.arrival_time}` : ''}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <Badge status={res.status} />
+                        <Button size="sm" variant="success" onClick={() => handleCheckIn(res)}>Check In</Button>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2 flex-shrink-0">
-                      <Badge status={res.status} />
-                      <Button size="sm" variant="success" onClick={() => handleCheckIn(res)}>Check In</Button>
-                    </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             )}
           </div>
@@ -224,7 +247,7 @@ export default function FrontDeskPage() {
                     <div className="min-w-0 mr-3">
                       <p className="font-medium text-htext truncate">{(res.guest as any)?.full_name ?? '—'}</p>
                       <p className="text-xs text-hmuted">
-                        Room {(res.room as any)?.room_number ?? '?'} · {(res.guest as any)?.phone ?? 'No phone'}
+                        {(res.house as any)?.name ?? '?'} · {(res.guest as any)?.phone ?? 'No phone'}
                       </p>
                       <p className="text-xs text-hmuted mt-0.5">
                         Checked in: {res.actual_check_in ? formatDate(res.actual_check_in) : 'Unknown'}
@@ -260,7 +283,7 @@ export default function FrontDeskPage() {
               <input
                 value={walkIn.guest_phone}
                 onChange={e => setWalkIn(f => ({ ...f, guest_phone: e.target.value }))}
-                placeholder="+1 234 567 8900"
+                placeholder="+855 12 345 678"
                 className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg"
               />
             </div>
@@ -275,16 +298,16 @@ export default function FrontDeskPage() {
               />
             </div>
             <div>
-              <label className="block text-xs text-hmuted mb-1">Room *</label>
+              <label className="block text-xs text-hmuted mb-1">House *</label>
               <select
-                value={walkIn.room_id}
-                onChange={e => setWalkIn(f => ({ ...f, room_id: e.target.value }))}
+                value={walkIn.house_id}
+                onChange={e => setWalkIn(f => ({ ...f, house_id: e.target.value }))}
                 className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg"
               >
-                <option value="">Select available room…</option>
-                {rooms.map(r => (
-                  <option key={r.id} value={r.id}>
-                    {r.room_number} — {r.room_type} ({formatCurrency(r.price_per_night)}/night)
+                <option value="">Select available house…</option>
+                {houses.map(h => (
+                  <option key={h.id} value={h.id}>
+                    {h.name} — {capitalize(h.house_type)} · {h.capacity} pax ({formatCurrency(h.base_rate_per_night)}/night)
                   </option>
                 ))}
               </select>
@@ -302,7 +325,7 @@ export default function FrontDeskPage() {
             <div>
               <label className="block text-xs text-hmuted mb-1">Adults</label>
               <input
-                type="number" min={1} max={6}
+                type="number" min={1} max={30}
                 value={walkIn.adults}
                 onChange={e => setWalkIn(f => ({ ...f, adults: Number(e.target.value) }))}
                 className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg"
@@ -311,13 +334,26 @@ export default function FrontDeskPage() {
             <div>
               <label className="block text-xs text-hmuted mb-1">Children</label>
               <input
-                type="number" min={0} max={6}
+                type="number" min={0} max={20}
                 value={walkIn.children}
                 onChange={e => setWalkIn(f => ({ ...f, children: Number(e.target.value) }))}
                 className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg"
               />
             </div>
           </div>
+          {walkIn.house_id && walkIn.check_out_date && (() => {
+            const h = houses.find(x => x.id === walkIn.house_id)
+            const nights = calculateNights(new Date().toISOString().split('T')[0], walkIn.check_out_date)
+            if (!h || nights <= 0) return null
+            return (
+              <div className="bg-hsurface2 rounded-xl px-4 py-3 text-sm">
+                <div className="flex justify-between text-hmuted">
+                  <span>{h.name} — {nights} night{nights !== 1 ? 's' : ''} × {formatCurrency(h.base_rate_per_night)}</span>
+                  <span className="font-semibold text-dark-navy">{formatCurrency(h.base_rate_per_night * nights)}</span>
+                </div>
+              </div>
+            )
+          })()}
           <div className="flex justify-end gap-3 pt-2">
             <Button variant="ghost" onClick={() => setWalkInOpen(false)}>Cancel</Button>
             <Button onClick={handleWalkIn} disabled={saving}>{saving ? 'Checking in…' : 'Check In Now'}</Button>

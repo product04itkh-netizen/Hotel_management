@@ -34,11 +34,11 @@ export default function HousekeepingPage() {
     if (!activeBranch) return
     const [taskRes, roomRes, staffRes] = await Promise.all([
       supabase.from('housekeeping_tasks')
-        .select('*, room:rooms(room_number, room_type, floor), staff:staff(full_name)')
+        .select('*, room:rooms(room_number, room_type, floor, house:houses(name)), staff:staff(full_name)')
         .eq('branch_id', activeBranch.id)
         .order('created_at', { ascending: false }),
       supabase.from('rooms')
-        .select('id, room_number, room_type, floor')
+        .select('id, room_number, room_type, floor, house:houses(name)')
         .eq('branch_id', activeBranch.id)
         .order('room_number'),
       supabase.from('staff')
@@ -156,8 +156,15 @@ export default function HousekeepingPage() {
               ) : filtered.map(task => (
                 <tr key={task.id} className="border-t border-hborder hover:bg-hbg/40">
                   <td className="px-5 py-3">
-                    <p className="font-medium text-htext">Room {(task.room as any)?.room_number ?? '—'}</p>
-                    <p className="text-xs text-hmuted">{capitalize((task.room as any)?.room_type ?? '')} · Floor {(task.room as any)?.floor}</p>
+                    <p className="font-medium text-htext">
+                      {(task.room as any)?.house?.name
+                        ? `${(task.room as any).house.name} — ${(task.room as any).room_number}`
+                        : (task.room as any)?.room_number
+                          ? `Room ${(task.room as any).room_number}`
+                          : '—'
+                      }
+                    </p>
+                    <p className="text-xs text-hmuted">{capitalize((task.room as any)?.room_type ?? '')}</p>
                   </td>
                   <td className="px-5 py-3 capitalize text-hmuted">{task.task_type}</td>
                   <td className="px-5 py-3"><Badge status={task.priority} /></td>
@@ -204,7 +211,11 @@ export default function HousekeepingPage() {
                 className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg"
               >
                 <option value="">Select room…</option>
-                {rooms.map(r => <option key={r.id} value={r.id}>Room {r.room_number} — Floor {r.floor}</option>)}
+                {rooms.map(r => (
+                  <option key={r.id} value={r.id}>
+                    {(r as any).house?.name ? `${(r as any).house.name} — ` : ''}{r.room_number}
+                  </option>
+                ))}
               </select>
             </div>
             <div>

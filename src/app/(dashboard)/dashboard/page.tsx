@@ -9,14 +9,14 @@ import { useBranch } from '@/context/BranchContext'
 import type { Reservation } from '@/types'
 
 interface Stats {
-  totalRooms: number
-  occupiedRooms: number
+  totalHouses: number
+  occupiedHouses: number
   todayRevenue: number
   todayCheckIns: number
   todayCheckOuts: number
   pendingHousekeeping: number
-  availableRooms: number
-  cleaningRooms: number
+  availableHouses: number
+  maintenanceHouses: number
 }
 
 const WEEK_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
@@ -25,9 +25,9 @@ export default function DashboardPage() {
   const supabase = createClient()
   const { activeBranch } = useBranch()
   const [stats, setStats] = useState<Stats>({
-    totalRooms: 0, occupiedRooms: 0, todayRevenue: 0,
+    totalHouses: 0, occupiedHouses: 0, todayRevenue: 0,
     todayCheckIns: 0, todayCheckOuts: 0, pendingHousekeeping: 0,
-    availableRooms: 0, cleaningRooms: 0,
+    availableHouses: 0, maintenanceHouses: 0,
   })
   const [recentReservations, setRecentReservations] = useState<Reservation[]>([])
   const [weeklyData, setWeeklyData] = useState<number[]>([60, 72, 65, 80, 78, 90, 85])
@@ -41,26 +41,26 @@ export default function DashboardPage() {
     if (!activeBranch) return
     const today = new Date().toISOString().split('T')[0]
 
-    const [roomsRes, checkInsRes, checkOutsRes, revenueRes, housekeepingRes, reservationsRes] = await Promise.all([
-      supabase.from('rooms').select('status').eq('branch_id', activeBranch.id),
+    const [housesRes, checkInsRes, checkOutsRes, revenueRes, housekeepingRes, reservationsRes] = await Promise.all([
+      supabase.from('houses').select('status').eq('branch_id', activeBranch.id),
       supabase.from('reservations').select('id').eq('branch_id', activeBranch.id).eq('check_in_date', today).in('status', ['confirmed', 'checked_in']),
       supabase.from('reservations').select('id').eq('branch_id', activeBranch.id).eq('check_out_date', today).eq('status', 'checked_in'),
       supabase.from('invoices').select('total').eq('branch_id', activeBranch.id).eq('status', 'paid').gte('paid_at', today + 'T00:00:00').lte('paid_at', today + 'T23:59:59'),
       supabase.from('housekeeping_tasks').select('id').eq('branch_id', activeBranch.id).in('status', ['pending', 'in_progress']),
-      supabase.from('reservations').select('*, guest:guests(full_name, phone), room:rooms(room_number, room_type)').eq('branch_id', activeBranch.id).order('created_at', { ascending: false }).limit(6),
+      supabase.from('reservations').select('*, guest:guests(full_name, phone), house:houses(name, house_type)').eq('branch_id', activeBranch.id).order('created_at', { ascending: false }).limit(6),
     ])
 
-    const rooms = roomsRes.data ?? []
-    const occupied = rooms.filter(r => r.status === 'occupied').length
-    const available = rooms.filter(r => r.status === 'available').length
-    const cleaning = rooms.filter(r => r.status === 'cleaning').length
+    const houseRows = housesRes.data ?? []
+    const occupied = houseRows.filter(h => h.status === 'occupied').length
+    const available = houseRows.filter(h => h.status === 'available').length
+    const maintenance = houseRows.filter(h => h.status === 'maintenance').length
     const revenue = (revenueRes.data ?? []).reduce((s, i) => s + Number(i.total), 0)
 
     setStats({
-      totalRooms: rooms.length,
-      occupiedRooms: occupied,
-      availableRooms: available,
-      cleaningRooms: cleaning,
+      totalHouses: houseRows.length,
+      occupiedHouses: occupied,
+      availableHouses: available,
+      maintenanceHouses: maintenance,
       todayRevenue: revenue,
       todayCheckIns: checkInsRes.data?.length ?? 0,
       todayCheckOuts: checkOutsRes.data?.length ?? 0,
@@ -71,7 +71,7 @@ export default function DashboardPage() {
     setLoading(false)
   }
 
-  const occupancyRate = stats.totalRooms > 0 ? Math.round((stats.occupiedRooms / stats.totalRooms) * 100) : 0
+  const occupancyRate = stats.totalHouses > 0 ? Math.round((stats.occupiedHouses / stats.totalHouses) * 100) : 0
   const maxBar = Math.max(...weeklyData, 1)
 
   return (
@@ -83,7 +83,7 @@ export default function DashboardPage() {
           <StatCard
             label="Occupancy Rate"
             value={`${occupancyRate}%`}
-            sub={`${stats.occupiedRooms} / ${stats.totalRooms} rooms`}
+            sub={`${stats.occupiedHouses} / ${stats.totalHouses} houses`}
             accent="#004AAD"
             progress={occupancyRate}
           />
@@ -96,7 +96,7 @@ export default function DashboardPage() {
           <StatCard
             label="Check-ins Today"
             value={stats.todayCheckIns}
-            sub={`${stats.availableRooms} rooms available`}
+            sub={`${stats.availableHouses} houses available`}
             accent="#1A7A4A"
           />
           <StatCard
@@ -128,16 +128,16 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Room Status Summary */}
+          {/* House Status Summary */}
           <div className="bg-white border border-hborder rounded-2xl p-5 shadow-card">
-            <h3 className="font-serif text-[17px] text-dark-navy">Room Status</h3>
-            <p className="text-xs text-hmuted mb-4">Current room availability breakdown</p>
+            <h3 className="font-serif text-[17px] text-dark-navy">House Status</h3>
+            <p className="text-xs text-hmuted mb-4">Current house availability breakdown</p>
             <div className="space-y-3">
               {[
-                { label: 'Available', count: stats.availableRooms, color: '#1A7A4A', bg: '#E8F5EE' },
-                { label: 'Occupied', count: stats.occupiedRooms, color: '#004AAD', bg: '#E8F0FB' },
-                { label: 'Cleaning', count: stats.cleaningRooms, color: '#A05C00', bg: '#FFF3E0' },
-                { label: 'Maintenance', count: stats.totalRooms - stats.availableRooms - stats.occupiedRooms - stats.cleaningRooms, color: '#B83232', bg: '#FDEAEA' },
+                { label: 'Available',   count: stats.availableHouses,   color: '#1A7A4A' },
+                { label: 'Occupied',    count: stats.occupiedHouses,    color: '#004AAD' },
+                { label: 'Maintenance', count: stats.maintenanceHouses, color: '#B83232' },
+                { label: 'Closed',      count: stats.totalHouses - stats.availableHouses - stats.occupiedHouses - stats.maintenanceHouses, color: '#6B7280' },
               ].map(row => (
                 <div key={row.label} className="flex items-center gap-3">
                   <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: row.color }} />
@@ -147,7 +147,7 @@ export default function DashboardPage() {
                     <div
                       className="h-full rounded-full"
                       style={{
-                        width: stats.totalRooms ? `${(row.count / stats.totalRooms) * 100}%` : '0%',
+                        width: stats.totalHouses ? `${(row.count / stats.totalHouses) * 100}%` : '0%',
                         background: row.color,
                       }}
                     />
@@ -170,7 +170,7 @@ export default function DashboardPage() {
                 <tr className="bg-hsurface2 text-left">
                   <th className="px-5 py-3 text-[11px] font-semibold text-hmuted uppercase tracking-wide">Ref</th>
                   <th className="px-5 py-3 text-[11px] font-semibold text-hmuted uppercase tracking-wide">Guest</th>
-                  <th className="px-5 py-3 text-[11px] font-semibold text-hmuted uppercase tracking-wide">Room</th>
+                  <th className="px-5 py-3 text-[11px] font-semibold text-hmuted uppercase tracking-wide">House</th>
                   <th className="px-5 py-3 text-[11px] font-semibold text-hmuted uppercase tracking-wide">Check-in</th>
                   <th className="px-5 py-3 text-[11px] font-semibold text-hmuted uppercase tracking-wide">Check-out</th>
                   <th className="px-5 py-3 text-[11px] font-semibold text-hmuted uppercase tracking-wide">Status</th>
@@ -189,7 +189,7 @@ export default function DashboardPage() {
                   <tr key={res.id} className="border-t border-hborder hover:bg-hbg/50 transition-colors">
                     <td className="px-5 py-3 font-mono text-xs text-hmuted">{res.reservation_number}</td>
                     <td className="px-5 py-3 font-medium text-htext">{(res.guest as any)?.full_name ?? '—'}</td>
-                    <td className="px-5 py-3 text-hmuted">{(res.room as any)?.room_number ?? '—'}</td>
+                    <td className="px-5 py-3 text-hmuted">{(res.house as any)?.name ?? '—'}</td>
                     <td className="px-5 py-3 text-hmuted">{formatDate(res.check_in_date)}</td>
                     <td className="px-5 py-3 text-hmuted">{formatDate(res.check_out_date)}</td>
                     <td className="px-5 py-3"><Badge status={res.status} /></td>
