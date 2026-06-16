@@ -11,11 +11,13 @@ ALTER TABLE journal_entries
 -- ─── 2. Unique bill number per branch (Bug Fix 3) ────────────────────────────
 DO $$
 BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint WHERE conname = 'bills_number_branch_unique'
-  ) THEN
-    ALTER TABLE bills ADD CONSTRAINT bills_number_branch_unique
-      UNIQUE (bill_number, branch_id);
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'bills' AND table_schema = 'public') THEN
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_constraint WHERE conname = 'bills_number_branch_unique'
+    ) THEN
+      ALTER TABLE bills ADD CONSTRAINT bills_number_branch_unique
+        UNIQUE (bill_number, branch_id);
+    END IF;
   END IF;
 END $$;
 
