@@ -225,6 +225,7 @@ export interface Invoice {
   invoice_number: string
   reservation_id?: string
   guest_id?: string
+  invoice_date: string
   subtotal: number
   tax_rate: number
   tax_amount: number

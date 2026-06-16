@@ -383,7 +383,7 @@ export default function BillingPage() {
                         : <span className="text-green-600">—</span>}
                     </td>
                     <td className="px-4 py-3"><Badge status={inv.status} /></td>
-                    <td className="px-4 py-3 text-xs text-hmuted whitespace-nowrap">{formatDate(inv.created_at)}</td>
+                    <td className="px-4 py-3 text-xs text-hmuted whitespace-nowrap">{formatDate(inv.invoice_date ?? inv.created_at)}</td>
                     <td className="px-4 py-3">
                       {!['paid', 'refunded', 'void'].includes(inv.status) && (
                         <Button size="sm" onClick={() => openPayment(inv)}>Record Payment</Button>
