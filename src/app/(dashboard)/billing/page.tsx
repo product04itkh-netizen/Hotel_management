@@ -291,6 +291,14 @@ export default function BillingPage() {
       branch_id: activeBranch.id,
     })
 
+    // Sync deposit back to reservation so Remaining column stays accurate
+    if (selectedInvoice.reservation_id) {
+      await supabase.from('reservations').update({
+        deposit: newPaid,
+        updated_at: new Date().toISOString(),
+      }).eq('id', selectedInvoice.reservation_id)
+    }
+
     if (newStatus === 'paid') {
       fetch('/api/telegram/notify', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
