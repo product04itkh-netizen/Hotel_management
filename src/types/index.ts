@@ -1,3 +1,32 @@
+// ─── Fixed Assets ─────────────────────────────────────────────────────────
+export type AssetCategory = 'land' | 'building' | 'computer_office' | 'furniture' | 'machinery' | 'vehicle'
+export type AssetStatus = 'active' | 'disposed' | 'maintenance'
+
+export interface FixedAsset {
+  id: string
+  description: string
+  category: AssetCategory
+  type_brand?: string
+  asset_code?: string
+  series_code?: string
+  purchased_date?: string
+  date_acquired?: string
+  date_disposed?: string
+  location?: string
+  incharge?: string
+  quantity: number
+  unit_cost: number
+  total_cost: number
+  depreciation_rate: number
+  is_depreciable: boolean
+  invoice_doc_ref?: string
+  notes?: string
+  status: AssetStatus
+  branch_id?: string
+  created_at: string
+  updated_at: string
+}
+
 // ─── Accounting ───────────────────────────────────────────────────────────
 export type AccountType = 'asset' | 'liability' | 'equity' | 'revenue' | 'expense'
 

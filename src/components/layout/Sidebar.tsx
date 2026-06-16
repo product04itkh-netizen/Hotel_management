@@ -21,6 +21,7 @@ const navItems = [
   { group: 'Finance', items: [
     { href: '/billing', label: 'Billing', icon: '💳' },
     { href: '/accounting', label: 'Accounting', icon: '📒' },
+    { href: '/assets', label: 'Fixed Assets', icon: '🏗️' },
   ]},
   { group: 'Management', items: [
     { href: '/reports', label: 'Reports', icon: '📈' },
