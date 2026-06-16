@@ -1,3 +1,57 @@
+// ─── Vendors & Bills ──────────────────────────────────────────────────────
+export interface Vendor {
+  id: string
+  name: string
+  contact_name?: string
+  email?: string
+  phone?: string
+  address?: string
+  tax_id?: string
+  payment_terms: number
+  notes?: string
+  is_active: boolean
+  branch_id?: string
+  created_at: string
+  updated_at: string
+}
+
+export type BillStatus = 'unpaid' | 'partial' | 'paid' | 'void'
+
+export interface Bill {
+  id: string
+  bill_number: string
+  vendor_id?: string
+  vendor?: Vendor
+  bill_date: string
+  due_date?: string
+  expense_account_id?: string
+  expense_account?: ChartOfAccount
+  description: string
+  subtotal: number
+  tax_amount: number
+  total: number
+  amount_paid: number
+  status: BillStatus
+  notes?: string
+  journal_entry_id?: string
+  branch_id?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface BillPayment {
+  id: string
+  bill_id: string
+  payment_date: string
+  amount: number
+  payment_method: string
+  reference?: string
+  notes?: string
+  journal_entry_id?: string
+  branch_id?: string
+  created_at: string
+}
+
 // ─── Fixed Assets ─────────────────────────────────────────────────────────
 export type AssetCategory = 'land' | 'building' | 'computer_office' | 'furniture' | 'machinery' | 'vehicle'
 export type AssetStatus = 'active' | 'disposed' | 'maintenance'
