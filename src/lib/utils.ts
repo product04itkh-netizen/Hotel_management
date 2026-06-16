@@ -96,3 +96,10 @@ export function getStatusBadgeClass(status: string): string {
 export function capitalize(str: string): string {
   return str.charAt(0).toUpperCase() + str.slice(1).replace(/_/g, ' ')
 }
+
+export function generateJournalEntryNumber(): string {
+  const date = new Date()
+  const dateStr = date.toISOString().slice(0, 10).replace(/-/g, '')
+  const rand = Math.floor(1000 + Math.random() * 9000)
+  return `JE-${dateStr}-${rand}`
+}

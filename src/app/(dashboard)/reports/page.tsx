@@ -26,13 +26,21 @@ interface BalanceSheet {
   netRevenue: number
 }
 
+interface PLData {
+  revenueByType: { name: string; amount: number }[]
+  expenseByCategory: { name: string; amount: number }[]
+  totalRevenue: number
+  totalExpenses: number
+  netIncome: number
+}
+
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 
 export default function ReportsPage() {
   const supabase = createClient()
   const { activeBranch } = useBranch()
   const [monthlyData, setMonthlyData] = useState<MonthlyData[]>([])
-  const [roomTypeStats, setRoomTypeStats] = useState<{ type: string; count: number }[]>([])
+  const [houseTypeStats, setHouseTypeStats] = useState<{ type: string; count: number }[]>([])
   const [sourceStats, setSourceStats] = useState<{ source: string; count: number }[]>([])
   const [loading, setLoading] = useState(true)
   const [kpis, setKpis] = useState({ totalRevenue: 0, totalGuests: 0, avgStay: 0, adr: 0, revpar: 0 })
@@ -40,6 +48,9 @@ export default function ReportsPage() {
     cashCollected: 0, accountsReceivable: 0, totalAssets: 0,
     unpaidTotal: 0, partialBalance: 0, refundsIssued: 0, totalLiabilities: 0,
     grossBilling: 0, totalDiscounts: 0, netRevenue: 0,
+  })
+  const [pl, setPl] = useState<PLData>({
+    revenueByType: [], expenseByCategory: [], totalRevenue: 0, totalExpenses: 0, netIncome: 0,
   })
 
   useEffect(() => { if (activeBranch) loadReports() }, [activeBranch]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -50,17 +61,19 @@ export default function ReportsPage() {
     sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 5)
     const startDate = sixMonthsAgo.toISOString().split('T')[0]
 
-    const [invRes, resRes, roomRes, allInvRes] = await Promise.all([
+    const [invRes, resRes, houseRes, allInvRes, jeLineRes] = await Promise.all([
       supabase.from('invoices').select('total, paid_at').eq('status', 'paid').eq('branch_id', activeBranch.id).gte('paid_at', startDate),
-      supabase.from('reservations').select('source, check_in_date, check_out_date, status, room:rooms(room_type)').eq('branch_id', activeBranch.id).gte('created_at', startDate),
-      supabase.from('rooms').select('room_type, status').eq('branch_id', activeBranch.id),
+      supabase.from('reservations').select('source, check_in_date, check_out_date, status, house:houses(house_type)').eq('branch_id', activeBranch.id).gte('created_at', startDate),
+      supabase.from('houses').select('house_type, status').eq('branch_id', activeBranch.id),
       supabase.from('invoices').select('total, amount_paid, status, discount_amount').eq('branch_id', activeBranch.id),
+      supabase.from('journal_entry_lines').select('debit, credit, account:chart_of_accounts(code, name, type, category)').gte('created_at', startDate),
     ])
 
     const invoices = invRes.data ?? []
     const reservations = resRes.data ?? []
-    const allRooms = roomRes.data ?? []
+    const allHouses = houseRes.data ?? []
     const allInvoices = allInvRes.data ?? []
+    const jeLines = jeLineRes.data ?? []
 
     // Monthly breakdown
     const months: MonthlyData[] = []
@@ -77,13 +90,13 @@ export default function ReportsPage() {
     }
     setMonthlyData(months)
 
-    // Room type distribution
+    // House type distribution
     const typeMap: Record<string, number> = {}
     reservations.forEach(r => {
-      const type = (r.room as any)?.room_type ?? 'unknown'
+      const type = (r.house as any)?.house_type ?? 'unknown'
       typeMap[type] = (typeMap[type] ?? 0) + 1
     })
-    setRoomTypeStats(Object.entries(typeMap).map(([type, count]) => ({ type, count })).sort((a, b) => b.count - a.count))
+    setHouseTypeStats(Object.entries(typeMap).map(([type, count]) => ({ type, count })).sort((a, b) => b.count - a.count))
 
     // Booking source
     const srcMap: Record<string, number> = {}
@@ -101,7 +114,7 @@ export default function ReportsPage() {
         }, 0) / stays.length
       : 0
     const adr = totalGuests > 0 ? totalRevenue / totalGuests : 0
-    const revpar = allRooms.length > 0 ? totalRevenue / (allRooms.length * 180) : 0
+    const revpar = allHouses.length > 0 ? totalRevenue / (allHouses.length * 180) : 0
 
     setKpis({ totalRevenue, totalGuests, avgStay: Math.round(avgStay * 10) / 10, adr, revpar })
 
@@ -137,6 +150,26 @@ export default function ReportsPage() {
       totalDiscounts,
       netRevenue: cashCollected - refundsIssued,
     })
+
+    // ── P&L from journal entry lines ──
+    const revenueMap: Record<string, number> = {}
+    const expenseMap: Record<string, number> = {}
+    jeLines.forEach((l: any) => {
+      const acct = l.account
+      if (!acct) return
+      if (acct.type === 'revenue' && Number(l.credit) > 0) {
+        revenueMap[acct.name] = (revenueMap[acct.name] ?? 0) + Number(l.credit)
+      }
+      if (acct.type === 'expense' && Number(l.debit) > 0) {
+        expenseMap[acct.name] = (expenseMap[acct.name] ?? 0) + Number(l.debit)
+      }
+    })
+    const plRevenue = Object.entries(revenueMap).map(([name, amount]) => ({ name, amount })).sort((a, b) => b.amount - a.amount)
+    const plExpense = Object.entries(expenseMap).map(([name, amount]) => ({ name, amount })).sort((a, b) => b.amount - a.amount)
+    const plTotalRev = plRevenue.reduce((s, r) => s + r.amount, 0)
+    const plTotalExp = plExpense.reduce((s, e) => s + e.amount, 0)
+    setPl({ revenueByType: plRevenue, expenseByCategory: plExpense, totalRevenue: plTotalRev, totalExpenses: plTotalExp, netIncome: plTotalRev - plTotalExp })
+
     setLoading(false)
   }
 
@@ -288,11 +321,11 @@ export default function ReportsPage() {
 
   const maxRevenue = Math.max(...monthlyData.map(m => m.revenue), 1)
   const maxRes = Math.max(...monthlyData.map(m => m.reservations), 1)
-  const totalRoomType = roomTypeStats.reduce((s, r) => s + r.count, 0)
+  const totalHouseType = houseTypeStats.reduce((s, r) => s + r.count, 0)
   const totalSource = sourceStats.reduce((s, r) => s + r.count, 0)
 
-  const TYPE_COLORS: Record<string, string> = {
-    standard: '#004AAD', deluxe: '#C89B3C', suite: '#1A7A4A', presidential: '#B83232',
+  const HOUSE_TYPE_COLORS: Record<string, string> = {
+    villa: '#004AAD', bungalow: '#C89B3C', homestay: '#1A7A4A', cottage: '#7C3AED', cabin: '#B83232', chalet: '#0EA5E9',
   }
 
   return (
@@ -449,27 +482,105 @@ export default function ReportsPage() {
           </div>
         </div>
 
+        {/* P&L Statement */}
+        <div className="bg-white border border-hborder rounded-2xl shadow-card mb-5 overflow-hidden">
+          <div className="px-6 py-4 border-b border-hborder">
+            <h3 className="font-serif text-[17px] text-dark-navy">Profit & Loss Statement</h3>
+            <p className="text-xs text-hmuted mt-0.5">From General Ledger — last 6 months</p>
+          </div>
+          {pl.revenueByType.length === 0 && pl.expenseByCategory.length === 0 ? (
+            <p className="text-hmuted text-sm text-center py-10">No GL entries yet. P&L populates automatically when invoices are paid.</p>
+          ) : (
+            <div className="grid grid-cols-3 divide-x divide-hborder">
+              {/* Revenue */}
+              <div className="p-5">
+                <p className="text-[11px] font-semibold tracking-widest text-[#1A7A4A] uppercase mb-3">Revenue</p>
+                <div className="space-y-2.5">
+                  {pl.revenueByType.length === 0 ? (
+                    <p className="text-xs text-hmuted py-2">No revenue entries</p>
+                  ) : pl.revenueByType.map(r => (
+                    <div key={r.name} className="flex justify-between text-sm">
+                      <span className="text-hmuted">{r.name}</span>
+                      <span className="font-semibold text-dark-navy">{formatCurrency(r.amount)}</span>
+                    </div>
+                  ))}
+                  <div className="flex justify-between text-sm border-t border-hborder pt-2.5 mt-1">
+                    <span className="font-semibold text-[#1A7A4A]">Total Revenue</span>
+                    <span className="font-bold text-[#1A7A4A] text-base">{formatCurrency(pl.totalRevenue)}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Expenses */}
+              <div className="p-5">
+                <p className="text-[11px] font-semibold tracking-widest text-[#B83232] uppercase mb-3">Expenses</p>
+                <div className="space-y-2.5">
+                  {pl.expenseByCategory.length === 0 ? (
+                    <p className="text-xs text-hmuted py-2">No expense entries</p>
+                  ) : pl.expenseByCategory.map(e => (
+                    <div key={e.name} className="flex justify-between text-sm">
+                      <span className="text-hmuted">{e.name}</span>
+                      <span className="font-semibold text-dark-navy">{formatCurrency(e.amount)}</span>
+                    </div>
+                  ))}
+                  <div className="flex justify-between text-sm border-t border-hborder pt-2.5 mt-1">
+                    <span className="font-semibold text-[#B83232]">Total Expenses</span>
+                    <span className="font-bold text-[#B83232] text-base">{formatCurrency(pl.totalExpenses)}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Net Income */}
+              <div className="p-5 bg-hsurface2/40">
+                <p className="text-[11px] font-semibold tracking-widest text-[#004AAD] uppercase mb-3">Net Income</p>
+                <div className="space-y-4">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-hmuted">Total Revenue</span>
+                    <span className="font-semibold text-dark-navy">{formatCurrency(pl.totalRevenue)}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-hmuted">Less: Total Expenses</span>
+                    <span className="font-semibold text-dark-navy">({formatCurrency(pl.totalExpenses)})</span>
+                  </div>
+                  <div className="flex justify-between text-sm border-t border-hborder pt-3 mt-1">
+                    <span className="font-semibold text-[#004AAD]">Net Income</span>
+                    <span className={`font-bold text-base ${pl.netIncome >= 0 ? 'text-[#1A7A4A]' : 'text-[#B83232]'}`}>
+                      {pl.netIncome < 0 ? `(${formatCurrency(Math.abs(pl.netIncome))})` : formatCurrency(pl.netIncome)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-hmuted">Net Margin</span>
+                    <span className="font-semibold text-dark-navy">
+                      {pl.totalRevenue > 0 ? `${Math.round((pl.netIncome / pl.totalRevenue) * 100)}%` : '—'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
         <div className="grid grid-cols-2 gap-5">
-          {/* Room type distribution */}
+          {/* House type distribution */}
           <div className="bg-white border border-hborder rounded-2xl p-5 shadow-card">
-            <h3 className="font-serif text-[17px] text-dark-navy mb-1">Room Type Popularity</h3>
-            <p className="text-xs text-hmuted mb-4">Bookings by room type (last 6 months)</p>
-            {roomTypeStats.length === 0 ? (
+            <h3 className="font-serif text-[17px] text-dark-navy mb-1">House Type Bookings</h3>
+            <p className="text-xs text-hmuted mb-4">Reservations by house type (last 6 months)</p>
+            {houseTypeStats.length === 0 ? (
               <p className="text-hmuted text-sm text-center py-6">No data yet</p>
             ) : (
               <div className="space-y-3">
-                {roomTypeStats.map(r => (
+                {houseTypeStats.map(r => (
                   <div key={r.type} className="flex items-center gap-3">
-                    <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: TYPE_COLORS[r.type] ?? '#888' }} />
+                    <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: HOUSE_TYPE_COLORS[r.type] ?? '#888' }} />
                     <span className="text-sm text-htext flex-1 capitalize">{r.type}</span>
                     <span className="text-sm font-semibold text-dark-navy">{r.count}</span>
                     <div className="w-28 h-1.5 bg-hsurface2 rounded-full overflow-hidden">
                       <div
                         className="h-full rounded-full"
-                        style={{ width: `${(r.count / totalRoomType) * 100}%`, background: TYPE_COLORS[r.type] ?? '#888' }}
+                        style={{ width: `${(r.count / totalHouseType) * 100}%`, background: HOUSE_TYPE_COLORS[r.type] ?? '#888' }}
                       />
                     </div>
-                    <span className="text-xs text-hmuted w-8 text-right">{Math.round((r.count / totalRoomType) * 100)}%</span>
+                    <span className="text-xs text-hmuted w-8 text-right">{Math.round((r.count / totalHouseType) * 100)}%</span>
                   </div>
                 ))}
               </div>

@@ -1,3 +1,99 @@
+// ─── Accounting ───────────────────────────────────────────────────────────
+export type AccountType = 'asset' | 'liability' | 'equity' | 'revenue' | 'expense'
+
+export interface ChartOfAccount {
+  id: string
+  code: string
+  name: string
+  type: AccountType
+  category: string
+  is_active: boolean
+  branch_id?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface JournalEntryLine {
+  id: string
+  entry_id: string
+  account_id: string
+  account?: ChartOfAccount
+  description?: string
+  debit: number
+  credit: number
+  created_at: string
+}
+
+export interface JournalEntry {
+  id: string
+  entry_number: string
+  entry_date: string
+  reference?: string
+  reference_type?: string
+  description: string
+  branch_id?: string
+  created_by?: string
+  created_at: string
+  updated_at: string
+  lines?: JournalEntryLine[]
+}
+
+export interface PettyCashTransaction {
+  id: string
+  transaction_date: string
+  description: string
+  category: string
+  amount: number
+  transaction_type: 'in' | 'out'
+  reference?: string
+  journal_entry_id?: string
+  branch_id?: string
+  created_at: string
+}
+
+export interface PaymentTransaction {
+  id: string
+  invoice_id: string
+  amount: number
+  payment_method: string
+  payment_date: string
+  notes?: string
+  journal_entry_id?: string
+  branch_id?: string
+  created_at: string
+  invoice?: Invoice
+}
+
+// ─── House ────────────────────────────────────────────────────────────────
+export type HouseType = 'villa' | 'bungalow' | 'homestay' | 'cottage' | 'cabin' | 'chalet'
+export type HouseStatus = 'available' | 'occupied' | 'maintenance' | 'closed'
+
+export interface House {
+  id: string
+  name: string
+  house_type: HouseType
+  branch_id?: string
+  branch?: Branch
+  capacity: number
+  base_rate_per_night: number
+  status: HouseStatus
+  amenities: string[]
+  description?: string
+  rooms?: Room[]
+  created_at: string
+  updated_at: string
+}
+
+// ─── Reservation Line Item ────────────────────────────────────────────────
+export interface ReservationLineItem {
+  id?: string
+  reservation_id?: string
+  label: string
+  amount: number
+  sort_order?: number
+  created_at?: string
+}
+
 // ─── Branch ───────────────────────────────────────────────────────────────
 export interface Branch {
   id: string
@@ -26,6 +122,8 @@ export interface Room {
   max_children: number
   amenities: string[]
   description?: string
+  house_id?: string
+  house?: House
   branch_id?: string
   branch?: Branch
   created_at: string
@@ -68,13 +166,19 @@ export interface Reservation {
   special_requests?: string
   source: BookingSource
   notes?: string
+  deposit?: number
+  pax_count?: number
+  arrival_time?: string
   created_by?: string
+  house_id?: string
+  house?: House
   branch_id?: string
   branch?: Branch
   created_at: string
   updated_at: string
   guest?: Guest
   room?: Room
+  line_items?: ReservationLineItem[]
 }
 
 export type InvoiceStatus = 'unpaid' | 'partial' | 'paid' | 'refunded' | 'void'

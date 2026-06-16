@@ -15,11 +15,12 @@ const navItems = [
   { group: 'Operations', items: [
     { href: '/reservations', label: 'Reservations', icon: '📅' },
     { href: '/front-desk', label: 'Front Desk', icon: '🏨' },
-    { href: '/rooms', label: 'Room Management', icon: '🛏' },
+    { href: '/rooms', label: 'Properties', icon: '🏡' },
     { href: '/housekeeping', label: 'Housekeeping', icon: '🧹' },
   ]},
   { group: 'Finance', items: [
     { href: '/billing', label: 'Billing', icon: '💳' },
+    { href: '/accounting', label: 'Accounting', icon: '📒' },
   ]},
   { group: 'Management', items: [
     { href: '/reports', label: 'Reports', icon: '📈' },
