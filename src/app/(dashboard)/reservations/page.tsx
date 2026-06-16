@@ -54,6 +54,13 @@ export default function ReservationsPage() {
   const [paxCount, setPaxCount] = useState<number | string>('')
   const [arrivalTime, setArrivalTime] = useState('')
   const [saving, setSaving] = useState(false)
+  const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list')
+  const [calMonth, setCalMonth] = useState<Date>(() => {
+    const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0); return d
+  })
+  const [houseFilter, setHouseFilter] = useState('all')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
 
   useEffect(() => {
     if (activeBranch) loadData()
@@ -82,7 +89,10 @@ export default function ReservationsPage() {
       || guestName.toLowerCase().includes(search.toLowerCase())
       || r.reservation_number.toLowerCase().includes(search.toLowerCase())
     const matchStatus = statusFilter === 'all' || r.status === statusFilter
-    return matchSearch && matchStatus
+    const matchHouse = houseFilter === 'all' || r.house_id === houseFilter
+    const matchFrom = !dateFrom || r.check_in_date >= dateFrom
+    const matchTo = !dateTo || r.check_in_date <= dateTo
+    return matchSearch && matchStatus && matchHouse && matchFrom && matchTo
   })
 
   function openCreate() {
@@ -271,99 +281,375 @@ export default function ReservationsPage() {
       <div className="p-8 flex-1 section-enter">
 
         {/* Toolbar */}
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3 mb-6">
+          {/* Filters */}
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search guest or ref…"
+            className="border border-hborder rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-navy w-48"
+          />
+          <select
+            value={statusFilter}
+            onChange={e => setStatusFilter(e.target.value)}
+            className="border border-hborder rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-navy"
+          >
+            {STATUSES.map(s => (
+              <option key={s} value={s}>{s === 'all' ? 'All Statuses' : capitalize(s.replace('_', ' '))}</option>
+            ))}
+          </select>
+          <select
+            value={houseFilter}
+            onChange={e => setHouseFilter(e.target.value)}
+            className="border border-hborder rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-navy"
+          >
+            <option value="all">All Properties</option>
+            {houses.map(h => <option key={h.id} value={h.id}>{h.name}</option>)}
+          </select>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-hmuted whitespace-nowrap">From</span>
             <input
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              placeholder="Search by guest or ref…"
-              className="border border-hborder rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-navy w-60"
-            />
-            <select
-              value={statusFilter}
-              onChange={e => setStatusFilter(e.target.value)}
+              type="date"
+              value={dateFrom}
+              onChange={e => {
+                const v = e.target.value
+                setDateFrom(v)
+                if (v && viewMode === 'calendar') {
+                  const d = new Date(v + 'T00:00:00')
+                  d.setDate(1)
+                  setCalMonth(d)
+                }
+              }}
               className="border border-hborder rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-navy"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-hmuted whitespace-nowrap">To</span>
+            <input
+              type="date"
+              value={dateTo}
+              onChange={e => {
+                const v = e.target.value
+                setDateTo(v)
+                if (v && !dateFrom && viewMode === 'calendar') {
+                  const d = new Date(v + 'T00:00:00')
+                  d.setDate(1)
+                  setCalMonth(d)
+                }
+              }}
+              className="border border-hborder rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-navy"
+            />
+          </div>
+          {(dateFrom || dateTo || houseFilter !== 'all' || statusFilter !== 'all' || search) && (
+            <button
+              onClick={() => { setSearch(''); setStatusFilter('all'); setHouseFilter('all'); setDateFrom(''); setDateTo('') }}
+              className="text-xs text-hmuted hover:text-red-500 transition-colors px-2 py-2"
             >
-              {STATUSES.map(s => (
-                <option key={s} value={s}>{s === 'all' ? 'All Statuses' : capitalize(s)}</option>
-              ))}
-            </select>
+              ✕ Clear
+            </button>
+          )}
+          {/* Spacer */}
+          <div className="flex-1" />
+          {/* View toggle + action */}
+          <div className="flex rounded-lg border border-hborder overflow-hidden">
+            <button
+              onClick={() => setViewMode('list')}
+              className={`px-3 py-2 text-xs font-medium transition-colors ${viewMode === 'list' ? 'bg-navy text-white' : 'bg-white text-hmuted hover:bg-hbg'}`}
+            >
+              ☰ List
+            </button>
+            <button
+              onClick={() => setViewMode('calendar')}
+              className={`px-3 py-2 text-xs font-medium transition-colors border-l border-hborder ${viewMode === 'calendar' ? 'bg-navy text-white' : 'bg-white text-hmuted hover:bg-hbg'}`}
+            >
+              ▦ Calendar
+            </button>
           </div>
           <Button onClick={openCreate}>+ New Reservation</Button>
         </div>
 
-        {/* Table */}
-        <div className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-hsurface2">
-                  {['Ref', 'Guest', 'House', 'Check-in', 'Check-out', 'Pax', 'Add-ons', 'Total', 'Deposit', 'Remaining', 'Status', 'Actions'].map(h => (
-                    <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide whitespace-nowrap">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {loading ? (
-                  <tr><td colSpan={12} className="px-5 py-10 text-center text-hmuted">Loading…</td></tr>
-                ) : filtered.length === 0 ? (
-                  <tr><td colSpan={12} className="px-5 py-10 text-center text-hmuted">No reservations found</td></tr>
-                ) : filtered.map(res => {
-                  const itemCount = (res.line_items ?? []).length
-                  const dep = res.deposit ?? 0
-                  const pax = res.pax_count
-                  return (
-                    <tr key={res.id} className="border-t border-hborder hover:bg-hbg/40 transition-colors">
-                      <td className="px-4 py-3 font-mono text-xs text-hmuted whitespace-nowrap">{res.reservation_number}</td>
-                      <td className="px-4 py-3">
-                        <p className="font-medium text-htext">{(res.guest as any)?.full_name ?? '—'}</p>
-                        <p className="text-xs text-hmuted">{(res.guest as any)?.phone ?? ''}</p>
-                      </td>
-                      <td className="px-4 py-3 text-hmuted">{(res.house as any)?.name ?? '—'}</td>
-                      <td className="px-4 py-3 text-hmuted whitespace-nowrap">{formatDate(res.check_in_date)}</td>
-                      <td className="px-4 py-3 text-hmuted whitespace-nowrap">{formatDate(res.check_out_date)}</td>
-                      <td className="px-4 py-3 text-hmuted">{pax != null ? `${pax} pax` : `${res.adults}A`}</td>
-                      <td className="px-4 py-3">
-                        {itemCount > 0 ? (
-                          <span className="inline-flex items-center gap-1 bg-navy/10 text-navy text-xs px-2 py-0.5 rounded-full font-medium">
-                            +{itemCount}
-                          </span>
-                        ) : <span className="text-hmuted text-xs">—</span>}
-                      </td>
-                      <td className="px-4 py-3 font-medium text-htext whitespace-nowrap">
-                        {res.total_amount ? formatCurrency(res.total_amount) : '—'}
-                      </td>
-                      <td className="px-4 py-3 text-hmuted whitespace-nowrap">
-                        {dep > 0 ? (
-                          <span className="text-green-700 font-medium">{formatCurrency(dep)}</span>
-                        ) : '—'}
-                      </td>
-                      <td className="px-4 py-3 whitespace-nowrap">
-                        {res.total_amount != null ? (() => {
-                          const remaining = (res.total_amount ?? 0) - dep
-                          return remaining > 0
-                            ? <span className="text-red-600 font-medium">{formatCurrency(remaining)}</span>
-                            : remaining === 0
-                              ? <span className="text-green-700 font-medium">Paid</span>
-                              : '—'
-                        })() : '—'}
-                      </td>
-                      <td className="px-4 py-3"><Badge status={res.status} /></td>
-                      <td className="px-4 py-3">
-                        <div className="flex gap-2">
-                          <button onClick={() => openEdit(res)} className="text-xs text-navy hover:underline">Edit</button>
-                          {!['cancelled', 'checked_out', 'no_show'].includes(res.status) && (
-                            <button onClick={() => handleCancel(res.id)} className="text-xs text-red-500 hover:underline">Cancel</button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+        {/* ── LIST VIEW ── */}
+        {viewMode === 'list' && (
+          <div className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-hsurface2">
+                    {['Ref', 'Guest', 'House', 'Check-in', 'Check-out', 'Pax', 'Add-ons', 'Total', 'Deposit', 'Remaining', 'Status', 'Actions'].map(h => (
+                      <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide whitespace-nowrap">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {loading ? (
+                    <tr><td colSpan={12} className="px-5 py-10 text-center text-hmuted">Loading…</td></tr>
+                  ) : filtered.length === 0 ? (
+                    <tr><td colSpan={12} className="px-5 py-10 text-center text-hmuted">No reservations found</td></tr>
+                  ) : filtered.map(res => {
+                    const itemCount = (res.line_items ?? []).length
+                    const dep = res.deposit ?? 0
+                    const pax = res.pax_count
+                    return (
+                      <tr key={res.id} className="border-t border-hborder hover:bg-hbg/40 transition-colors">
+                        <td className="px-4 py-3 font-mono text-xs text-hmuted whitespace-nowrap">{res.reservation_number}</td>
+                        <td className="px-4 py-3">
+                          <p className="font-medium text-htext">{(res.guest as any)?.full_name ?? '—'}</p>
+                          <p className="text-xs text-hmuted">{(res.guest as any)?.phone ?? ''}</p>
+                        </td>
+                        <td className="px-4 py-3 text-hmuted">{(res.house as any)?.name ?? '—'}</td>
+                        <td className="px-4 py-3 text-hmuted whitespace-nowrap">{formatDate(res.check_in_date)}</td>
+                        <td className="px-4 py-3 text-hmuted whitespace-nowrap">{formatDate(res.check_out_date)}</td>
+                        <td className="px-4 py-3 text-hmuted">{pax != null ? `${pax} pax` : `${res.adults}A`}</td>
+                        <td className="px-4 py-3">
+                          {itemCount > 0 ? (
+                            <span className="inline-flex items-center gap-1 bg-navy/10 text-navy text-xs px-2 py-0.5 rounded-full font-medium">
+                              +{itemCount}
+                            </span>
+                          ) : <span className="text-hmuted text-xs">—</span>}
+                        </td>
+                        <td className="px-4 py-3 font-medium text-htext whitespace-nowrap">
+                          {res.total_amount ? formatCurrency(res.total_amount) : '—'}
+                        </td>
+                        <td className="px-4 py-3 text-hmuted whitespace-nowrap">
+                          {dep > 0 ? (
+                            <span className="text-green-700 font-medium">{formatCurrency(dep)}</span>
+                          ) : '—'}
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          {res.total_amount != null ? (() => {
+                            const remaining = (res.total_amount ?? 0) - dep
+                            return remaining > 0
+                              ? <span className="text-red-600 font-medium">{formatCurrency(remaining)}</span>
+                              : remaining === 0
+                                ? <span className="text-green-700 font-medium">Paid</span>
+                                : '—'
+                          })() : '—'}
+                        </td>
+                        <td className="px-4 py-3"><Badge status={res.status} /></td>
+                        <td className="px-4 py-3">
+                          <div className="flex gap-2">
+                            <button onClick={() => openEdit(res)} className="text-xs text-navy hover:underline">Edit</button>
+                            {!['cancelled', 'checked_out', 'no_show'].includes(res.status) && (
+                              <button onClick={() => handleCancel(res.id)} className="text-xs text-red-500 hover:underline">Cancel</button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
+        )}
+
+        {/* ── CALENDAR / GRID VIEW ── */}
+        {viewMode === 'calendar' && (() => {
+          const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December']
+          const DAY_LABELS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']
+          const todayStr = new Date().toISOString().slice(0, 10)
+
+          const statusColor: Record<string, { bg: string; text: string; border: string }> = {
+            confirmed:   { bg: '#dcfce7', text: '#15803d', border: '#86efac' },
+            checked_in:  { bg: '#dbeafe', text: '#1d4ed8', border: '#93c5fd' },
+            pending:     { bg: '#fef9c3', text: '#854d0e', border: '#fde047' },
+            checked_out: { bg: '#f1f5f9', text: '#475569', border: '#cbd5e1' },
+            cancelled:   { bg: '#fee2e2', text: '#b91c1c', border: '#fca5a5' },
+            no_show:     { bg: '#fdf4ff', text: '#7e22ce', border: '#d8b4fe' },
+          }
+
+          function toDStr(d: Date) {
+            return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
+          }
+
+          const visibleHouses = houseFilter === 'all' ? houses : houses.filter(h => h.id === houseFilter)
+
+          // Determine which months to display
+          const monthsToShow: Date[] = []
+          if (dateFrom || dateTo) {
+            const start = new Date((dateFrom || dateTo)! + 'T00:00:00')
+            start.setDate(1)
+            const end = new Date((dateTo || dateFrom)! + 'T00:00:00')
+            const cur = new Date(start)
+            while (cur <= end) {
+              monthsToShow.push(new Date(cur))
+              cur.setMonth(cur.getMonth() + 1)
+            }
+          } else {
+            monthsToShow.push(new Date(calMonth))
+          }
+
+          // Reservations for a specific day (optionally filtered by status)
+          function getDayRes(dayStr: string) {
+            return visibleHouses.flatMap(house =>
+              reservations
+                .filter(r =>
+                  r.house_id === house.id &&
+                  r.check_in_date <= dayStr &&
+                  r.check_out_date > dayStr &&
+                  (statusFilter === 'all' || r.status === statusFilter)
+                )
+                .map(r => ({ house, r }))
+            )
+          }
+
+          function renderMonth(mStart: Date) {
+            const yr = mStart.getFullYear()
+            const mo = mStart.getMonth()
+            const dim = new Date(yr, mo + 1, 0).getDate()
+
+            // ISO week: Mon=0 … Sun=6
+            const firstDow = (new Date(yr, mo, 1).getDay() + 6) % 7
+            const cells: (Date | null)[] = [
+              ...Array(firstDow).fill(null),
+              ...Array.from({ length: dim }, (_, i) => new Date(yr, mo, i + 1)),
+            ]
+            while (cells.length % 7 !== 0) cells.push(null)
+
+            const weeks: (Date | null)[][] = []
+            for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7))
+
+            return (
+              <div key={`${yr}-${mo}`} className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden mb-6">
+                {/* Month title */}
+                <div className="px-5 py-3 border-b border-hborder bg-hsurface2 flex items-center justify-between">
+                  <h3 className="text-sm font-bold text-htext">{MONTH_NAMES[mo]} {yr}</h3>
+                  <div className="flex items-center gap-3">
+                    {Object.entries(statusColor).map(([s, c]) => (
+                      <span key={s} className="flex items-center gap-1 text-[10px] font-medium whitespace-nowrap" style={{ color: c.text }}>
+                        <span className="w-2 h-2 rounded-sm inline-block flex-none" style={{ background: c.bg, border: `1px solid ${c.border}` }} />
+                        {capitalize(s.replace('_', ' '))}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Day-of-week header */}
+                <div className="grid grid-cols-7 border-b border-hborder">
+                  {DAY_LABELS.map(d => (
+                    <div
+                      key={d}
+                      className={`py-2 text-center text-[11px] font-semibold uppercase tracking-wide border-r border-hborder last:border-r-0 ${
+                        d === 'Sat' || d === 'Sun' ? 'text-amber-600 bg-amber-50/50' : 'text-hmuted bg-hsurface2'
+                      }`}
+                    >
+                      {d}
+                    </div>
+                  ))}
+                </div>
+
+                {/* Week rows */}
+                {weeks.map((week, wi) => (
+                  <div key={wi} className="grid grid-cols-7 border-b border-hborder last:border-b-0">
+                    {week.map((day, di) => {
+                      const isWeekend = di >= 5
+                      if (!day) {
+                        return (
+                          <div
+                            key={di}
+                            className={`border-r border-hborder last:border-r-0 min-h-[90px] ${isWeekend ? 'bg-amber-50/20' : 'bg-hbg/30'}`}
+                          />
+                        )
+                      }
+                      const ds = toDStr(day)
+                      const isToday = ds === todayStr
+                      const entries = getDayRes(ds)
+                      return (
+                        <div
+                          key={di}
+                          className={`border-r border-hborder last:border-r-0 min-h-[90px] p-1.5 ${
+                            isToday
+                              ? 'bg-blue-50/70 ring-1 ring-inset ring-blue-300'
+                              : isWeekend
+                                ? 'bg-amber-50/30'
+                                : 'bg-white'
+                          }`}
+                        >
+                          {/* Date number */}
+                          <div className="flex justify-end mb-1">
+                            <span
+                              className={`text-[11px] font-bold w-5 h-5 flex items-center justify-center rounded-full ${
+                                isToday ? 'bg-blue-600 text-white' : isWeekend ? 'text-amber-600' : 'text-hmuted'
+                              }`}
+                            >
+                              {day.getDate()}
+                            </span>
+                          </div>
+
+                          {/* Reservation chips */}
+                          <div className="space-y-[3px]">
+                            {entries.map(({ house, r }) => {
+                              const sc = statusColor[r.status] ?? statusColor.confirmed
+                              const guestName = (r.guest as any)?.full_name ?? 'Guest'
+                              const isCI = r.check_in_date === ds
+                              const isCO = r.check_out_date === ds
+                              return (
+                                <button
+                                  key={r.id}
+                                  onClick={() => openEdit(r)}
+                                  title={`${guestName} · ${formatDate(r.check_in_date)} → ${formatDate(r.check_out_date)}`}
+                                  className="w-full text-left rounded-[4px] px-1.5 py-[3px] text-[10px] font-semibold leading-tight truncate block hover:opacity-80 transition-opacity"
+                                  style={{ background: sc.bg, color: sc.text, border: `1.5px solid ${sc.border}` }}
+                                >
+                                  {isCI && <span className="mr-0.5 opacity-60">▶</span>}
+                                  {isCO && <span className="mr-0.5 opacity-60">◀</span>}
+                                  {guestName}
+                                  {visibleHouses.length > 1 && (
+                                    <span className="opacity-60 ml-1">· {house.name}</span>
+                                  )}
+                                </button>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                ))}
+              </div>
+            )
+          }
+
+          return (
+            <div>
+              {/* Nav bar — only when no date range set */}
+              {!dateFrom && !dateTo && (
+                <div className="flex items-center gap-2 mb-5">
+                  <button
+                    onClick={() => { const d = new Date(calMonth); d.setMonth(d.getMonth()-1); setCalMonth(d) }}
+                    className="px-3 py-1.5 text-xs rounded-lg border border-hborder bg-white text-hmuted hover:bg-hbg transition-colors"
+                  >
+                    ← Prev
+                  </button>
+                  <button
+                    onClick={() => { const d = new Date(); d.setDate(1); d.setHours(0,0,0,0); setCalMonth(d) }}
+                    className="px-3 py-1.5 text-xs rounded-lg border border-hborder bg-white text-navy font-semibold hover:bg-hbg transition-colors"
+                  >
+                    Today
+                  </button>
+                  <button
+                    onClick={() => { const d = new Date(calMonth); d.setMonth(d.getMonth()+1); setCalMonth(d) }}
+                    className="px-3 py-1.5 text-xs rounded-lg border border-hborder bg-white text-hmuted hover:bg-hbg transition-colors"
+                  >
+                    Next →
+                  </button>
+                  <span className="text-xs text-hmuted ml-2">{MONTH_NAMES[calMonth.getMonth()]} {calMonth.getFullYear()}</span>
+                </div>
+              )}
+              {dateFrom && dateTo && (
+                <p className="text-xs text-hmuted mb-5">
+                  Showing {monthsToShow.length} month{monthsToShow.length > 1 ? 's' : ''} · {formatDate(dateFrom)} → {formatDate(dateTo)}
+                </p>
+              )}
+
+              {loading ? (
+                <div className="bg-white border border-hborder rounded-2xl p-12 text-center text-hmuted text-sm">Loading…</div>
+              ) : (
+                monthsToShow.map(m => renderMonth(m))
+              )}
+            </div>
+          )
+        })()}
       </div>
 
       {/* Create / Edit Modal */}

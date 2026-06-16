@@ -61,13 +61,21 @@ export default function ReportsPage() {
     sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 5)
     const startDate = sixMonthsAgo.toISOString().split('T')[0]
 
-    const [invRes, resRes, houseRes, allInvRes, jeLineRes] = await Promise.all([
+    const [invRes, resRes, houseRes, allInvRes] = await Promise.all([
       supabase.from('invoices').select('total, paid_at').eq('status', 'paid').eq('branch_id', activeBranch.id).gte('paid_at', startDate),
       supabase.from('reservations').select('source, check_in_date, check_out_date, status, house:houses(house_type)').eq('branch_id', activeBranch.id).gte('created_at', startDate),
       supabase.from('houses').select('house_type, status').eq('branch_id', activeBranch.id),
       supabase.from('invoices').select('total, amount_paid, status, discount_amount').eq('branch_id', activeBranch.id),
-      supabase.from('journal_entry_lines').select('debit, credit, account:chart_of_accounts(code, name, type, category)').gte('created_at', startDate),
     ])
+    // 2-step: get this branch's JE IDs first, then fetch their lines (journal_entry_lines has no branch_id)
+    const { data: jeIdData } = await supabase.from('journal_entries')
+      .select('id').eq('branch_id', activeBranch.id).eq('is_void', false).gte('entry_date', startDate)
+    const jeIdList = (jeIdData ?? []).map((e: any) => e.id)
+    const jeLineRes = jeIdList.length > 0
+      ? await supabase.from('journal_entry_lines')
+          .select('debit, credit, account:chart_of_accounts(code, name, type, category)')
+          .in('entry_id', jeIdList)
+      : { data: [] as any[] }
 
     const invoices = invRes.data ?? []
     const reservations = resRes.data ?? []

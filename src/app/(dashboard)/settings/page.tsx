@@ -144,14 +144,16 @@ export default function SettingsPage() {
   return (
     <>
       <TopBar title="Settings" subtitle="Property configuration & integrations" />
-      <div className="p-8 flex-1 section-enter max-w-3xl">
-        <div className="space-y-6">
-          {/* Hotel Info */}
-          <div className="bg-white border border-hborder rounded-2xl p-6 shadow-card">
-            <h3 className="font-serif text-lg text-dark-navy mb-4">Property Information</h3>
-            <div className="space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="col-span-2">
+      <div className="p-6 flex-1 section-enter overflow-auto">
+        <div className="grid grid-cols-2 gap-6 items-start">
+
+          {/* LEFT COLUMN */}
+          <div className="space-y-6">
+            {/* Property Info */}
+            <div className="bg-white border border-hborder rounded-2xl p-6 shadow-card">
+              <h3 className="font-serif text-lg text-dark-navy mb-4">Property Information</h3>
+              <div className="space-y-3">
+                <div>
                   <label className="block text-xs text-hmuted mb-1">Property Name</label>
                   <input
                     value={form.hotel_name}
@@ -159,7 +161,7 @@ export default function SettingsPage() {
                     className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg"
                   />
                 </div>
-                <div className="col-span-2">
+                <div>
                   <label className="block text-xs text-hmuted mb-1">Address</label>
                   <input
                     value={form.hotel_address}
@@ -168,146 +170,152 @@ export default function SettingsPage() {
                     className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg"
                   />
                 </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs text-hmuted mb-1">Phone</label>
+                    <input
+                      value={form.hotel_phone}
+                      onChange={e => setForm(f => ({ ...f, hotel_phone: e.target.value }))}
+                      className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-hmuted mb-1">Email</label>
+                    <input
+                      type="email"
+                      value={form.hotel_email}
+                      onChange={e => setForm(f => ({ ...f, hotel_email: e.target.value }))}
+                      className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Operations */}
+            <div className="bg-white border border-hborder rounded-2xl p-6 shadow-card">
+              <h3 className="font-serif text-lg text-dark-navy mb-4">Operations</h3>
+              <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs text-hmuted mb-1">Phone</label>
+                  <label className="block text-xs text-hmuted mb-1">Check-in Time</label>
                   <input
-                    value={form.hotel_phone}
-                    onChange={e => setForm(f => ({ ...f, hotel_phone: e.target.value }))}
+                    type="time"
+                    value={form.check_in_time}
+                    onChange={e => setForm(f => ({ ...f, check_in_time: e.target.value }))}
                     className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-hmuted mb-1">Email</label>
+                  <label className="block text-xs text-hmuted mb-1">Check-out Time</label>
                   <input
-                    type="email"
-                    value={form.hotel_email}
-                    onChange={e => setForm(f => ({ ...f, hotel_email: e.target.value }))}
+                    type="time"
+                    value={form.check_out_time}
+                    onChange={e => setForm(f => ({ ...f, check_out_time: e.target.value }))}
                     className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg"
                   />
+                </div>
+                <div>
+                  <label className="block text-xs text-hmuted mb-1">Tax Rate (%)</label>
+                  <input
+                    type="number" min={0} max={100} step={0.1}
+                    value={form.tax_rate}
+                    onChange={e => setForm(f => ({ ...f, tax_rate: Number(e.target.value) }))}
+                    className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-hmuted mb-1">Currency</label>
+                  <select
+                    value={form.currency}
+                    onChange={e => setForm(f => ({ ...f, currency: e.target.value }))}
+                    className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg"
+                  >
+                    {['USD','EUR','GBP','KHR','THB','SGD','JPY','AUD','CAD'].map(c => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Operations */}
-          <div className="bg-white border border-hborder rounded-2xl p-6 shadow-card">
-            <h3 className="font-serif text-lg text-dark-navy mb-4">Operations</h3>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs text-hmuted mb-1">Check-in Time</label>
-                <input
-                  type="time"
-                  value={form.check_in_time}
-                  onChange={e => setForm(f => ({ ...f, check_in_time: e.target.value }))}
-                  className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg"
-                />
+          {/* RIGHT COLUMN */}
+          <div className="space-y-6">
+            {/* Telegram */}
+            <div className="bg-white border border-hborder rounded-2xl p-6 shadow-card">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="font-serif text-lg text-dark-navy">Telegram Notifications</h3>
+                  <p className="text-xs text-hmuted mt-0.5">Push alerts to your Telegram channel or group</p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={form.telegram_enabled}
+                    onChange={e => setForm(f => ({ ...f, telegram_enabled: e.target.checked }))}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-hsurface2 rounded-full peer peer-checked:bg-navy transition-colors after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-5"></div>
+                </label>
               </div>
-              <div>
-                <label className="block text-xs text-hmuted mb-1">Check-out Time</label>
-                <input
-                  type="time"
-                  value={form.check_out_time}
-                  onChange={e => setForm(f => ({ ...f, check_out_time: e.target.value }))}
-                  className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg"
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-hmuted mb-1">Tax Rate (%)</label>
-                <input
-                  type="number" min={0} max={100} step={0.1}
-                  value={form.tax_rate}
-                  onChange={e => setForm(f => ({ ...f, tax_rate: Number(e.target.value) }))}
-                  className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg"
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-hmuted mb-1">Currency</label>
-                <select
-                  value={form.currency}
-                  onChange={e => setForm(f => ({ ...f, currency: e.target.value }))}
-                  className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg"
+
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs text-hmuted mb-1">Bot Token</label>
+                  <input
+                    type="password"
+                    value={form.telegram_bot_token}
+                    onChange={e => setForm(f => ({ ...f, telegram_bot_token: e.target.value }))}
+                    placeholder="1234567890:ABCdefGHIjklMNOpqrsTUVwxyz"
+                    className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg font-mono"
+                  />
+                  <p className="text-xs text-hlight mt-1">Get a bot token from @BotFather on Telegram</p>
+                </div>
+                <div>
+                  <label className="block text-xs text-hmuted mb-1">Chat ID</label>
+                  <input
+                    value={form.telegram_chat_id}
+                    onChange={e => setForm(f => ({ ...f, telegram_chat_id: e.target.value }))}
+                    placeholder="-1001234567890"
+                    className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg font-mono"
+                  />
+                  <p className="text-xs text-hlight mt-1">Use @userinfobot to find your chat ID</p>
+                </div>
+
+                <div>
+                  <p className="text-xs font-semibold text-hmuted uppercase tracking-wide mb-2">Notification Events</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {NOTIFICATION_EVENTS.map(ev => (
+                      <label key={ev.key} className="flex items-center gap-2.5 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={form.notification_events.includes(ev.key)}
+                          onChange={() => toggleEvent(ev.key)}
+                          className="w-4 h-4 rounded border-hborder text-navy focus:ring-navy"
+                        />
+                        <span className="text-sm text-htext">{ev.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                <Button
+                  variant="ghost"
+                  onClick={handleTestTelegram}
+                  disabled={testingTelegram}
                 >
-                  {['USD','EUR','GBP','KHR','THB','SGD','JPY','AUD','CAD'].map(c => (
-                    <option key={c} value={c}>{c}</option>
-                  ))}
-                </select>
+                  {testingTelegram ? 'Sending…' : '📨 Send Test Notification'}
+                </Button>
               </div>
             </div>
-          </div>
 
-          {/* Telegram */}
-          <div className="bg-white border border-hborder rounded-2xl p-6 shadow-card">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h3 className="font-serif text-lg text-dark-navy">Telegram Notifications</h3>
-                <p className="text-xs text-hmuted mt-0.5">Push alerts to your Telegram channel or group</p>
-              </div>
-              <label className="relative inline-flex items-center cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={form.telegram_enabled}
-                  onChange={e => setForm(f => ({ ...f, telegram_enabled: e.target.checked }))}
-                  className="sr-only peer"
-                />
-                <div className="w-11 h-6 bg-hsurface2 rounded-full peer peer-checked:bg-navy transition-colors after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-5"></div>
-              </label>
-            </div>
-
-            <div className="space-y-3">
-              <div>
-                <label className="block text-xs text-hmuted mb-1">Bot Token</label>
-                <input
-                  type="password"
-                  value={form.telegram_bot_token}
-                  onChange={e => setForm(f => ({ ...f, telegram_bot_token: e.target.value }))}
-                  placeholder="1234567890:ABCdefGHIjklMNOpqrsTUVwxyz"
-                  className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg font-mono"
-                />
-                <p className="text-xs text-hlight mt-1">Get a bot token from @BotFather on Telegram</p>
-              </div>
-              <div>
-                <label className="block text-xs text-hmuted mb-1">Chat ID</label>
-                <input
-                  value={form.telegram_chat_id}
-                  onChange={e => setForm(f => ({ ...f, telegram_chat_id: e.target.value }))}
-                  placeholder="-1001234567890"
-                  className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg font-mono"
-                />
-                <p className="text-xs text-hlight mt-1">Use @userinfobot to find your chat ID</p>
-              </div>
-
-              <div>
-                <p className="text-xs font-semibold text-hmuted uppercase tracking-wide mb-2">Notification Events</p>
-                <div className="grid grid-cols-2 gap-2">
-                  {NOTIFICATION_EVENTS.map(ev => (
-                    <label key={ev.key} className="flex items-center gap-2.5 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={form.notification_events.includes(ev.key)}
-                        onChange={() => toggleEvent(ev.key)}
-                        className="w-4 h-4 rounded border-hborder text-navy focus:ring-navy"
-                      />
-                      <span className="text-sm text-htext">{ev.label}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              <Button
-                variant="ghost"
-                onClick={handleTestTelegram}
-                disabled={testingTelegram}
-              >
-                {testingTelegram ? 'Sending…' : '📨 Send Test Notification'}
+            <div className="flex justify-end">
+              <Button onClick={handleSave} disabled={saving} size="lg">
+                {saving ? 'Saving…' : 'Save Settings'}
               </Button>
             </div>
           </div>
 
-          <div className="flex justify-end">
-            <Button onClick={handleSave} disabled={saving} size="lg">
-              {saving ? 'Saving…' : 'Save Settings'}
-            </Button>
-          </div>
         </div>
       </div>
     </>

@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 import { createClient } from '@/lib/supabase/client'
 import { formatCurrency, formatDate, generateJournalEntryNumber, capitalize } from '@/lib/utils'
+import { exportXlsx } from '@/lib/excel'
 import { toast } from '@/components/ui/Toast'
 import { useBranch } from '@/context/BranchContext'
 import { cn } from '@/lib/utils'
@@ -274,12 +275,20 @@ export default function AccountingPage() {
   async function computeOverview(entryData: any[]) {
     if (!activeBranch) return
     const monthStart = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-01`
-    const [pcRes, linesRes, arRes, apRes] = await Promise.all([
+    const [pcRes, arRes, apRes] = await Promise.all([
       supabase.from('petty_cash_transactions').select('amount, transaction_type').eq('branch_id', activeBranch.id),
-      supabase.from('journal_entry_lines').select('debit, credit, account:chart_of_accounts(type)').gte('created_at', monthStart + 'T00:00:00'),
       supabase.from('invoices').select('total, amount_paid').eq('branch_id', activeBranch.id).in('status', ['unpaid', 'partial']),
       supabase.from('bills').select('total, amount_paid').eq('branch_id', activeBranch.id).in('status', ['unpaid', 'partial']),
     ])
+    // 2-step: get this branch's JE IDs for current month, then fetch their lines
+    const { data: monthJeData } = await supabase.from('journal_entries')
+      .select('id').eq('branch_id', activeBranch.id).eq('is_void', false).gte('entry_date', monthStart)
+    const monthJeIds = (monthJeData ?? []).map((e: any) => e.id)
+    const linesRes = monthJeIds.length > 0
+      ? await supabase.from('journal_entry_lines')
+          .select('debit, credit, account:chart_of_accounts(type)')
+          .in('entry_id', monthJeIds)
+      : { data: [] as any[] }
     const pettyCashBalance = (pcRes.data ?? []).reduce((s: number, t: any) => s + (t.transaction_type === 'in' ? Number(t.amount) : -Number(t.amount)), 0)
     const monthRevenue = (linesRes.data ?? []).filter((l: any) => l.account?.type === 'revenue').reduce((s: number, l: any) => s + Number(l.credit), 0)
     const monthExpenses = (linesRes.data ?? []).filter((l: any) => l.account?.type === 'expense').reduce((s: number, l: any) => s + Number(l.debit), 0)
@@ -823,6 +832,147 @@ export default function AccountingPage() {
     .filter(b => b.vendor_id === vendorId && ['unpaid', 'partial'].includes(b.status))
     .reduce((s, b) => s + (Number(b.total) - Number(b.amount_paid)), 0)
 
+  // ── Excel exports ──────────────────────────────────────────────
+
+  function exportAR() {
+    exportXlsx(`Receivables_${todayStr()}`, [{ name: 'Receivables', rows: filteredAR.map(inv => ({
+      'Invoice #': inv.invoice_number,
+      'Guest': (inv.guest as any)?.full_name ?? '',
+      'Phone': (inv.guest as any)?.phone ?? '',
+      'Issue Date': inv.invoice_date ?? inv.created_at,
+      'Total': Number(inv.total),
+      'Paid': Number(inv.amount_paid),
+      'Balance': Number(inv.total) - Number(inv.amount_paid),
+      'Status': inv.status,
+      'Aging': agingLabel(daysPastDue(inv.invoice_date ?? inv.created_at)),
+    })) }])
+  }
+
+  function exportBills() {
+    exportXlsx(`Bills_AP_${todayStr()}`, [{ name: 'Bills', rows: filteredBills.map(b => ({
+      'Bill #': b.bill_number,
+      'Vendor': (b.vendor as any)?.name ?? '',
+      'Bill Date': b.bill_date,
+      'Due Date': b.due_date ?? '',
+      'Description': b.description,
+      'Subtotal': Number(b.subtotal),
+      'Tax': Number(b.tax_amount),
+      'Total': Number(b.total),
+      'Paid': Number(b.amount_paid),
+      'Balance': Number(b.total) - Number(b.amount_paid),
+      'Status': b.status,
+    })) }])
+  }
+
+  function exportVendors() {
+    exportXlsx(`Vendors_${todayStr()}`, [{ name: 'Vendors', rows: vendors.map(v => ({
+      'Name': v.name,
+      'Contact': v.contact_name ?? '',
+      'Email': v.email ?? '',
+      'Phone': v.phone ?? '',
+      'Payment Terms (days)': v.payment_terms,
+      'Tax ID': v.tax_id ?? '',
+      'Outstanding Balance': vendorBalance(v.id),
+      'Active': v.is_active ? 'Yes' : 'No',
+      'Notes': v.notes ?? '',
+    })) }])
+  }
+
+  function exportJournalEntries() {
+    exportXlsx(`Journal_Entries_${todayStr()}`, [{ name: 'Journal Entries', rows: entries.map(e => ({
+      'Entry #': e.entry_number,
+      'Date': e.entry_date,
+      'Description': e.description,
+      'Reference': e.reference ?? '',
+      'Type': e.reference_type ?? '',
+      'Void': e.is_void ? 'Yes' : 'No',
+    })) }])
+  }
+
+  function exportLedger() {
+    if (ledgerRows.length === 0) { toast('Load the ledger first', 'error'); return }
+    const acct = accounts.find(a => a.id === ledgerAccountId)
+    exportXlsx(`Ledger_${acct?.code ?? ''}_${todayStr()}`, [{ name: 'General Ledger', rows: ledgerRows.map(r => ({
+      'Entry #': r.entry?.entry_number ?? '',
+      'Date': r.entry?.entry_date ?? '',
+      'Description': r.entry?.description ?? '',
+      'Reference': r.entry?.reference ?? '',
+      'Debit': Number(r.debit),
+      'Credit': Number(r.credit),
+      'Balance': Number(r.running_balance ?? 0),
+    })) }])
+  }
+
+  function exportTrialBalance() {
+    if (tbRows.length === 0) { toast('Load the trial balance first', 'error'); return }
+    exportXlsx(`Trial_Balance_${todayStr()}`, [{ name: 'Trial Balance', rows: tbRows.map(r => ({
+      'Code': r.code,
+      'Account': r.name,
+      'Type': r.type,
+      'Category': r.category,
+      'Debit': Number(r.dr),
+      'Credit': Number(r.cr),
+      'Balance': Number(r.balance),
+    })) }])
+  }
+
+  function exportReport() {
+    if (!reportData) { toast('Load the report first', 'error'); return }
+    if (reportData.type === 'pl') {
+      const rows = [
+        { 'Section': 'REVENUE', 'Code': '', 'Account': '', 'Amount': '' },
+        ...reportData.revenue.map((a: any) => ({ 'Section': '', 'Code': a.code, 'Account': a.name, 'Amount': Number(a.balance) })),
+        { 'Section': '', 'Code': '', 'Account': 'Total Revenue', 'Amount': Number(reportData.totalRev) },
+        { 'Section': '', 'Code': '', 'Account': '', 'Amount': '' },
+        { 'Section': 'EXPENSES', 'Code': '', 'Account': '', 'Amount': '' },
+        ...reportData.expenses.map((a: any) => ({ 'Section': '', 'Code': a.code, 'Account': a.name, 'Amount': Number(a.balance) })),
+        { 'Section': '', 'Code': '', 'Account': 'Total Expenses', 'Amount': Number(reportData.totalExp) },
+        { 'Section': '', 'Code': '', 'Account': '', 'Amount': '' },
+        { 'Section': '', 'Code': '', 'Account': 'NET INCOME', 'Amount': Number(reportData.totalRev) - Number(reportData.totalExp) },
+      ]
+      exportXlsx(`PL_${reportFrom}_${reportTo}`, [{ name: 'P&L', rows }])
+    } else {
+      const rows = [
+        { 'Section': 'ASSETS', 'Code': '', 'Account': '', 'Amount': '' },
+        ...reportData.assets.map((a: any) => ({ 'Section': '', 'Code': a.code, 'Account': a.name, 'Amount': Number(a.balance) })),
+        { 'Section': '', 'Code': '', 'Account': 'Total Assets', 'Amount': Number(reportData.totalAssets) },
+        { 'Section': '', 'Code': '', 'Account': '', 'Amount': '' },
+        { 'Section': 'LIABILITIES', 'Code': '', 'Account': '', 'Amount': '' },
+        ...reportData.liabilities.map((a: any) => ({ 'Section': '', 'Code': a.code, 'Account': a.name, 'Amount': Number(a.balance) })),
+        { 'Section': '', 'Code': '', 'Account': 'Total Liabilities', 'Amount': Number(reportData.totalLiab) },
+        { 'Section': '', 'Code': '', 'Account': '', 'Amount': '' },
+        { 'Section': 'EQUITY', 'Code': '', 'Account': '', 'Amount': '' },
+        ...reportData.equity.map((a: any) => ({ 'Section': '', 'Code': a.code, 'Account': a.name, 'Amount': Number(a.balance) })),
+        { 'Section': '', 'Code': '', 'Account': 'Net Income', 'Amount': Number(reportData.netIncome) },
+        { 'Section': '', 'Code': '', 'Account': 'Total Equity', 'Amount': Number(reportData.totalEquity) },
+      ]
+      exportXlsx(`Balance_Sheet_${reportTo}`, [{ name: 'Balance Sheet', rows }])
+    }
+  }
+
+  function exportCOA() {
+    exportXlsx(`Chart_of_Accounts_${todayStr()}`, [{ name: 'Chart of Accounts', rows: accounts.map(a => ({
+      'Code': a.code,
+      'Name': a.name,
+      'Type': a.type,
+      'Category': a.category,
+      'Active': a.is_active ? 'Yes' : 'No',
+    })) }])
+  }
+
+  function exportPettyCash() {
+    exportXlsx(`Petty_Cash_${todayStr()}`, [{ name: 'Petty Cash', rows: filteredPetty.map(t => ({
+      'Date': t.transaction_date,
+      'Description': t.description,
+      'Category': t.category,
+      'Type': t.transaction_type === 'in' ? 'Cash In' : 'Cash Out',
+      'Amount': Number(t.amount),
+      'In': t.transaction_type === 'in' ? Number(t.amount) : 0,
+      'Out': t.transaction_type === 'out' ? Number(t.amount) : 0,
+      'Reference': t.reference ?? '',
+    })) }])
+  }
+
   // ── Render ─────────────────────────────────────────────────────
 
   const input = 'w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg'
@@ -922,7 +1072,10 @@ export default function AccountingPage() {
                   >{f === 'all' ? 'All' : capitalize(f)}</button>
                 ))}
               </div>
-              <Button variant="ghost" onClick={() => setShowAgingReport(true)}>Aging Report</Button>
+              <div className="flex gap-2">
+                <Button variant="ghost" onClick={() => setShowAgingReport(true)}>Aging Report</Button>
+                <Button variant="ghost" onClick={exportAR}>↓ Export</Button>
+              </div>
             </div>
             <div className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
               <div className="px-5 py-4 border-b border-hborder">
@@ -995,7 +1148,10 @@ export default function AccountingPage() {
                   >{f === 'all' ? 'All' : capitalize(f)}</button>
                 ))}
               </div>
-              <Button onClick={() => setBillFormOpen(true)}>+ New Bill</Button>
+              <div className="flex gap-2">
+                <Button variant="ghost" onClick={exportBills}>↓ Export</Button>
+                <Button onClick={() => setBillFormOpen(true)}>+ New Bill</Button>
+              </div>
             </div>
             <div className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
               <div className="px-5 py-4 border-b border-hborder">
@@ -1061,7 +1217,10 @@ export default function AccountingPage() {
           <div>
             <div className="flex items-center justify-between mb-4">
               <p className="text-sm text-hmuted">{vendors.length} vendors · {vendors.filter(v => v.is_active).length} active</p>
-              <Button onClick={openAddVendor}>+ Add Vendor</Button>
+              <div className="flex gap-2">
+                <Button variant="ghost" onClick={exportVendors}>↓ Export</Button>
+                <Button onClick={openAddVendor}>+ Add Vendor</Button>
+              </div>
             </div>
             <div className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
               <table className="w-full text-sm">
@@ -1105,7 +1264,8 @@ export default function AccountingPage() {
         {/* ══ JOURNAL ENTRIES ═══════════════════════════════════════ */}
         {tab === 'journal' && (
           <div>
-            <div className="flex justify-end mb-4">
+            <div className="flex justify-end gap-2 mb-4">
+              <Button variant="ghost" onClick={exportJournalEntries}>↓ Export</Button>
               <Button onClick={openAddEntry}>+ New Entry</Button>
             </div>
             <div className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
@@ -1211,6 +1371,7 @@ export default function AccountingPage() {
                 <input type="date" value={ledgerTo} onChange={e => setLedgerTo(e.target.value)} className={input} />
               </div>
               <Button onClick={loadLedger} disabled={!ledgerAccountId}>Load Ledger</Button>
+              {ledgerRows.length > 0 && <Button variant="ghost" onClick={exportLedger}>↓ Export</Button>}
             </div>
 
             {ledgerLoading ? (
@@ -1273,6 +1434,7 @@ export default function AccountingPage() {
               </div>
               <Button onClick={loadTrialBalance} disabled={tbLoading}>{tbLoading ? 'Computing…' : 'Generate'}</Button>
               {tbRows.length > 0 && <Button variant="ghost" onClick={() => window.print()}>Print</Button>}
+              {tbRows.length > 0 && <Button variant="ghost" onClick={exportTrialBalance}>↓ Export</Button>}
             </div>
             {tbRows.length > 0 ? (
               <div className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
@@ -1347,6 +1509,7 @@ export default function AccountingPage() {
               </div>
               <Button onClick={loadReport} disabled={reportLoading}>{reportLoading ? 'Computing…' : 'Generate'}</Button>
               {reportData && <Button variant="ghost" onClick={() => window.print()}>Print</Button>}
+              {reportData && <Button variant="ghost" onClick={exportReport}>↓ Export</Button>}
             </div>
 
             {reportData?.type === 'pl' && (
@@ -1625,7 +1788,10 @@ export default function AccountingPage() {
           <div>
             <div className="flex items-center justify-between mb-4">
               <p className="text-sm text-hmuted">{accounts.length} accounts · {accounts.filter(a => a.is_active).length} active</p>
-              <Button onClick={openAddAccount}>+ Add Account</Button>
+              <div className="flex gap-2">
+                <Button variant="ghost" onClick={exportCOA}>↓ Export</Button>
+                <Button onClick={openAddAccount}>+ Add Account</Button>
+              </div>
             </div>
             <div className="space-y-4">
               {ACCOUNT_TYPES.map(type => {
@@ -1701,14 +1867,17 @@ export default function AccountingPage() {
                 <Button onClick={() => { setPcForm(f => ({ ...f, type: 'out' })); setPcFormOpen(true) }}>+ Record Transaction</Button>
               </div>
             </div>
-            <div className="flex gap-1 bg-hsurface2 rounded-xl p-1 mb-4 w-fit">
-              {(['all', 'in', 'out'] as const).map(f => (
-                <button key={f} onClick={() => setPcFilter(f)}
-                  className={cn('px-4 py-1.5 rounded-lg text-sm font-medium transition-colors capitalize',
-                    pcFilter === f ? 'bg-white text-dark-navy shadow-sm' : 'text-hmuted hover:text-htext'
-                  )}
-                >{f === 'all' ? 'All' : f === 'in' ? 'Cash In' : 'Cash Out'}</button>
-              ))}
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex gap-1 bg-hsurface2 rounded-xl p-1">
+                {(['all', 'in', 'out'] as const).map(f => (
+                  <button key={f} onClick={() => setPcFilter(f)}
+                    className={cn('px-4 py-1.5 rounded-lg text-sm font-medium transition-colors capitalize',
+                      pcFilter === f ? 'bg-white text-dark-navy shadow-sm' : 'text-hmuted hover:text-htext'
+                    )}
+                  >{f === 'all' ? 'All' : f === 'in' ? 'Cash In' : 'Cash Out'}</button>
+                ))}
+              </div>
+              <Button variant="ghost" onClick={exportPettyCash}>↓ Export</Button>
             </div>
             <div className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
               <table className="w-full text-sm">
