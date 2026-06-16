@@ -50,12 +50,6 @@ export function generateReservationNumber(): string {
   return `RES-${dateStr}-${rand}`
 }
 
-export function generateInvoiceNumber(): string {
-  const date = new Date()
-  const dateStr = date.toISOString().slice(0, 10).replace(/-/g, '')
-  const rand = Math.floor(1000 + Math.random() * 9000)
-  return `INV-${dateStr}-${rand}`
-}
 
 export function todayISO(): string {
   return new Date().toISOString().split('T')[0]

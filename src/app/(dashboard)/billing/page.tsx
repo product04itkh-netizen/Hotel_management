@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/Badge'
 import { Modal } from '@/components/ui/Modal'
 import { createClient } from '@/lib/supabase/client'
 import {
-  formatDate, formatCurrency, generateInvoiceNumber,
+  formatDate, formatCurrency,
   generateJournalEntryNumber, calculateNights, capitalize,
 } from '@/lib/utils'
 import { toast } from '@/components/ui/Toast'
@@ -152,6 +152,26 @@ export default function BillingPage() {
     setInvoiceOpen(true)
   }
 
+  async function generateInvoiceNumber(): Promise<string> {
+    const now = new Date()
+    const yyyymm = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`
+    const prefix = `INV-${yyyymm}-`
+    const { data } = await supabase
+      .from('invoices')
+      .select('invoice_number')
+      .eq('branch_id', activeBranch!.id)
+      .like('invoice_number', `${prefix}%`)
+      .order('invoice_number', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    let seq = 1
+    if (data?.invoice_number) {
+      const lastNum = parseInt((data.invoice_number as string).slice(prefix.length), 10)
+      if (!isNaN(lastNum)) seq = lastNum + 1
+    }
+    return `${prefix}${String(seq).padStart(3, '0')}`
+  }
+
   async function handleCreate() {
     setSaving(true)
     const selectedRes = reservations.find(r => r.id === form.reservation_id) ?? null
@@ -163,7 +183,7 @@ export default function BillingPage() {
     const initialStatus = initialPaid >= total && total > 0 ? 'paid' : initialPaid > 0 ? 'partial' : 'unpaid'
 
     const { data: inv, error } = await supabase.from('invoices').insert({
-      invoice_number: generateInvoiceNumber(),
+      invoice_number: await generateInvoiceNumber(),
       reservation_id: form.reservation_id || null,
       guest_id: guestId,
       house_id: (selectedRes as any)?.house_id ?? null,
