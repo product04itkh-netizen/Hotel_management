@@ -11,7 +11,7 @@ import { cn } from '@/lib/utils'
 import type { ChartOfAccount, AccountType, JournalEntry, PettyCashTransaction, Vendor, Bill } from '@/types'
 
 // ── Types & constants ──────────────────────────────────────────
-type Tab = 'overview' | 'ar' | 'bills' | 'vendors' | 'journal' | 'ledger' | 'coa' | 'petty'
+type Tab = 'overview' | 'ar' | 'bills' | 'vendors' | 'journal' | 'ledger' | 'trial_balance' | 'reports' | 'reconciliation' | 'recurring' | 'periods' | 'coa' | 'petty'
 
 const ACCOUNT_TYPES: AccountType[] = ['asset', 'liability', 'equity', 'revenue', 'expense']
 const PETTY_CATEGORIES = [
@@ -25,34 +25,40 @@ const TYPE_COLOR: Record<AccountType, string> = {
   expense: 'bg-orange-100 text-orange-700',
 }
 const TABS: { key: Tab; label: string }[] = [
-  { key: 'overview', label: 'Overview' },
-  { key: 'ar',      label: 'Receivables' },
-  { key: 'bills',   label: 'Bills (AP)' },
-  { key: 'vendors', label: 'Vendors' },
-  { key: 'journal', label: 'Journal Entries' },
-  { key: 'ledger',  label: 'General Ledger' },
-  { key: 'coa',     label: 'Chart of Accounts' },
-  { key: 'petty',   label: 'Petty Cash' },
+  { key: 'overview',       label: 'Overview' },
+  { key: 'ar',             label: 'Receivables' },
+  { key: 'bills',          label: 'Bills (AP)' },
+  { key: 'vendors',        label: 'Vendors' },
+  { key: 'journal',        label: 'Journal Entries' },
+  { key: 'ledger',         label: 'General Ledger' },
+  { key: 'trial_balance',  label: 'Trial Balance' },
+  { key: 'reports',        label: 'P&L / Balance Sheet' },
+  { key: 'reconciliation', label: 'Bank Recon.' },
+  { key: 'recurring',      label: 'Recurring' },
+  { key: 'periods',        label: 'Periods' },
+  { key: 'coa',            label: 'Chart of Accounts' },
+  { key: 'petty',          label: 'Petty Cash' },
 ]
+const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December']
 
 function normalBalance(type: AccountType): 'debit' | 'credit' {
   return ['asset', 'expense'].includes(type) ? 'debit' : 'credit'
 }
-function ageDays(d: string): number {
-  return Math.floor((Date.now() - new Date(d).getTime()) / 86400000)
+function daysPastDue(issueDate: string, terms = 30): number {
+  const due = new Date(issueDate)
+  due.setDate(due.getDate() + terms)
+  return Math.floor((Date.now() - due.getTime()) / 86400000)
 }
-function agingLabel(days: number, terms = 30) {
-  const ov = days - terms
-  if (ov <= 0) return 'Current'
-  if (ov <= 30) return '1–30 days'
-  if (ov <= 60) return '31–60 days'
+function agingLabel(od: number) {
+  if (od <= 0) return 'Current'
+  if (od <= 30) return '1–30 days'
+  if (od <= 60) return '31–60 days'
   return '60+ days'
 }
-function agingColor(days: number, terms = 30) {
-  const ov = days - terms
-  if (ov <= 0) return 'bg-green-100 text-green-700'
-  if (ov <= 30) return 'bg-yellow-100 text-yellow-700'
-  if (ov <= 60) return 'bg-orange-100 text-orange-700'
+function agingColor(od: number) {
+  if (od <= 0) return 'bg-green-100 text-green-700'
+  if (od <= 30) return 'bg-yellow-100 text-yellow-700'
+  if (od <= 60) return 'bg-orange-100 text-orange-700'
   return 'bg-red-100 text-red-700'
 }
 const todayStr = () => new Date().toISOString().split('T')[0]
@@ -134,10 +140,44 @@ export default function AccountingPage() {
     address: '', tax_id: '', payment_terms: '30', notes: '',
   })
 
+  // Trial Balance
+  const [tbFrom, setTbFrom] = useState(`${new Date().getFullYear()}-01-01`)
+  const [tbTo,   setTbTo]   = useState(todayStr())
+  const [tbRows, setTbRows] = useState<any[]>([])
+  const [tbLoading, setTbLoading] = useState(false)
+
+  // Reports (P&L / Balance Sheet)
+  const [reportType,    setReportType]    = useState<'pl' | 'bs'>('pl')
+  const [reportFrom,    setReportFrom]    = useState(`${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-01`)
+  const [reportTo,      setReportTo]      = useState(todayStr())
+  const [reportData,    setReportData]    = useState<any>(null)
+  const [reportLoading, setReportLoading] = useState(false)
+
+  // Bank Reconciliation
+  const [reconLines,   setReconLines]   = useState<any[]>([])
+  const [reconStmtBal, setReconStmtBal] = useState('')
+  const [reconLoading, setReconLoading] = useState(false)
+
+  // Recurring Entries
+  const [recurring,      setRecurring]      = useState<any[]>([])
+  const [recurFormOpen,  setRecurFormOpen]  = useState(false)
+  const [editRecurId,    setEditRecurId]    = useState<string | null>(null)
+  const [recurSaving,    setRecurSaving]    = useState(false)
+  const [recurForm,      setRecurForm]      = useState({ name: '', description: '', frequency: 'monthly', next_due_date: todayStr() })
+  const [recurLines,     setRecurLines]     = useState([emptyJeLine(), emptyJeLine()])
+
+  // Accounting Periods
+  const [periods,       setPeriods]       = useState<any[]>([])
+  const [periodSaving,  setPeriodSaving]  = useState(false)
+
+  // AR Aging Report modal
+  const [showAgingReport, setShowAgingReport] = useState(false)
+
   useEffect(() => {
     if (activeBranch) {
       loadAccounts(); loadEntries(); loadPetty()
       loadAR(); loadBills(); loadVendors()
+      loadPeriods(); loadRecurring()
     }
   }, [activeBranch]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -203,12 +243,19 @@ export default function AccountingPage() {
   async function loadLedger() {
     if (!ledgerAccountId || !activeBranch) return
     setLedgerLoading(true)
-    let q = supabase.from('journal_entry_lines')
+    // Step 1: get entry IDs filtered by date — PostgREST cannot filter on nested FK columns
+    let jeQ = supabase.from('journal_entries')
+      .select('id').eq('branch_id', activeBranch.id)
+    if (ledgerFrom) jeQ = jeQ.gte('entry_date', ledgerFrom)
+    if (ledgerTo)   jeQ = jeQ.lte('entry_date', ledgerTo)
+    const { data: jeData } = await jeQ
+    const ids = (jeData ?? []).map((e: any) => e.id)
+    if (ids.length === 0) { setLedgerRows([]); setLedgerLoading(false); return }
+    // Step 2: get lines for those entries on the selected account
+    const { data } = await supabase.from('journal_entry_lines')
       .select('*, entry:journal_entries(entry_number, entry_date, description, reference)')
-      .eq('account_id', ledgerAccountId).order('entry_id')
-    if (ledgerFrom) q = q.gte('entry.entry_date' as any, ledgerFrom)
-    if (ledgerTo)   q = q.lte('entry.entry_date' as any, ledgerTo)
-    const { data } = await q
+      .eq('account_id', ledgerAccountId)
+      .in('entry_id', ids)
     const acct = accounts.find(a => a.id === ledgerAccountId)
     const nb = acct ? normalBalance(acct.type) : 'debit'
     let balance = 0
@@ -301,6 +348,12 @@ export default function AccountingPage() {
     if (!jeBalanced) { toast('Debits must equal credits', 'error'); return }
     const validLines = jeLines.filter(l => l.account_id && (Number(l.debit) > 0 || Number(l.credit) > 0))
     if (validLines.length < 2) { toast('At least 2 lines required', 'error'); return }
+    if (jeForm.date) {
+      const d = new Date(jeForm.date)
+      const ey = d.getFullYear(), em = d.getMonth() + 1
+      const closed = periods.find(p => p.year === ey && p.month === em && p.status === 'closed')
+      if (closed) { toast(`${MONTH_NAMES[em - 1]} ${ey} is a closed period. Reopen it first.`, 'error'); return }
+    }
     setJeSaving(true)
     const { data: je, error: jeErr } = await supabase.from('journal_entries').insert({
       entry_number: generateJournalEntryNumber(), entry_date: jeForm.date,
@@ -316,6 +369,42 @@ export default function AccountingPage() {
       }))
     )
     toast('Journal entry posted'); setJeSaving(false); setJeFormOpen(false); loadEntries()
+  }
+
+  async function voidJournalEntry(entry: JournalEntry) {
+    if (!confirm(`Void ${entry.entry_number}? A reversing entry will be posted.`)) return
+    let lines: any[] = entryLines[entry.id] ?? []
+    if (lines.length === 0) {
+      const { data } = await supabase.from('journal_entry_lines').select('*').eq('entry_id', entry.id)
+      lines = data ?? []
+    }
+    if (lines.length === 0) { toast('No lines found for this entry', 'error'); return }
+    const { data: reversal, error } = await supabase.from('journal_entries').insert({
+      entry_number: generateJournalEntryNumber(),
+      entry_date: todayStr(),
+      reference: entry.entry_number,
+      reference_type: 'void',
+      description: `VOID: ${entry.description}`,
+      branch_id: activeBranch?.id ?? null,
+    }).select().single()
+    if (error || !reversal) { toast(error?.message ?? 'Failed to create reversal', 'error'); return }
+    await supabase.from('journal_entry_lines').insert(
+      lines.map((l: any) => ({
+        entry_id: reversal.id,
+        account_id: l.account_id,
+        description: l.description ?? null,
+        debit: Number(l.credit),
+        credit: Number(l.debit),
+      }))
+    )
+    await supabase.from('journal_entries').update({
+      is_void: true,
+      voided_at: new Date().toISOString(),
+      void_entry_id: reversal.id,
+    }).eq('id', entry.id)
+    toast(`${entry.entry_number} voided — ${reversal.entry_number} posted`)
+    setEntryLines({})
+    loadEntries()
   }
 
   // ── Bills ──────────────────────────────────────────────────────
@@ -497,6 +586,200 @@ export default function AccountingPage() {
     loadPetty(); loadEntries()
   }
 
+  // ── Periods ────────────────────────────────────────────────────
+
+  async function loadPeriods() {
+    if (!activeBranch) return
+    const { data } = await supabase.from('accounting_periods')
+      .select('*').eq('branch_id', activeBranch.id)
+      .order('year', { ascending: false }).order('month', { ascending: false })
+    setPeriods(data ?? [])
+  }
+
+  async function closePeriod(year: number, month: number) {
+    if (!activeBranch) return
+    setPeriodSaving(true)
+    const existing = periods.find(p => p.year === year && p.month === month)
+    if (existing) {
+      await supabase.from('accounting_periods')
+        .update({ status: 'closed', closed_at: new Date().toISOString() }).eq('id', existing.id)
+    } else {
+      await supabase.from('accounting_periods').insert({
+        year, month, status: 'closed', closed_at: new Date().toISOString(), branch_id: activeBranch.id,
+      })
+    }
+    toast(`${MONTH_NAMES[month - 1]} ${year} closed`)
+    await loadPeriods()
+    setPeriodSaving(false)
+  }
+
+  async function reopenPeriod(id: string, year: number, month: number) {
+    await supabase.from('accounting_periods').update({ status: 'open', closed_at: null }).eq('id', id)
+    toast(`${MONTH_NAMES[month - 1]} ${year} reopened`)
+    loadPeriods()
+  }
+
+  // ── Recurring ──────────────────────────────────────────────────
+
+  async function loadRecurring() {
+    if (!activeBranch) return
+    const { data } = await supabase.from('recurring_journal_entries')
+      .select('*').eq('branch_id', activeBranch.id).order('next_due_date')
+    setRecurring(data ?? [])
+  }
+
+  async function saveRecurring() {
+    if (!recurForm.name || !recurForm.description) { toast('Name and description required', 'error'); return }
+    const valid = recurLines.filter(l => l.account_id && (Number(l.debit) > 0 || Number(l.credit) > 0))
+    if (valid.length < 2) { toast('At least 2 lines required', 'error'); return }
+    const dr = valid.reduce((s, l) => s + Number(l.debit || 0), 0)
+    const cr = valid.reduce((s, l) => s + Number(l.credit || 0), 0)
+    if (Math.abs(dr - cr) > 0.001) { toast('Lines must balance (DR = CR)', 'error'); return }
+    setRecurSaving(true)
+    const payload = {
+      name: recurForm.name, description: recurForm.description,
+      frequency: recurForm.frequency, next_due_date: recurForm.next_due_date,
+      lines: valid.map(l => ({ account_id: l.account_id, description: l.description || null, debit: Number(l.debit || 0), credit: Number(l.credit || 0) })),
+      updated_at: new Date().toISOString(),
+    }
+    const { error } = editRecurId
+      ? await supabase.from('recurring_journal_entries').update(payload).eq('id', editRecurId)
+      : await supabase.from('recurring_journal_entries').insert({ ...payload, branch_id: activeBranch?.id })
+    if (error) { toast(error.message, 'error'); setRecurSaving(false); return }
+    toast(editRecurId ? 'Template updated' : 'Template saved')
+    setRecurSaving(false); setRecurFormOpen(false); loadRecurring()
+  }
+
+  async function postRecurring(rec: any) {
+    if (!activeBranch) return
+    const { data: je, error } = await supabase.from('journal_entries').insert({
+      entry_number: generateJournalEntryNumber(),
+      entry_date: rec.next_due_date,
+      description: rec.description,
+      reference: rec.name,
+      reference_type: 'recurring',
+      branch_id: activeBranch.id,
+    }).select().single()
+    if (error || !je) { toast(error?.message ?? 'Error', 'error'); return }
+    await supabase.from('journal_entry_lines').insert(
+      rec.lines.map((l: any) => ({ ...l, entry_id: je.id }))
+    )
+    const next = new Date(rec.next_due_date)
+    if (rec.frequency === 'monthly')   next.setMonth(next.getMonth() + 1)
+    else if (rec.frequency === 'quarterly') next.setMonth(next.getMonth() + 3)
+    else next.setFullYear(next.getFullYear() + 1)
+    await supabase.from('recurring_journal_entries').update({
+      next_due_date: next.toISOString().split('T')[0],
+      updated_at: new Date().toISOString(),
+    }).eq('id', rec.id)
+    toast(`Posted: ${je.entry_number}`)
+    loadRecurring(); loadEntries()
+  }
+
+  // ── Trial Balance ──────────────────────────────────────────────
+
+  async function loadTrialBalance() {
+    if (!activeBranch) return
+    setTbLoading(true)
+    let q = supabase.from('journal_entries').select('id').eq('branch_id', activeBranch.id).eq('is_void', false)
+    if (tbFrom) q = q.gte('entry_date', tbFrom)
+    if (tbTo)   q = q.lte('entry_date', tbTo)
+    const { data: jeData } = await q
+    const ids = (jeData ?? []).map((e: any) => e.id)
+    if (ids.length === 0) { setTbRows([]); setTbLoading(false); return }
+    const { data: lines } = await supabase.from('journal_entry_lines')
+      .select('account_id, debit, credit').in('entry_id', ids)
+    const map: Record<string, { dr: number; cr: number }> = {}
+    for (const l of lines ?? []) {
+      if (!map[l.account_id]) map[l.account_id] = { dr: 0, cr: 0 }
+      map[l.account_id].dr += Number(l.debit)
+      map[l.account_id].cr += Number(l.credit)
+    }
+    const rows = accounts
+      .filter(a => map[a.id])
+      .map(a => {
+        const { dr, cr } = map[a.id]
+        const balance = ['asset', 'expense'].includes(a.type) ? dr - cr : cr - dr
+        return { ...a, dr, cr, balance }
+      })
+      .sort((a, b) => a.code.localeCompare(b.code))
+    setTbRows(rows)
+    setTbLoading(false)
+  }
+
+  // ── Reports (P&L / Balance Sheet) ─────────────────────────────
+
+  async function loadReport() {
+    if (!activeBranch) return
+    setReportLoading(true)
+    let q = supabase.from('journal_entries').select('id').eq('branch_id', activeBranch.id).eq('is_void', false)
+    if (reportType === 'pl' && reportFrom) q = q.gte('entry_date', reportFrom)
+    if (reportTo) q = q.lte('entry_date', reportTo)
+    const { data: jeData } = await q
+    const ids = (jeData ?? []).map((e: any) => e.id)
+    const { data: lines } = ids.length > 0
+      ? await supabase.from('journal_entry_lines').select('account_id, debit, credit').in('entry_id', ids)
+      : { data: [] as any[] }
+    const map: Record<string, { dr: number; cr: number }> = {}
+    for (const l of lines ?? []) {
+      if (!map[l.account_id]) map[l.account_id] = { dr: 0, cr: 0 }
+      map[l.account_id].dr += Number(l.debit)
+      map[l.account_id].cr += Number(l.credit)
+    }
+    const withBal = accounts.map(a => {
+      const { dr = 0, cr = 0 } = map[a.id] ?? {}
+      const balance = ['asset', 'expense'].includes(a.type) ? dr - cr : cr - dr
+      return { ...a, dr, cr, balance }
+    })
+    if (reportType === 'pl') {
+      const revenue  = withBal.filter(a => a.type === 'revenue' && (a.dr > 0 || a.cr > 0))
+      const expenses = withBal.filter(a => a.type === 'expense' && (a.dr > 0 || a.cr > 0))
+      setReportData({ type: 'pl', revenue, expenses, totalRev: revenue.reduce((s, a) => s + a.balance, 0), totalExp: expenses.reduce((s, a) => s + a.balance, 0) })
+    } else {
+      const revAccts = withBal.filter(a => a.type === 'revenue')
+      const expAccts = withBal.filter(a => a.type === 'expense')
+      const netIncome = revAccts.reduce((s, a) => s + a.balance, 0) - expAccts.reduce((s, a) => s + a.balance, 0)
+      setReportData({
+        type: 'bs',
+        assets:      withBal.filter(a => a.type === 'asset'),
+        liabilities: withBal.filter(a => a.type === 'liability'),
+        equity:      withBal.filter(a => a.type === 'equity'),
+        totalAssets: withBal.filter(a => a.type === 'asset').reduce((s, a) => s + a.balance, 0),
+        totalLiab:   withBal.filter(a => a.type === 'liability').reduce((s, a) => s + a.balance, 0),
+        totalEquity: withBal.filter(a => a.type === 'equity').reduce((s, a) => s + a.balance, 0) + netIncome,
+        netIncome,
+      })
+    }
+    setReportLoading(false)
+  }
+
+  // ── Bank Reconciliation ────────────────────────────────────────
+
+  async function loadReconciliation() {
+    if (!activeBranch) return
+    setReconLoading(true)
+    const cashAcct = accounts.find(a => a.code === '1020')
+    if (!cashAcct) { toast('Account 1020 (Cash at Bank) not found in COA', 'error'); setReconLoading(false); return }
+    const { data: jeData } = await supabase.from('journal_entries')
+      .select('id').eq('branch_id', activeBranch.id).eq('is_void', false)
+    const ids = (jeData ?? []).map((e: any) => e.id)
+    if (ids.length === 0) { setReconLines([]); setReconLoading(false); return }
+    const { data } = await supabase.from('journal_entry_lines')
+      .select('*, entry:journal_entries(entry_number, entry_date, description)')
+      .eq('account_id', cashAcct.id).in('entry_id', ids)
+    setReconLines(
+      (data ?? [])
+        .filter((r: any) => r.entry)
+        .sort((a: any, b: any) => a.entry.entry_date.localeCompare(b.entry.entry_date))
+    )
+    setReconLoading(false)
+  }
+
+  async function toggleReconciled(lineId: string, current: boolean) {
+    await supabase.from('journal_entry_lines').update({ is_reconciled: !current }).eq('id', lineId)
+    setReconLines(prev => prev.map(r => r.id === lineId ? { ...r, is_reconciled: !current } : r))
+  }
+
   // ── Derived ────────────────────────────────────────────────────
 
   const pettyCashBalance = petty.reduce((s, t) => s + (t.transaction_type === 'in' ? Number(t.amount) : -Number(t.amount)), 0)
@@ -598,14 +881,17 @@ export default function AccountingPage() {
         {/* ══ RECEIVABLES (AR) ══════════════════════════════════════ */}
         {tab === 'ar' && (
           <div>
-            <div className="flex gap-1 bg-hsurface2 rounded-xl p-1 mb-4 w-fit">
-              {(['all', 'unpaid', 'partial', 'paid'] as const).map(f => (
-                <button key={f} onClick={() => setArFilter(f)}
-                  className={cn('px-4 py-1.5 rounded-lg text-sm font-medium transition-colors capitalize',
-                    arFilter === f ? 'bg-white text-dark-navy shadow-sm' : 'text-hmuted hover:text-htext'
-                  )}
-                >{f === 'all' ? 'All' : capitalize(f)}</button>
-              ))}
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex gap-1 bg-hsurface2 rounded-xl p-1">
+                {(['all', 'unpaid', 'partial', 'paid'] as const).map(f => (
+                  <button key={f} onClick={() => setArFilter(f)}
+                    className={cn('px-4 py-1.5 rounded-lg text-sm font-medium transition-colors capitalize',
+                      arFilter === f ? 'bg-white text-dark-navy shadow-sm' : 'text-hmuted hover:text-htext'
+                    )}
+                  >{f === 'all' ? 'All' : capitalize(f)}</button>
+                ))}
+              </div>
+              <Button variant="ghost" onClick={() => setShowAgingReport(true)}>Aging Report</Button>
             </div>
             <div className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
               <div className="px-5 py-4 border-b border-hborder">
@@ -627,7 +913,7 @@ export default function AccountingPage() {
                       <tr><td colSpan={10} className="px-5 py-10 text-center text-hmuted">No invoices found</td></tr>
                     ) : filteredAR.map((inv: any) => {
                       const issueDate = inv.invoice_date ?? inv.created_at
-                      const days      = ageDays(issueDate)
+                      const od        = daysPastDue(issueDate)
                       const due       = new Date(issueDate); due.setDate(due.getDate() + 30)
                       const balance   = Number(inv.total) - Number(inv.amount_paid)
                       return (
@@ -642,8 +928,8 @@ export default function AccountingPage() {
                           <td className="px-4 py-2.5 font-semibold text-right text-dark-navy">{formatCurrency(balance)}</td>
                           <td className="px-4 py-2.5">
                             {inv.status !== 'paid' && inv.status !== 'void' && (
-                              <span className={cn('text-[10px] px-2 py-0.5 rounded-full font-medium whitespace-nowrap', agingColor(days))}>
-                                {agingLabel(days)}
+                              <span className={cn('text-[10px] px-2 py-0.5 rounded-full font-medium whitespace-nowrap', agingColor(od))}>
+                                {agingLabel(od)}
                               </span>
                             )}
                           </td>
@@ -794,23 +1080,26 @@ export default function AccountingPage() {
             <div className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
               <table className="w-full text-sm">
                 <thead><tr className="bg-hsurface2">
-                  {['', 'Entry #', 'Date', 'Description', 'Reference', 'Type', 'Posted'].map(h => (
+                  {['', 'Entry #', 'Date', 'Description', 'Reference', 'Type', 'Posted', ''].map(h => (
                     <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide">{h}</th>
                   ))}
                 </tr></thead>
                 <tbody>
                   {entries.length === 0 ? (
-                    <tr><td colSpan={7} className="px-5 py-10 text-center text-hmuted">No journal entries. Entries auto-post when transactions are recorded.</td></tr>
+                    <tr><td colSpan={8} className="px-5 py-10 text-center text-hmuted">No journal entries. Entries auto-post when transactions are recorded.</td></tr>
                   ) : entries.map(e => (
                     <>
-                      <tr key={e.id} className="border-t border-hborder hover:bg-hbg/40 cursor-pointer"
+                      <tr key={e.id} className={cn('border-t border-hborder hover:bg-hbg/40 cursor-pointer', e.is_void && 'opacity-50 bg-gray-50/60')}
                         onClick={async () => {
                           if (expandedEntryId === e.id) { setExpandedEntryId(null); return }
                           setExpandedEntryId(e.id); await loadEntryLines(e.id)
                         }}
                       >
                         <td className="px-3 py-2.5 text-hmuted text-xs">{expandedEntryId === e.id ? '▾' : '▸'}</td>
-                        <td className="px-4 py-2.5 font-mono text-xs text-hmuted">{e.entry_number}</td>
+                        <td className="px-4 py-2.5 font-mono text-xs text-hmuted">
+                          <span className={e.is_void ? 'line-through' : ''}>{e.entry_number}</span>
+                          {e.is_void && <span className="ml-1.5 text-[9px] bg-gray-200 text-gray-500 px-1.5 py-0.5 rounded-full font-bold uppercase">VOID</span>}
+                        </td>
                         <td className="px-4 py-2.5 text-xs text-hmuted whitespace-nowrap">{formatDate(e.entry_date)}</td>
                         <td className="px-4 py-2.5 text-htext">{e.description}</td>
                         <td className="px-4 py-2.5 text-xs text-hmuted font-mono">{e.reference ?? '—'}</td>
@@ -820,6 +1109,14 @@ export default function AccountingPage() {
                           </span>
                         </td>
                         <td className="px-4 py-2.5 text-xs text-hmuted">{formatDate(e.created_at)}</td>
+                        <td className="px-4 py-2.5" onClick={ev => ev.stopPropagation()}>
+                          {!e.is_void && (
+                            <button
+                              onClick={() => voidJournalEntry(e)}
+                              className="text-xs text-red-400 hover:text-red-600 hover:underline"
+                            >Void</button>
+                          )}
+                        </td>
                       </tr>
                       {expandedEntryId === e.id && entryLines[e.id] && (
                         <tr key={`${e.id}-lines`} className="bg-hbg/50">
@@ -928,6 +1225,367 @@ export default function AccountingPage() {
                 </div>
               )
             })()}
+          </div>
+        )}
+
+        {/* ══ TRIAL BALANCE ═════════════════════════════════════════ */}
+        {tab === 'trial_balance' && (
+          <div>
+            <div className="flex items-end gap-3 mb-5 bg-white border border-hborder rounded-2xl p-4 shadow-card flex-wrap">
+              <div>
+                <label className="block text-xs text-hmuted mb-1">From</label>
+                <input type="date" value={tbFrom} onChange={e => setTbFrom(e.target.value)} className={input} />
+              </div>
+              <div>
+                <label className="block text-xs text-hmuted mb-1">To</label>
+                <input type="date" value={tbTo} onChange={e => setTbTo(e.target.value)} className={input} />
+              </div>
+              <Button onClick={loadTrialBalance} disabled={tbLoading}>{tbLoading ? 'Computing…' : 'Generate'}</Button>
+              {tbRows.length > 0 && <Button variant="ghost" onClick={() => window.print()}>Print</Button>}
+            </div>
+            {tbRows.length > 0 ? (
+              <div className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
+                <div className="px-5 py-4 border-b border-hborder">
+                  <h3 className="font-serif text-[17px] text-dark-navy">Trial Balance</h3>
+                  <p className="text-xs text-hmuted">{tbFrom} — {tbTo} · {activeBranch?.location}</p>
+                </div>
+                <table className="w-full text-sm">
+                  <thead><tr className="bg-hsurface2">
+                    {['Code','Account Name','Type','Debit ($)','Credit ($)','Balance ($)'].map(h => (
+                      <th key={h} className={cn('px-4 py-3 text-[11px] font-semibold text-hmuted uppercase tracking-wide', h.includes('$') ? 'text-right' : 'text-left')}>{h}</th>
+                    ))}
+                  </tr></thead>
+                  <tbody>
+                    {tbRows.map((r, i) => (
+                      <tr key={r.id} className={cn('border-t border-hborder', i % 2 === 1 ? 'bg-hbg/30' : '')}>
+                        <td className="px-4 py-2 font-mono text-xs text-navy">{r.code}</td>
+                        <td className="px-4 py-2 text-htext">{r.name}</td>
+                        <td className="px-4 py-2"><span className={cn('text-[10px] px-2 py-0.5 rounded-full font-medium', TYPE_COLOR[r.type as AccountType])}>{r.type}</span></td>
+                        <td className="px-4 py-2 text-right text-hmuted">{r.dr > 0 ? formatCurrency(r.dr) : ''}</td>
+                        <td className="px-4 py-2 text-right text-hmuted">{r.cr > 0 ? formatCurrency(r.cr) : ''}</td>
+                        <td className={cn('px-4 py-2 text-right font-semibold', r.balance < 0 ? 'text-red-600' : 'text-dark-navy')}>{formatCurrency(Math.abs(r.balance))}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    {(() => {
+                      const totDr = tbRows.reduce((s, r) => s + r.dr, 0)
+                      const totCr = tbRows.reduce((s, r) => s + r.cr, 0)
+                      const balanced = Math.abs(totDr - totCr) < 0.01
+                      return (
+                        <tr className="bg-dark-navy text-white">
+                          <td colSpan={3} className="px-4 py-3 font-bold text-sm uppercase tracking-wide">Totals</td>
+                          <td className="px-4 py-3 text-right font-bold">{formatCurrency(totDr)}</td>
+                          <td className="px-4 py-3 text-right font-bold">{formatCurrency(totCr)}</td>
+                          <td className="px-4 py-3 text-right font-bold">
+                            {balanced ? <span className="text-green-300">✓ Balanced</span> : <span className="text-red-300">⚠ Unbalanced</span>}
+                          </td>
+                        </tr>
+                      )
+                    })()}
+                  </tfoot>
+                </table>
+              </div>
+            ) : (
+              <p className="text-center text-hmuted py-16">Select a date range and click Generate.</p>
+            )}
+          </div>
+        )}
+
+        {/* ══ P&L / BALANCE SHEET ═══════════════════════════════════ */}
+        {tab === 'reports' && (
+          <div>
+            <div className="flex items-end gap-3 mb-5 bg-white border border-hborder rounded-2xl p-4 shadow-card flex-wrap">
+              <div className="flex gap-1 bg-hsurface2 rounded-xl p-1">
+                {(['pl', 'bs'] as const).map(t => (
+                  <button key={t} onClick={() => { setReportType(t); setReportData(null) }}
+                    className={cn('px-4 py-1.5 rounded-lg text-sm font-medium transition-colors',
+                      reportType === t ? 'bg-white text-dark-navy shadow-sm' : 'text-hmuted hover:text-htext'
+                    )}>{t === 'pl' ? 'Income Statement' : 'Balance Sheet'}</button>
+                ))}
+              </div>
+              {reportType === 'pl' && (
+                <div>
+                  <label className="block text-xs text-hmuted mb-1">From</label>
+                  <input type="date" value={reportFrom} onChange={e => setReportFrom(e.target.value)} className={input} />
+                </div>
+              )}
+              <div>
+                <label className="block text-xs text-hmuted mb-1">{reportType === 'pl' ? 'To' : 'As of'}</label>
+                <input type="date" value={reportTo} onChange={e => setReportTo(e.target.value)} className={input} />
+              </div>
+              <Button onClick={loadReport} disabled={reportLoading}>{reportLoading ? 'Computing…' : 'Generate'}</Button>
+              {reportData && <Button variant="ghost" onClick={() => window.print()}>Print</Button>}
+            </div>
+
+            {reportData?.type === 'pl' && (
+              <div className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
+                <div className="px-5 py-4 border-b border-hborder">
+                  <h3 className="font-serif text-[17px] text-dark-navy">Income Statement</h3>
+                  <p className="text-xs text-hmuted">{reportFrom} — {reportTo} · {activeBranch?.location}</p>
+                </div>
+                <div className="p-5 space-y-5">
+                  <div>
+                    <p className="text-xs font-bold text-hmuted uppercase tracking-wide mb-2">Revenue</p>
+                    {reportData.revenue.map((a: any) => (
+                      <div key={a.id} className="flex justify-between py-1.5 border-b border-hborder/40 text-sm">
+                        <span className="text-htext">{a.code} — {a.name}</span>
+                        <span className="font-medium text-green-700">{formatCurrency(a.balance)}</span>
+                      </div>
+                    ))}
+                    <div className="flex justify-between py-2 font-bold text-dark-navy">
+                      <span>Total Revenue</span><span>{formatCurrency(reportData.totalRev)}</span>
+                    </div>
+                  </div>
+                  <div>
+                    <p className="text-xs font-bold text-hmuted uppercase tracking-wide mb-2">Expenses</p>
+                    {reportData.expenses.map((a: any) => (
+                      <div key={a.id} className="flex justify-between py-1.5 border-b border-hborder/40 text-sm">
+                        <span className="text-htext">{a.code} — {a.name}</span>
+                        <span className="font-medium text-red-600">{formatCurrency(a.balance)}</span>
+                      </div>
+                    ))}
+                    <div className="flex justify-between py-2 font-bold text-dark-navy">
+                      <span>Total Expenses</span><span>{formatCurrency(reportData.totalExp)}</span>
+                    </div>
+                  </div>
+                  <div className={cn('flex justify-between p-4 rounded-xl font-bold text-lg', reportData.totalRev - reportData.totalExp >= 0 ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-700')}>
+                    <span>Net {reportData.totalRev - reportData.totalExp >= 0 ? 'Income' : 'Loss'}</span>
+                    <span>{formatCurrency(Math.abs(reportData.totalRev - reportData.totalExp))}</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {reportData?.type === 'bs' && (
+              <div className="grid grid-cols-2 gap-4">
+                <div className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
+                  <div className="px-5 py-3 border-b border-hborder bg-green-50">
+                    <p className="font-bold text-green-800 text-sm uppercase tracking-wide">Assets</p>
+                  </div>
+                  <div className="p-4 space-y-1">
+                    {reportData.assets.map((a: any) => (
+                      <div key={a.id} className="flex justify-between py-1 text-sm border-b border-hborder/30">
+                        <span className="text-htext">{a.code} — {a.name}</span>
+                        <span className={cn('font-medium', a.balance < 0 ? 'text-red-500' : '')}>{formatCurrency(a.balance)}</span>
+                      </div>
+                    ))}
+                    <div className="flex justify-between pt-3 font-bold text-dark-navy border-t-2 border-hborder">
+                      <span>Total Assets</span><span>{formatCurrency(reportData.totalAssets)}</span>
+                    </div>
+                  </div>
+                </div>
+                <div className="space-y-4">
+                  <div className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
+                    <div className="px-5 py-3 border-b border-hborder bg-red-50">
+                      <p className="font-bold text-red-800 text-sm uppercase tracking-wide">Liabilities</p>
+                    </div>
+                    <div className="p-4 space-y-1">
+                      {reportData.liabilities.map((a: any) => (
+                        <div key={a.id} className="flex justify-between py-1 text-sm border-b border-hborder/30">
+                          <span className="text-htext">{a.code} — {a.name}</span>
+                          <span className="font-medium">{formatCurrency(a.balance)}</span>
+                        </div>
+                      ))}
+                      <div className="flex justify-between pt-2 font-semibold text-dark-navy border-t border-hborder">
+                        <span>Total Liabilities</span><span>{formatCurrency(reportData.totalLiab)}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
+                    <div className="px-5 py-3 border-b border-hborder bg-purple-50">
+                      <p className="font-bold text-purple-800 text-sm uppercase tracking-wide">Equity</p>
+                    </div>
+                    <div className="p-4 space-y-1">
+                      {reportData.equity.map((a: any) => (
+                        <div key={a.id} className="flex justify-between py-1 text-sm border-b border-hborder/30">
+                          <span className="text-htext">{a.code} — {a.name}</span>
+                          <span className="font-medium">{formatCurrency(a.balance)}</span>
+                        </div>
+                      ))}
+                      <div className="flex justify-between py-1 text-sm border-b border-hborder/30">
+                        <span className="text-htext italic">Current Period Net Income</span>
+                        <span className={cn('font-medium', reportData.netIncome < 0 ? 'text-red-500' : 'text-green-700')}>{formatCurrency(reportData.netIncome)}</span>
+                      </div>
+                      <div className="flex justify-between pt-2 font-semibold text-dark-navy border-t border-hborder">
+                        <span>Total Equity</span><span>{formatCurrency(reportData.totalEquity)}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className={cn('p-4 rounded-xl font-bold text-sm flex justify-between', Math.abs(reportData.totalAssets - reportData.totalLiab - reportData.totalEquity) < 0.01 ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-700')}>
+                    <span>Balance Check (Assets = Liab + Equity)</span>
+                    <span>{Math.abs(reportData.totalAssets - reportData.totalLiab - reportData.totalEquity) < 0.01 ? '✓ Balanced' : `⚠ Off by ${formatCurrency(Math.abs(reportData.totalAssets - reportData.totalLiab - reportData.totalEquity))}`}</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {!reportData && !reportLoading && (
+              <p className="text-center text-hmuted py-16">Select a report type and date range, then click Generate.</p>
+            )}
+          </div>
+        )}
+
+        {/* ══ BANK RECONCILIATION ═══════════════════════════════════ */}
+        {tab === 'reconciliation' && (
+          <div>
+            <div className="flex items-end gap-4 mb-5 bg-white border border-hborder rounded-2xl p-4 shadow-card flex-wrap">
+              <div>
+                <label className="block text-xs text-hmuted mb-1">Statement Balance ($)</label>
+                <input type="number" step="0.01" value={reconStmtBal} onChange={e => setReconStmtBal(e.target.value)} placeholder="0.00" className={input} style={{ width: 160 }} />
+              </div>
+              <Button onClick={loadReconciliation} disabled={reconLoading}>{reconLoading ? 'Loading…' : 'Load Transactions'}</Button>
+              <p className="text-xs text-hmuted self-end pb-2">Loads all 1020 Cash at Bank transactions. Check off items that appear on the bank statement.</p>
+            </div>
+
+            {reconLines.length > 0 && (() => {
+              const bookBal     = reconLines.reduce((s, r) => s + Number(r.debit) - Number(r.credit), 0)
+              const clearedBal  = reconLines.filter(r => r.is_reconciled).reduce((s, r) => s + Number(r.debit) - Number(r.credit), 0)
+              const stmtBal     = Number(reconStmtBal) || 0
+              const diff        = clearedBal - stmtBal
+              return (
+                <>
+                  <div className="grid grid-cols-4 gap-4 mb-5">
+                    {[
+                      { label: 'Book Balance',     value: bookBal,    color: 'text-dark-navy' },
+                      { label: 'Cleared Balance',  value: clearedBal, color: 'text-dark-navy' },
+                      { label: 'Statement Balance',value: stmtBal,    color: 'text-dark-navy' },
+                      { label: 'Difference',       value: diff,       color: Math.abs(diff) < 0.01 ? 'text-green-700' : 'text-red-600' },
+                    ].map(c => (
+                      <div key={c.label} className="bg-white border border-hborder rounded-2xl p-4 shadow-card">
+                        <p className="text-xs text-hmuted">{c.label}</p>
+                        <p className={cn('font-serif text-xl mt-1', c.color)}>{formatCurrency(c.value)}</p>
+                        {c.label === 'Difference' && Math.abs(diff) < 0.01 && <p className="text-xs text-green-600 mt-0.5">✓ Reconciled</p>}
+                      </div>
+                    ))}
+                  </div>
+                  <div className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
+                    <table className="w-full text-sm">
+                      <thead><tr className="bg-hsurface2">
+                        <th className="px-3 py-3 w-10" />
+                        {['Date','Entry #','Description','Debit','Credit','Cleared'].map(h => (
+                          <th key={h} className={cn('px-4 py-3 text-[11px] font-semibold text-hmuted uppercase tracking-wide', h.match(/Debit|Credit/) ? 'text-right' : 'text-left')}>{h}</th>
+                        ))}
+                      </tr></thead>
+                      <tbody>
+                        {reconLines.map((r: any) => (
+                          <tr key={r.id} className={cn('border-t border-hborder transition-colors', r.is_reconciled ? 'bg-green-50/60' : 'hover:bg-hbg/40')}>
+                            <td className="px-3 py-2.5 text-center">
+                              <input type="checkbox" checked={r.is_reconciled} onChange={() => toggleReconciled(r.id, r.is_reconciled)}
+                                className="w-4 h-4 accent-green-600 cursor-pointer" />
+                            </td>
+                            <td className="px-4 py-2.5 text-xs text-hmuted whitespace-nowrap">{formatDate(r.entry?.entry_date)}</td>
+                            <td className="px-4 py-2.5 font-mono text-xs text-hmuted">{r.entry?.entry_number}</td>
+                            <td className="px-4 py-2.5 text-htext max-w-[240px] truncate">{r.entry?.description}</td>
+                            <td className="px-4 py-2.5 text-right font-medium">{Number(r.debit) > 0 ? formatCurrency(r.debit) : ''}</td>
+                            <td className="px-4 py-2.5 text-right font-medium">{Number(r.credit) > 0 ? formatCurrency(r.credit) : ''}</td>
+                            <td className="px-4 py-2.5 text-center">{r.is_reconciled ? <span className="text-green-600 font-bold">✓</span> : ''}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )
+            })()}
+            {reconLines.length === 0 && !reconLoading && (
+              <p className="text-center text-hmuted py-16">Click Load Transactions to begin reconciliation of account 1020 Cash at Bank.</p>
+            )}
+          </div>
+        )}
+
+        {/* ══ RECURRING ENTRIES ═════════════════════════════════════ */}
+        {tab === 'recurring' && (
+          <div>
+            <div className="flex justify-end mb-4">
+              <Button onClick={() => {
+                setEditRecurId(null)
+                setRecurForm({ name: '', description: '', frequency: 'monthly', next_due_date: todayStr() })
+                setRecurLines([emptyJeLine(), emptyJeLine()])
+                setRecurFormOpen(true)
+              }}>+ New Template</Button>
+            </div>
+            <div className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
+              <table className="w-full text-sm">
+                <thead><tr className="bg-hsurface2">
+                  {['Template Name','Description','Frequency','Next Due','Active','Actions'].map(h => (
+                    <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide">{h}</th>
+                  ))}
+                </tr></thead>
+                <tbody>
+                  {recurring.length === 0 ? (
+                    <tr><td colSpan={6} className="px-5 py-12 text-center text-hmuted">No recurring templates yet. Create one for monthly salary, rent, utilities, etc.</td></tr>
+                  ) : recurring.map(rec => (
+                    <tr key={rec.id} className={cn('border-t border-hborder hover:bg-hbg/40', !rec.is_active && 'opacity-50')}>
+                      <td className="px-4 py-2.5 font-medium text-htext">{rec.name}</td>
+                      <td className="px-4 py-2.5 text-xs text-hmuted max-w-[200px] truncate">{rec.description}</td>
+                      <td className="px-4 py-2.5 text-xs text-hmuted capitalize">{rec.frequency}</td>
+                      <td className="px-4 py-2.5 text-xs text-hmuted whitespace-nowrap">{formatDate(rec.next_due_date)}</td>
+                      <td className="px-4 py-2.5">
+                        <span className={cn('text-[10px] px-2 py-0.5 rounded-full font-medium', rec.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500')}>
+                          {rec.is_active ? 'Active' : 'Inactive'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <div className="flex gap-3">
+                          <button onClick={() => postRecurring(rec)} className="text-xs text-navy hover:underline font-medium">Post Now</button>
+                          <button onClick={() => {
+                            setEditRecurId(rec.id)
+                            setRecurForm({ name: rec.name, description: rec.description, frequency: rec.frequency, next_due_date: rec.next_due_date })
+                            setRecurLines(rec.lines.length > 0 ? rec.lines.map((l: any) => ({ ...l, debit: l.debit || '', credit: l.credit || '' })) : [emptyJeLine(), emptyJeLine()])
+                            setRecurFormOpen(true)
+                          }} className="text-xs text-hmuted hover:text-htext hover:underline">Edit</button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* ══ ACCOUNTING PERIODS ════════════════════════════════════ */}
+        {tab === 'periods' && (
+          <div>
+            <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-5 text-sm text-amber-800">
+              <strong>Period Close:</strong> Closing a period blocks new journal entries dated in that month. Reopen to make corrections. Year-end close entries (transferring P&L to Retained Earnings) should be posted manually as a closing-type journal entry.
+            </div>
+            <div className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
+              <table className="w-full text-sm">
+                <thead><tr className="bg-hsurface2">
+                  {['Period','Status','Closed At','Action'].map(h => (
+                    <th key={h} className="px-5 py-3 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide">{h}</th>
+                  ))}
+                </tr></thead>
+                <tbody>
+                  {Array.from({ length: 24 }, (_, i) => {
+                    const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - i)
+                    const year = d.getFullYear(), month = d.getMonth() + 1
+                    const period = periods.find(p => p.year === year && p.month === month)
+                    const isClosed = period?.status === 'closed'
+                    return (
+                      <tr key={`${year}-${month}`} className={cn('border-t border-hborder', isClosed ? 'bg-gray-50/60' : 'hover:bg-hbg/40')}>
+                        <td className="px-5 py-3 font-medium text-htext">{MONTH_NAMES[month - 1]} {year}</td>
+                        <td className="px-5 py-3">
+                          <span className={cn('text-xs px-2 py-0.5 rounded-full font-medium', isClosed ? 'bg-gray-100 text-gray-600' : 'bg-green-100 text-green-700')}>
+                            {isClosed ? '🔒 Closed' : '🔓 Open'}
+                          </span>
+                        </td>
+                        <td className="px-5 py-3 text-xs text-hmuted">{period?.closed_at ? formatDate(period.closed_at) : '—'}</td>
+                        <td className="px-5 py-3">
+                          {isClosed ? (
+                            <button onClick={() => reopenPeriod(period!.id, year, month)} className="text-xs text-navy hover:underline">Reopen</button>
+                          ) : (
+                            <button onClick={() => closePeriod(year, month)} disabled={periodSaving} className="text-xs text-red-500 hover:text-red-700 hover:underline disabled:opacity-50">Close Period</button>
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
 
@@ -1099,8 +1757,8 @@ export default function AccountingPage() {
             <div>
               <label className="block text-xs text-hmuted mb-1">Type</label>
               <select value={jeForm.reference_type} onChange={e => setJeForm(f => ({ ...f, reference_type: e.target.value }))} className={input}>
-                {['manual', 'invoice', 'bill', 'reservation', 'petty_cash', 'adjustment'].map(t => (
-                  <option key={t} value={t}>{capitalize(t.replace('_', ' '))}</option>
+                {['manual', 'invoice', 'bill', 'reservation', 'petty_cash', 'adjustment', 'opening_balance', 'closing'].map(t => (
+                  <option key={t} value={t}>{capitalize(t.replace(/_/g, ' '))}</option>
                 ))}
               </select>
             </div>
@@ -1305,6 +1963,148 @@ export default function AccountingPage() {
             <Button onClick={saveVendor} disabled={vendorSaving}>{vendorSaving ? 'Saving…' : editVendorId ? 'Update Vendor' : 'Add Vendor'}</Button>
           </div>
         </div>
+      </Modal>
+
+      {/* ── Recurring Entry Modal ── */}
+      <Modal open={recurFormOpen} onClose={() => setRecurFormOpen(false)} title={editRecurId ? 'Edit Template' : 'New Recurring Template'} size="lg">
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="col-span-2">
+              <label className="block text-xs text-hmuted mb-1">Template Name *</label>
+              <input value={recurForm.name} onChange={e => setRecurForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Monthly Rent, Staff Salary…" className={input} />
+            </div>
+            <div>
+              <label className="block text-xs text-hmuted mb-1">Frequency</label>
+              <select value={recurForm.frequency} onChange={e => setRecurForm(f => ({ ...f, frequency: e.target.value }))} className={input}>
+                <option value="monthly">Monthly</option>
+                <option value="quarterly">Quarterly</option>
+                <option value="annual">Annual</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-hmuted mb-1">Next Due Date</label>
+              <input type="date" value={recurForm.next_due_date} onChange={e => setRecurForm(f => ({ ...f, next_due_date: e.target.value }))} className={input} />
+            </div>
+            <div className="col-span-2">
+              <label className="block text-xs text-hmuted mb-1">Description (used as JE description when posted) *</label>
+              <input value={recurForm.description} onChange={e => setRecurForm(f => ({ ...f, description: e.target.value }))} placeholder="e.g. Monthly office rent payment" className={input} />
+            </div>
+          </div>
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs font-semibold text-hmuted uppercase tracking-wide">Debit / Credit Lines</p>
+              <button onClick={() => setRecurLines(prev => [...prev, emptyJeLine()])} className="text-xs text-navy hover:underline font-medium">+ Add Line</button>
+            </div>
+            <div className="space-y-2">
+              <div className="grid grid-cols-12 gap-2 px-0.5 text-[10px] text-hmuted uppercase tracking-wide font-semibold">
+                <span className="col-span-4">Account</span><span className="col-span-3">Note</span>
+                <span className="col-span-2 text-right">Debit ($)</span><span className="col-span-2 text-right">Credit ($)</span>
+              </div>
+              {recurLines.map((line, idx) => (
+                <div key={idx} className="grid grid-cols-12 gap-2 items-center">
+                  <select value={line.account_id} onChange={e => setRecurLines(prev => prev.map((l, i) => i === idx ? { ...l, account_id: e.target.value } : l))}
+                    className="col-span-4 border border-hborder rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-navy bg-hbg">
+                    <option value="">Select account…</option>
+                    {ACCOUNT_TYPES.map(type => (
+                      <optgroup key={type} label={capitalize(type)}>
+                        {accountsByType[type].filter(a => a.is_active).map(a => (
+                          <option key={a.id} value={a.id}>{a.code} — {a.name}</option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </select>
+                  <input value={line.description} onChange={e => setRecurLines(prev => prev.map((l, i) => i === idx ? { ...l, description: e.target.value } : l))}
+                    placeholder="Note" className="col-span-3 border border-hborder rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-navy bg-hbg" />
+                  <input type="number" min={0} step={0.01} value={line.debit} onChange={e => setRecurLines(prev => prev.map((l, i) => i === idx ? { ...l, debit: e.target.value } : l))}
+                    placeholder="0.00" className="col-span-2 border border-hborder rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-navy bg-hbg text-right" />
+                  <input type="number" min={0} step={0.01} value={line.credit} onChange={e => setRecurLines(prev => prev.map((l, i) => i === idx ? { ...l, credit: e.target.value } : l))}
+                    placeholder="0.00" className="col-span-2 border border-hborder rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-navy bg-hbg text-right" />
+                  {recurLines.length > 2
+                    ? <button onClick={() => setRecurLines(prev => prev.filter((_, i) => i !== idx))} className="col-span-1 text-red-400 hover:text-red-600 text-lg text-center">×</button>
+                    : <span className="col-span-1" />}
+                </div>
+              ))}
+            </div>
+            {(() => {
+              const dr = recurLines.reduce((s, l) => s + Number(l.debit || 0), 0)
+              const cr = recurLines.reduce((s, l) => s + Number(l.credit || 0), 0)
+              const ok = Math.abs(dr - cr) < 0.001
+              return (
+                <div className={cn('mt-3 rounded-xl px-4 py-2.5 flex items-center justify-between text-sm', ok ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200')}>
+                  <span className={ok ? 'text-green-700 font-medium' : 'text-red-600 font-medium'}>{ok ? '✓ Balanced' : '⚠ Debits must equal credits'}</span>
+                  <div className="flex gap-6 text-xs">
+                    <span className="text-hmuted">DR: <strong>{formatCurrency(dr)}</strong></span>
+                    <span className="text-hmuted">CR: <strong>{formatCurrency(cr)}</strong></span>
+                  </div>
+                </div>
+              )
+            })()}
+          </div>
+          <div className="flex justify-end gap-3 pt-1">
+            <Button variant="ghost" onClick={() => setRecurFormOpen(false)}>Cancel</Button>
+            <Button onClick={saveRecurring} disabled={recurSaving}>{recurSaving ? 'Saving…' : editRecurId ? 'Update Template' : 'Save Template'}</Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* ── AR Aging Report Modal ── */}
+      <Modal open={showAgingReport} onClose={() => setShowAgingReport(false)} title="AR Aging Report" size="lg">
+        {(() => {
+          const buckets: Record<string, { current: number; d30: number; d60: number; d60p: number }> = {}
+          arInvoices
+            .filter((inv: any) => inv.status !== 'paid' && inv.status !== 'void')
+            .forEach((inv: any) => {
+              const name = inv.guest?.full_name ?? 'No Guest'
+              if (!buckets[name]) buckets[name] = { current: 0, d30: 0, d60: 0, d60p: 0 }
+              const od = daysPastDue(inv.invoice_date ?? inv.created_at)
+              const bal = Number(inv.total) - Number(inv.amount_paid)
+              if (od <= 0) buckets[name].current += bal
+              else if (od <= 30) buckets[name].d30 += bal
+              else if (od <= 60) buckets[name].d60 += bal
+              else buckets[name].d60p += bal
+            })
+          const rows = Object.entries(buckets)
+          const tot = (key: 'current' | 'd30' | 'd60' | 'd60p') => rows.reduce((s, [, v]) => s + v[key], 0)
+          return (
+            <div>
+              <div className="flex justify-end mb-3">
+                <Button variant="ghost" onClick={() => window.print()}>Print</Button>
+              </div>
+              <table className="w-full text-sm">
+                <thead><tr className="bg-hsurface2">
+                  {['Customer','Current','1–30 days','31–60 days','60+ days','Total'].map(h => (
+                    <th key={h} className={cn('px-3 py-2.5 text-[11px] font-semibold text-hmuted uppercase tracking-wide', h === 'Customer' ? 'text-left' : 'text-right')}>{h}</th>
+                  ))}
+                </tr></thead>
+                <tbody>
+                  {rows.map(([name, v]) => {
+                    const total = v.current + v.d30 + v.d60 + v.d60p
+                    return (
+                      <tr key={name} className="border-t border-hborder hover:bg-hbg/40">
+                        <td className="px-3 py-2 text-htext font-medium">{name}</td>
+                        <td className="px-3 py-2 text-right text-green-700">{v.current > 0 ? formatCurrency(v.current) : '—'}</td>
+                        <td className="px-3 py-2 text-right text-yellow-700">{v.d30 > 0 ? formatCurrency(v.d30) : '—'}</td>
+                        <td className="px-3 py-2 text-right text-orange-600">{v.d60 > 0 ? formatCurrency(v.d60) : '—'}</td>
+                        <td className="px-3 py-2 text-right text-red-600">{v.d60p > 0 ? formatCurrency(v.d60p) : '—'}</td>
+                        <td className="px-3 py-2 text-right font-bold text-dark-navy">{formatCurrency(total)}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+                <tfoot>
+                  <tr className="bg-dark-navy text-white">
+                    <td className="px-3 py-2.5 font-bold">Total</td>
+                    <td className="px-3 py-2.5 text-right font-bold">{formatCurrency(tot('current'))}</td>
+                    <td className="px-3 py-2.5 text-right font-bold">{formatCurrency(tot('d30'))}</td>
+                    <td className="px-3 py-2.5 text-right font-bold">{formatCurrency(tot('d60'))}</td>
+                    <td className="px-3 py-2.5 text-right font-bold">{formatCurrency(tot('d60p'))}</td>
+                    <td className="px-3 py-2.5 text-right font-bold">{formatCurrency(tot('current') + tot('d30') + tot('d60') + tot('d60p'))}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )
+        })()}
       </Modal>
 
       {/* ── Petty Cash Modal ── */}

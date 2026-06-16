@@ -8,6 +8,7 @@ import { formatCurrency, formatDate, capitalize } from '@/lib/utils'
 import { toast } from '@/components/ui/Toast'
 import { useBranch } from '@/context/BranchContext'
 import { cn } from '@/lib/utils'
+import { generateJournalEntryNumber } from '@/lib/utils'
 import type { FixedAsset, AssetCategory, AssetStatus } from '@/types'
 
 type Tab = 'overview' | 'register' | 'depreciation'
@@ -67,10 +68,16 @@ export default function AssetsPage() {
   const [form, setForm] = useState({ ...emptyForm })
   const [saving, setSaving] = useState(false)
 
-  // Depreciation year
+  // Depreciation year (schedule view)
   const [depYear, setDepYear] = useState(new Date().getFullYear())
 
-  useEffect(() => { if (activeBranch) load() }, [activeBranch]) // eslint-disable-line
+  // Depreciation run (auto-post)
+  const [depRuns,      setDepRuns]      = useState<any[]>([])
+  const [depRunYear,   setDepRunYear]   = useState(new Date().getFullYear())
+  const [depRunMonth,  setDepRunMonth]  = useState(new Date().getMonth() + 1)
+  const [depRunSaving, setDepRunSaving] = useState(false)
+
+  useEffect(() => { if (activeBranch) { load(); loadDepRuns() } }, [activeBranch]) // eslint-disable-line
 
   async function load() {
     if (!activeBranch) return
@@ -83,6 +90,74 @@ export default function AssetsPage() {
       .order('purchased_date', { ascending: true, nullsFirst: false })
     setAssets((data ?? []) as FixedAsset[])
     setLoading(false)
+  }
+
+  async function loadDepRuns() {
+    if (!activeBranch) return
+    const { data } = await supabase.from('depreciation_runs')
+      .select('*').eq('branch_id', activeBranch.id)
+      .order('run_year', { ascending: false }).order('run_month', { ascending: false })
+    setDepRuns(data ?? [])
+  }
+
+  async function runDepreciation() {
+    if (!activeBranch) return
+    const alreadyRun = depRuns.find(r => r.run_year === depRunYear && r.run_month === depRunMonth)
+    if (alreadyRun) { toast(`Depreciation for ${MONTHS[depRunMonth - 1]} ${depRunYear} already posted`, 'error'); return }
+    const depAssetList = assets.filter(a => a.is_depreciable && a.status === 'active' && Number(a.total_cost) > 0)
+    if (depAssetList.length === 0) { toast('No depreciable active assets found', 'error'); return }
+
+    // Map category → accumulated depreciation account code
+    const accumMap: Record<string, string> = {
+      building: '1501', computer_office: '1502', furniture: '1503', machinery: '1504', vehicle: '1505',
+    }
+    const { data: coaData } = await supabase.from('chart_of_accounts')
+      .select('id, code').eq('branch_id', activeBranch.id)
+    const coa = coaData ?? []
+    const findAcct = (code: string) => coa.find((a: any) => a.code === code)
+    const depExpAcct = findAcct('5700')
+    if (!depExpAcct) { toast('Account 5700 Depreciation Expense not found in COA', 'error'); return }
+
+    setDepRunSaving(true)
+    const entryDate = `${depRunYear}-${String(depRunMonth).padStart(2, '0')}-01`
+    const { data: je, error: jeErr } = await supabase.from('journal_entries').insert({
+      entry_number: generateJournalEntryNumber(),
+      entry_date: entryDate,
+      description: `Depreciation — ${MONTHS[depRunMonth - 1]} ${depRunYear}`,
+      reference_type: 'depreciation',
+      branch_id: activeBranch.id,
+    }).select().single()
+    if (jeErr || !je) { toast(jeErr?.message ?? 'Error creating journal entry', 'error'); setDepRunSaving(false); return }
+
+    let totalAmount = 0
+    const lines: any[] = []
+    for (const asset of depAssetList) {
+      const monthly = (Number(asset.total_cost) * Number(asset.depreciation_rate)) / 12
+      if (monthly <= 0) continue
+      // Skip if asset was purchased after the run month
+      if (asset.purchased_date) {
+        const pd = new Date(asset.purchased_date)
+        if (pd.getFullYear() > depRunYear || (pd.getFullYear() === depRunYear && pd.getMonth() + 1 > depRunMonth)) continue
+      }
+      const accumCode = accumMap[asset.category]
+      const accumAcct = accumCode ? findAcct(accumCode) : null
+      if (!accumAcct) continue
+      totalAmount += monthly
+      lines.push(
+        { entry_id: je.id, account_id: depExpAcct.id, description: asset.description, debit: monthly, credit: 0 },
+        { entry_id: je.id, account_id: accumAcct.id,  description: asset.description, debit: 0, credit: monthly },
+      )
+    }
+    if (lines.length === 0) { toast('No valid depreciation lines — check COA accounts 1501–1505 and 5700', 'error'); setDepRunSaving(false); return }
+    await supabase.from('journal_entry_lines').insert(lines)
+    await supabase.from('depreciation_runs').insert({
+      run_year: depRunYear, run_month: depRunMonth,
+      journal_entry_id: je.id, total_amount: totalAmount,
+      asset_count: lines.length / 2, branch_id: activeBranch.id,
+    })
+    toast(`Depreciation posted: ${je.entry_number} · ${formatCurrency(totalAmount)}`)
+    setDepRunSaving(false)
+    loadDepRuns()
   }
 
   // ── Overview stats ────────────────────────────────────────────────────────
@@ -449,9 +524,56 @@ export default function AssetsPage() {
         {/* ── DEPRECIATION SCHEDULE ─────────────────────────────────────── */}
         {tab === 'depreciation' && (
           <div className="space-y-4">
-            {/* Controls */}
+            {/* ── Run Depreciation panel ── */}
+            <div className="bg-white border border-hborder rounded-2xl p-5 shadow-sm">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="font-semibold text-dark-navy text-[15px]">Post Monthly Depreciation</h3>
+                  <p className="text-xs text-hmuted mt-0.5">Creates DR 5700 / CR Accum. Dep. journal entries for all active depreciable assets.</p>
+                </div>
+              </div>
+              <div className="flex items-end gap-3 flex-wrap">
+                <div>
+                  <label className="block text-xs text-hmuted mb-1">Month</label>
+                  <select value={depRunMonth} onChange={e => setDepRunMonth(Number(e.target.value))}
+                    className="border border-hborder rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-navy">
+                    {MONTHS.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-hmuted mb-1">Year</label>
+                  <select value={depRunYear} onChange={e => setDepRunYear(Number(e.target.value))}
+                    className="border border-hborder rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-navy">
+                    {[2024, 2025, 2026, 2027].map(y => <option key={y} value={y}>{y}</option>)}
+                  </select>
+                </div>
+                <Button
+                  onClick={runDepreciation}
+                  disabled={depRunSaving || !!depRuns.find(r => r.run_year === depRunYear && r.run_month === depRunMonth)}
+                >
+                  {depRunSaving ? 'Posting…' : depRuns.find(r => r.run_year === depRunYear && r.run_month === depRunMonth) ? '✓ Already Posted' : 'Run Depreciation'}
+                </Button>
+              </div>
+              {depRuns.length > 0 && (
+                <div className="mt-4 border-t border-hborder pt-4">
+                  <p className="text-xs font-semibold text-hmuted uppercase tracking-wide mb-2">Run History</p>
+                  <div className="space-y-1">
+                    {depRuns.slice(0, 6).map(r => (
+                      <div key={r.id} className="flex items-center justify-between text-sm py-1 border-b border-hborder/40">
+                        <span className="text-htext">{MONTHS[r.run_month - 1]} {r.run_year}</span>
+                        <span className="text-xs text-hmuted">{r.asset_count} assets</span>
+                        <span className="font-semibold text-dark-navy">{formatCurrency(r.total_amount)}</span>
+                        <span className="text-xs text-green-600 font-medium">✓ Posted</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Schedule Controls */}
             <div className="flex items-center gap-3">
-              <label className="text-sm text-hmuted font-medium">Year</label>
+              <label className="text-sm text-hmuted font-medium">Schedule Year</label>
               <select
                 value={depYear}
                 onChange={e => setDepYear(Number(e.target.value))}

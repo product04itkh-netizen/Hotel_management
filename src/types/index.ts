@@ -81,6 +81,17 @@ export interface FixedAsset {
   updated_at: string
 }
 
+export interface DepreciationRun {
+  id: string
+  run_year: number
+  run_month: number
+  journal_entry_id?: string
+  total_amount: number
+  asset_count: number
+  branch_id?: string
+  created_at: string
+}
+
 // ─── Accounting ───────────────────────────────────────────────────────────
 export type AccountType = 'asset' | 'liability' | 'equity' | 'revenue' | 'expense'
 
@@ -104,6 +115,8 @@ export interface JournalEntryLine {
   description?: string
   debit: number
   credit: number
+  is_reconciled: boolean
+  reconciliation_id?: string
   created_at: string
 }
 
@@ -114,11 +127,45 @@ export interface JournalEntry {
   reference?: string
   reference_type?: string
   description: string
+  is_void: boolean
+  voided_at?: string
+  void_entry_id?: string
   branch_id?: string
   created_by?: string
   created_at: string
   updated_at: string
   lines?: JournalEntryLine[]
+}
+
+export interface AccountingPeriod {
+  id: string
+  year: number
+  month: number
+  status: 'open' | 'closed'
+  closed_at?: string
+  notes?: string
+  branch_id?: string
+  created_at: string
+}
+
+export interface RecurringJELine {
+  account_id: string
+  description?: string
+  debit: number
+  credit: number
+}
+
+export interface RecurringJournalEntry {
+  id: string
+  name: string
+  description: string
+  frequency: 'monthly' | 'quarterly' | 'annual'
+  next_due_date: string
+  is_active: boolean
+  lines: RecurringJELine[]
+  branch_id?: string
+  created_at: string
+  updated_at: string
 }
 
 export interface PettyCashTransaction {
@@ -228,7 +275,6 @@ export interface Guest {
   created_at: string
   updated_at: string
 }
-
 
 export type ReservationStatus = 'pending' | 'confirmed' | 'checked_in' | 'checked_out' | 'cancelled' | 'no_show'
 export type BookingSource = 'walk_in' | 'phone' | 'online' | 'ota' | 'referral'
