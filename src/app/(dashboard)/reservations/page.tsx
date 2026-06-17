@@ -13,6 +13,7 @@ import type { Reservation, House } from '@/types'
 const STATUSES = ['all', 'pending', 'confirmed', 'checked_in', 'checked_out', 'cancelled', 'no_show']
 const SOURCES = ['walk_in', 'phone', 'online', 'ota', 'referral']
 
+
 const PRESET_ADDONS = [
   { label: 'Car Rental (4WD)', icon: '🚙' },
   { label: 'Food & Cooking', icon: '🍳' },
@@ -61,10 +62,34 @@ export default function ReservationsPage() {
   const [houseFilter, setHouseFilter] = useState('all')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
+  const [khHolidays, setKhHolidays] = useState<Record<string, string>>({})
 
   useEffect(() => {
     if (activeBranch) loadData()
   }, [activeBranch]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fetch Cambodian public holidays from Calendarific (once per year, cached 90 days)
+  useEffect(() => {
+    if (viewMode !== 'calendar') return
+    const yearsNeeded = new Set<number>()
+    if (dateFrom || dateTo) {
+      const start = new Date((dateFrom || dateTo) + 'T00:00:00').getFullYear()
+      const end   = new Date((dateTo || dateFrom) + 'T00:00:00').getFullYear()
+      for (let y = start; y <= end; y++) yearsNeeded.add(y)
+    } else {
+      yearsNeeded.add(calMonth.getFullYear())
+      yearsNeeded.add(calMonth.getFullYear() + 1) // prefetch next year
+    }
+    yearsNeeded.forEach(async (year) => {
+      try {
+        const res = await fetch(`/api/holidays?year=${year}`)
+        if (res.ok) {
+          const data: Record<string, string> = await res.json()
+          setKhHolidays(prev => ({ ...prev, ...data }))
+        }
+      } catch { /* silently fail — calendar still works without holidays */ }
+    })
+  }, [viewMode, calMonth, dateFrom, dateTo]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadData() {
     if (!activeBranch) return
@@ -554,6 +579,7 @@ export default function ReservationsPage() {
                       const ds = toDStr(day)
                       const isToday = ds === todayStr
                       const entries = getDayRes(ds)
+                      const holiday = khHolidays[ds] ?? null
                       return (
                         <div
                           key={di}
@@ -575,6 +601,16 @@ export default function ReservationsPage() {
                               {day.getDate()}
                             </span>
                           </div>
+
+                          {/* Cambodian public holiday tag */}
+                          {holiday && (
+                            <div
+                              title={holiday}
+                              className="w-full mb-[3px] px-1 py-[2px] rounded-[3px] text-[9px] font-semibold leading-tight truncate bg-red-50 text-red-700 border border-red-200"
+                            >
+                              🇰🇭 {holiday}
+                            </div>
+                          )}
 
                           {/* Reservation chips */}
                           <div className="space-y-[3px]">
