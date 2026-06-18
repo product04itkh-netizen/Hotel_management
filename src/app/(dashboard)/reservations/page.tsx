@@ -293,9 +293,17 @@ export default function ReservationsPage() {
     loadData()
   }
 
-  async function handleCancel(id: string) {
+  async function handleCancel(res: any) {
     if (!confirm('Cancel this reservation?')) return
-    await supabase.from('reservations').update({ status: 'cancelled', updated_at: new Date().toISOString() }).eq('id', id)
+    await supabase.from('reservations').update({ status: 'cancelled', updated_at: new Date().toISOString() }).eq('id', res.id)
+    fetch('/api/telegram/notify', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ event: 'cancellation', branch_id: activeBranch?.id, data: {
+        guest_name: (res.guest as any)?.full_name ?? res.guest_name,
+        house_name: (res.house as any)?.name,
+        reservation_number: res.reservation_number,
+      }}),
+    }).catch(() => {})
     toast('Reservation cancelled', 'info')
     loadData()
   }
@@ -455,7 +463,7 @@ export default function ReservationsPage() {
                           <div className="flex gap-2">
                             <button onClick={() => openEdit(res)} className="text-xs text-navy hover:underline">Edit</button>
                             {!['cancelled', 'checked_out', 'no_show'].includes(res.status) && (
-                              <button onClick={() => handleCancel(res.id)} className="text-xs text-red-500 hover:underline">Cancel</button>
+                              <button onClick={() => handleCancel(res)} className="text-xs text-red-500 hover:underline">Cancel</button>
                             )}
                           </div>
                         </td>

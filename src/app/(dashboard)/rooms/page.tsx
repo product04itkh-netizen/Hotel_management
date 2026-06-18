@@ -152,6 +152,15 @@ export default function PropertiesPage() {
 
   async function changeHouseStatus(house: House, status: HouseStatus) {
     await supabase.from('houses').update({ status, updated_at: new Date().toISOString() }).eq('id', house.id)
+    if (status === 'maintenance') {
+      fetch('/api/telegram/notify', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ event: 'room_maintenance', branch_id: activeBranch?.id, data: {
+          house_name: house.name,
+          notes: `${house.name} marked as maintenance`,
+        }}),
+      }).catch(() => {})
+    }
     toast(`${house.name} marked as ${status}`)
     await loadHouses()
     setSelectedHouseId(house.id)
@@ -231,6 +240,15 @@ export default function PropertiesPage() {
 
   async function changeRoomStatus(room: Room, status: RoomStatus) {
     await supabase.from('rooms').update({ status, updated_at: new Date().toISOString() }).eq('id', room.id)
+    if (status === 'maintenance') {
+      fetch('/api/telegram/notify', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ event: 'room_maintenance', branch_id: activeBranch?.id, data: {
+          house_name: room.room_number,
+          notes: `Room ${room.room_number} marked as maintenance`,
+        }}),
+      }).catch(() => {})
+    }
     toast(`${room.room_number} marked as ${status}`)
     await loadHouses()
     setSelectedHouseId((room as any).house_id)

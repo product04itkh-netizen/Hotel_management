@@ -23,6 +23,7 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [testingTelegram, setTestingTelegram] = useState(false)
+  const [testEvent, setTestEvent] = useState('new_reservation')
   const [settingsId, setSettingsId] = useState<string | null>(null)
   const [form, setForm] = useState({
     hotel_name: 'OnlyOne Homestay',
@@ -65,8 +66,10 @@ export default function SettingsPage() {
   }
 
   async function handleSave() {
+    if (!activeBranch) return
     setSaving(true)
     const payload = {
+      branch_id: activeBranch.id,
       hotel_name: form.hotel_name,
       hotel_address: form.hotel_address || null,
       hotel_phone: form.hotel_phone || null,
@@ -81,16 +84,64 @@ export default function SettingsPage() {
       check_out_time: form.check_out_time,
       updated_at: new Date().toISOString(),
     }
-    if (settingsId) {
-      const { error } = await supabase.from('hotel_settings').update(payload).eq('id', settingsId)
-      if (error) { toast(error.message, 'error'); setSaving(false); return }
-    } else {
-      const { data, error } = await supabase.from('hotel_settings').insert({ ...payload, branch_id: activeBranch?.id ?? null }).select().single()
-      if (error) { toast(error.message, 'error'); setSaving(false); return }
-      setSettingsId(data?.id ?? null)
-    }
+    const { data, error } = await supabase
+      .from('hotel_settings')
+      .upsert(payload, { onConflict: 'branch_id' })
+      .select('id')
+      .single()
+    if (error) { toast(error.message, 'error'); setSaving(false); return }
+    if (data?.id) setSettingsId(data.id)
     toast('Settings saved')
     setSaving(false)
+  }
+
+  const TEST_PAYLOADS: Record<string, Record<string, string>> = {
+    new_reservation: {
+      hotel_name: form.hotel_name,
+      guest_name: 'Test Guest',
+      house_name: 'House 01',
+      check_in:  new Date().toISOString().split('T')[0],
+      check_out: new Date(Date.now() + 86400000 * 2).toISOString().split('T')[0],
+      reservation_number: 'TEST-0001',
+    },
+    checkin: {
+      hotel_name: form.hotel_name,
+      guest_name: 'Test Guest',
+      house_name: 'House 01',
+      time: '14:00',
+      reservation_number: 'TEST-0001',
+    },
+    checkout: {
+      hotel_name: form.hotel_name,
+      guest_name: 'Test Guest',
+      house_name: 'House 01',
+      time: '12:00',
+      reservation_number: 'TEST-0001',
+    },
+    payment: {
+      hotel_name: form.hotel_name,
+      guest_name: 'Test Guest',
+      amount: '$120.00',
+      method: 'Cash',
+      invoice_number: 'INV-TEST-001',
+    },
+    housekeeping_complete: {
+      hotel_name: form.hotel_name,
+      room_number: 'House 01',
+      staff_name: 'Test Staff',
+    },
+    room_maintenance: {
+      hotel_name: form.hotel_name,
+      house_name: 'House 01',
+      notes: 'Test maintenance alert',
+    },
+    cancellation: {
+      hotel_name: form.hotel_name,
+      guest_name: 'Test Guest',
+      house_name: 'House 01',
+      reservation_number: 'TEST-0001',
+      reason: 'Test cancellation',
+    },
   }
 
   async function handleTestTelegram() {
@@ -102,23 +153,15 @@ export default function SettingsPage() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        event: 'new_reservation',
-        data: {
-          hotel_name: form.hotel_name,
-          guest_name: 'Test Guest',
-          room_number: '101',
-          room_type: 'Deluxe',
-          check_in: new Date().toISOString().split('T')[0],
-          check_out: new Date(Date.now() + 86400000 * 2).toISOString().split('T')[0],
-          reservation_number: 'TEST-0000',
-        },
+        event: testEvent,
+        data: TEST_PAYLOADS[testEvent] ?? {},
         override_token: form.telegram_bot_token,
         override_chat_id: form.telegram_chat_id,
-      })
+      }),
     })
     const json = await res.json()
     if (json.ok) {
-      toast('Test message sent! Check your Telegram.')
+      toast(`Test "${testEvent}" sent — check Telegram.`)
     } else {
       toast(json.error ?? 'Failed to send test message', 'error')
     }
@@ -299,13 +342,24 @@ export default function SettingsPage() {
                   </div>
                 </div>
 
-                <Button
-                  variant="ghost"
-                  onClick={handleTestTelegram}
-                  disabled={testingTelegram}
-                >
-                  {testingTelegram ? 'Sending…' : '📨 Send Test Notification'}
-                </Button>
+                <div className="flex gap-2 items-center">
+                  <select
+                    value={testEvent}
+                    onChange={e => setTestEvent(e.target.value)}
+                    className="flex-1 border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg"
+                  >
+                    {NOTIFICATION_EVENTS.map(ev => (
+                      <option key={ev.key} value={ev.key}>{ev.label}</option>
+                    ))}
+                  </select>
+                  <Button
+                    variant="ghost"
+                    onClick={handleTestTelegram}
+                    disabled={testingTelegram}
+                  >
+                    {testingTelegram ? 'Sending…' : '📨 Test'}
+                  </Button>
+                </div>
               </div>
             </div>
 

@@ -16,13 +16,13 @@ function buildMessage(event: TelegramEvent, data: Record<string, string | number
   const hotel = data.hotel_name ?? 'Hotel'
   switch (event) {
     case 'new_reservation':
-      return `📋 *New Reservation — ${hotel}*\n\nGuest: ${data.guest_name}\nRoom: ${data.room_number} (${data.room_type})\nCheck-in: ${data.check_in}\nCheck-out: ${data.check_out}\nRef: \`${data.reservation_number}\``
+      return `📋 *New Reservation — ${hotel}*\n\nGuest: ${data.guest_name}\nHouse: ${data.house_name ?? data.room_number}\nCheck-in: ${data.check_in}\nCheck-out: ${data.check_out}\nRef: \`${data.reservation_number}\``
 
     case 'checkin':
-      return `✅ *Guest Checked In — ${hotel}*\n\nGuest: ${data.guest_name}\nRoom: ${data.room_number}\nTime: ${data.time}\nRef: \`${data.reservation_number}\``
+      return `✅ *Guest Checked In — ${hotel}*\n\nGuest: ${data.guest_name}\nHouse: ${data.house_name ?? data.room_number}\nTime: ${data.time}\nRef: \`${data.reservation_number}\``
 
     case 'checkout':
-      return `🔑 *Guest Checked Out — ${hotel}*\n\nGuest: ${data.guest_name}\nRoom: ${data.room_number}\nTime: ${data.time}\nRef: \`${data.reservation_number}\``
+      return `🔑 *Guest Checked Out — ${hotel}*\n\nGuest: ${data.guest_name}\nHouse: ${data.house_name ?? data.room_number}\nTime: ${data.time}\nRef: \`${data.reservation_number}\``
 
     case 'payment':
       return `💳 *Payment Received — ${hotel}*\n\nGuest: ${data.guest_name}\nAmount: ${data.amount}\nMethod: ${data.method}\nInvoice: \`${data.invoice_number}\``
@@ -31,7 +31,7 @@ function buildMessage(event: TelegramEvent, data: Record<string, string | number
       return `🧹 *Room Ready — ${hotel}*\n\nRoom ${data.room_number} has been cleaned and is now available.\nStaff: ${data.staff_name}`
 
     case 'room_maintenance':
-      return `🔧 *Maintenance Alert — ${hotel}*\n\nRoom ${data.room_number} has been flagged for maintenance.\nPriority: ${data.priority}\nNotes: ${data.notes ?? 'None'}`
+      return `🔧 *Maintenance Alert — ${hotel}*\n\n${data.house_name ?? data.room_number} has been flagged for maintenance.\nNotes: ${data.notes ?? 'None'}`
 
     case 'cancellation':
       return `❌ *Reservation Cancelled — ${hotel}*\n\nGuest: ${data.guest_name}\nRoom: ${data.room_number}\nRef: \`${data.reservation_number}\`\nReason: ${data.reason ?? 'Not specified'}`
