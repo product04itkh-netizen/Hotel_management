@@ -50,7 +50,7 @@ export default function BillingPage() {
     if (!activeBranch) return
     const [invRes, resRes, settingsRes] = await Promise.all([
       supabase.from('invoices')
-        .select('*, reservation:reservations(reservation_number, check_in_date, check_out_date), guest:guests(full_name, phone), house:houses(name), deposit_amount')
+        .select('*, reservation:reservations(reservation_number, check_in_date, check_out_date), guest:guests(full_name, phone), house:houses(name)')
         .eq('branch_id', activeBranch.id)
         .order('created_at', { ascending: false }),
       supabase.from('reservations')

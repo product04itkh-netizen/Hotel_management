@@ -52,6 +52,7 @@ export default function ReservationsPage() {
   const [form, setForm] = useState({ ...emptyForm })
   const [lineItems, setLineItems] = useState<LineItemForm[]>([])
   const [deposit, setDeposit] = useState<number | string>(0)
+  const [depositMethod, setDepositMethod] = useState<string>('cash')
   const [paxCount, setPaxCount] = useState<number | string>('')
   const [arrivalTime, setArrivalTime] = useState('')
   const [saving, setSaving] = useState(false)
@@ -126,6 +127,7 @@ export default function ReservationsPage() {
     setForm({ ...emptyForm })
     setLineItems([])
     setDeposit(0)
+    setDepositMethod('cash')
     setPaxCount('')
     setArrivalTime('')
     setModalOpen(true)
@@ -155,6 +157,7 @@ export default function ReservationsPage() {
         .map(i => ({ id: i.id, label: i.label, amount: i.amount }))
     )
     setDeposit(res.deposit ?? 0)
+    setDepositMethod((res as any).deposit_method ?? 'cash')
     setPaxCount(res.pax_count ?? '')
     setArrivalTime(res.arrival_time ?? '')
     setModalOpen(true)
@@ -228,6 +231,7 @@ export default function ReservationsPage() {
         notes: form.notes || null,
         total_amount: subtotal,
         deposit: depositNum,
+        deposit_method: depositNum > 0 ? depositMethod : null,
         updated_at: new Date().toISOString(),
       }).eq('id', editId)
       if (error) { toast(error.message, 'error'); setSaving(false); return }
@@ -250,6 +254,7 @@ export default function ReservationsPage() {
         notes: form.notes || null,
         total_amount: subtotal,
         deposit: depositNum,
+        deposit_method: depositNum > 0 ? depositMethod : null,
       }).select().single()
 
       if (error) { toast(error.message, 'error'); setSaving(false); return }
@@ -1034,9 +1039,22 @@ export default function ReservationsPage() {
                 </div>
 
                 {/* Deposit inline input */}
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-hmuted">Deposit Paid</span>
+                <div className="flex items-center justify-between text-sm gap-2">
+                  <span className="text-hmuted shrink-0">Deposit Paid</span>
                   <div className="flex items-center gap-1.5">
+                    <select
+                      value={depositMethod}
+                      onChange={e => setDepositMethod(e.target.value)}
+                      className="border border-hborder rounded-md px-2 py-0.5 text-xs focus:outline-none focus:border-navy bg-hbg text-htext"
+                    >
+                      <option value="cash">Cash</option>
+                      <option value="bank_transfer">Bank Transfer</option>
+                      <option value="aba_pay">ABA Pay</option>
+                      <option value="wing">Wing</option>
+                      <option value="bakong">Bakong</option>
+                      <option value="online">Online (OTA)</option>
+                      <option value="other">Other</option>
+                    </select>
                     <span className="text-hmuted text-xs">$</span>
                     <input
                       type="number"
