@@ -166,11 +166,18 @@ export default function BillingPage() {
   async function generateInvoiceNumber(): Promise<string> {
     const now = new Date()
     const yyyymm = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`
-    const prefix = `INV-${yyyymm}-`
-    // Query globally (no branch filter) — the unique constraint is across all branches
+    // Branch code: single word → first 3 chars; multi-word → initials (e.g. "Srae Ambel" → "SA")
+    const location = activeBranch?.location ?? ''
+    const words = location.trim().split(/\s+/)
+    const branchCode = words.length === 1
+      ? location.slice(0, 3).toUpperCase()
+      : words.map(w => w[0]).join('').toUpperCase()
+    const prefix = `INV-${branchCode}-${yyyymm}-`
+    // Query per-branch — sequence is independent per branch
     const { data } = await supabase
       .from('invoices')
       .select('invoice_number')
+      .eq('branch_id', activeBranch!.id)
       .like('invoice_number', `${prefix}%`)
       .order('invoice_number', { ascending: false })
       .limit(1)
