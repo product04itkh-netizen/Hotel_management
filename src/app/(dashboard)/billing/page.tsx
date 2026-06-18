@@ -50,7 +50,7 @@ export default function BillingPage() {
     if (!activeBranch) return
     const [invRes, resRes, settingsRes] = await Promise.all([
       supabase.from('invoices')
-        .select('*, reservation:reservations(reservation_number, check_in_date, check_out_date), guest:guests(full_name, phone), house:houses(name)')
+        .select('*, reservation:reservations(reservation_number, check_in_date, check_out_date), guest:guests(full_name, phone), house:houses(name), deposit_amount')
         .eq('branch_id', activeBranch.id)
         .order('created_at', { ascending: false }),
       supabase.from('reservations')
@@ -212,6 +212,7 @@ export default function BillingPage() {
       discount_amount: discountAmount,
       total,
       amount_paid: initialPaid,
+      deposit_amount: initialPaid,
       status: initialStatus,
       payment_method: initialPaid > 0 ? 'cash' : null,
       paid_at: initialStatus === 'paid' ? new Date().toISOString() : null,
@@ -381,16 +382,16 @@ export default function BillingPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-hsurface2">
-                {['Invoice #', 'Guest', 'House', 'Subtotal', 'Tax', 'Total', 'Paid', 'Balance', 'Status', 'Date Issued', 'Actions'].map(h => (
+                {['Invoice #', 'Guest', 'House', 'Subtotal', 'Tax', 'Total', 'Deposit', 'Paid', 'Balance', 'Status', 'Date Issued', 'Actions'].map(h => (
                   <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide whitespace-nowrap">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={11} className="px-5 py-10 text-center text-hmuted">Loading…</td></tr>
+                <tr><td colSpan={12} className="px-5 py-10 text-center text-hmuted">Loading…</td></tr>
               ) : filtered.length === 0 ? (
-                <tr><td colSpan={11} className="px-5 py-10 text-center text-hmuted">No invoices found</td></tr>
+                <tr><td colSpan={12} className="px-5 py-10 text-center text-hmuted">No invoices found</td></tr>
               ) : filtered.map(inv => {
                 const balance = Number(inv.total) - Number(inv.amount_paid)
                 return (
@@ -404,6 +405,9 @@ export default function BillingPage() {
                     <td className="px-4 py-3 text-hmuted">{formatCurrency(inv.subtotal)}</td>
                     <td className="px-4 py-3 text-hmuted">{formatCurrency(inv.tax_amount ?? 0)}</td>
                     <td className="px-4 py-3 font-semibold text-dark-navy whitespace-nowrap">{formatCurrency(inv.total)}</td>
+                    <td className="px-4 py-3 text-blue-600 font-medium">
+                      {Number((inv as any).deposit_amount) > 0 ? formatCurrency((inv as any).deposit_amount) : <span className="text-hmuted">—</span>}
+                    </td>
                     <td className="px-4 py-3 text-green-700 font-medium">{formatCurrency(inv.amount_paid)}</td>
                     <td className="px-4 py-3">
                       {balance > 0
