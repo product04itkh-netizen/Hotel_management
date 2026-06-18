@@ -167,10 +167,10 @@ export default function BillingPage() {
     const now = new Date()
     const yyyymm = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`
     const prefix = `INV-${yyyymm}-`
+    // Query globally (no branch filter) — the unique constraint is across all branches
     const { data } = await supabase
       .from('invoices')
       .select('invoice_number')
-      .eq('branch_id', activeBranch!.id)
       .like('invoice_number', `${prefix}%`)
       .order('invoice_number', { ascending: false })
       .limit(1)
