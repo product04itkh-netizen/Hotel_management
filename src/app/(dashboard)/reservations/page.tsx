@@ -63,6 +63,7 @@ export default function ReservationsPage() {
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [khHolidays, setKhHolidays] = useState<Record<string, string>>({})
+  const [notifyingId, setNotifyingId] = useState<string | null>(null)
 
   useEffect(() => {
     if (activeBranch) loadData()
@@ -293,6 +294,30 @@ export default function ReservationsPage() {
     loadData()
   }
 
+  async function handleNotify(res: any) {
+    setNotifyingId(res.id)
+    const response = await fetch('/api/telegram/notify', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        event: 'new_reservation', branch_id: activeBranch?.id,
+        data: {
+          guest_name: (res.guest as any)?.full_name ?? res.guest_name,
+          house_name: (res.house as any)?.name,
+          check_in: res.check_in_date,
+          check_out: res.check_out_date,
+          reservation_number: res.reservation_number,
+        },
+      }),
+    })
+    const json = await response.json()
+    if (json.ok) {
+      toast(`Notification sent for ${res.reservation_number}`)
+    } else {
+      toast(json.error ?? 'Failed to send notification', 'error')
+    }
+    setNotifyingId(null)
+  }
+
   async function handleCancel(res: any) {
     if (!confirm('Cancel this reservation?')) return
     await supabase.from('reservations').update({ status: 'cancelled', updated_at: new Date().toISOString() }).eq('id', res.id)
@@ -460,11 +485,19 @@ export default function ReservationsPage() {
                         </td>
                         <td className="px-4 py-3"><Badge status={res.status} /></td>
                         <td className="px-4 py-3">
-                          <div className="flex gap-2">
+                          <div className="flex gap-2 items-center">
                             <button onClick={() => openEdit(res)} className="text-xs text-navy hover:underline">Edit</button>
                             {!['cancelled', 'checked_out', 'no_show'].includes(res.status) && (
                               <button onClick={() => handleCancel(res)} className="text-xs text-red-500 hover:underline">Cancel</button>
                             )}
+                            <button
+                              onClick={() => handleNotify(res)}
+                              disabled={notifyingId === res.id}
+                              title="Send Telegram notification"
+                              className="text-xs text-hmuted hover:text-navy disabled:opacity-40"
+                            >
+                              {notifyingId === res.id ? '⏳' : '📨'}
+                            </button>
                           </div>
                         </td>
                       </tr>
