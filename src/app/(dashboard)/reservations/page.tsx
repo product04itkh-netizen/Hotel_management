@@ -493,10 +493,16 @@ export default function ReservationsPage() {
                             <button
                               onClick={() => handleNotify(res)}
                               disabled={notifyingId === res.id}
-                              title="Send Telegram notification"
-                              className="text-xs text-hmuted hover:text-navy disabled:opacity-40"
+                              title="Resend Telegram notification"
+                              className="text-hmuted hover:text-[#229ED9] disabled:opacity-40 transition-colors"
                             >
-                              {notifyingId === res.id ? '⏳' : '📨'}
+                              {notifyingId === res.id ? (
+                                <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" strokeOpacity=".25"/><path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round"/></svg>
+                              ) : (
+                                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+                                  <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221-1.97 9.289c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12l-6.871 4.326-2.962-.924c-.643-.204-.657-.643.136-.953l11.57-4.461c.537-.194 1.006.131.833.932z"/>
+                                </svg>
+                              )}
                             </button>
                           </div>
                         </td>
