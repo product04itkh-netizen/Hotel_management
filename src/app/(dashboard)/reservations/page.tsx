@@ -256,6 +256,14 @@ export default function ReservationsPage() {
       reservationId = newRes?.id ?? null
 
       if (newRes) {
+        const paxStr = [
+          form.adults > 0 ? `${form.adults} Adult${form.adults !== 1 ? 's' : ''}` : null,
+          form.children > 0 ? `${form.children} Child${form.children !== 1 ? 'ren' : ''}` : null,
+        ].filter(Boolean).join(', ') || `${paxCount} Pax`
+        const addOnsStr = validItems.length > 0
+          ? validItems.map(i => `• ${i.label}  $${Number(i.amount || 0).toFixed(2)}`).join('\n')
+          : 'None'
+        const remainingAmt = subtotal - depositNum
         fetch('/api/telegram/notify', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -266,7 +274,12 @@ export default function ReservationsPage() {
               check_in: form.check_in_date,
               check_out: form.check_out_date,
               reservation_number: newRes.reservation_number,
-              pax: paxCount,
+              pax: paxStr,
+              total_amount: formatCurrency(subtotal),
+              deposit: depositNum > 0 ? formatCurrency(depositNum) : '—',
+              remaining: remainingAmt > 0 ? formatCurrency(remainingAmt) : '$0.00',
+              add_ons: addOnsStr,
+              status: form.status.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase()),
             },
           }),
         }).catch(() => {})
@@ -296,6 +309,19 @@ export default function ReservationsPage() {
 
   async function handleNotify(res: any) {
     setNotifyingId(res.id)
+    const adults = res.adults ?? 0
+    const children = res.children ?? 0
+    const paxStr = [
+      adults > 0 ? `${adults} Adult${adults !== 1 ? 's' : ''}` : null,
+      children > 0 ? `${children} Child${children !== 1 ? 'ren' : ''}` : null,
+    ].filter(Boolean).join(', ') || `${res.pax_count ?? '—'} Pax`
+    const total = res.total_amount ?? 0
+    const dep = res.deposit ?? 0
+    const remaining = total - dep
+    const items: any[] = res.line_items ?? []
+    const addOnsStr = items.length > 0
+      ? items.map((i: any) => `• ${i.label}  $${Number(i.amount || 0).toFixed(2)}`).join('\n')
+      : 'None'
     const response = await fetch('/api/telegram/notify', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -306,6 +332,12 @@ export default function ReservationsPage() {
           check_in: res.check_in_date,
           check_out: res.check_out_date,
           reservation_number: res.reservation_number,
+          pax: paxStr,
+          total_amount: formatCurrency(total),
+          deposit: dep > 0 ? formatCurrency(dep) : '—',
+          remaining: remaining > 0 ? formatCurrency(remaining) : '$0.00',
+          add_ons: addOnsStr,
+          status: String(res.status ?? '').replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase()),
         },
       }),
     })

@@ -103,6 +103,12 @@ export default function SettingsPage() {
       check_in:  new Date().toISOString().split('T')[0],
       check_out: new Date(Date.now() + 86400000 * 2).toISOString().split('T')[0],
       reservation_number: 'TEST-0001',
+      pax: '4 Adults, 2 Children',
+      total_amount: '$180.00',
+      deposit: '$30.00',
+      remaining: '$150.00',
+      add_ons: '• Car Rental  $50.00\n• BBQ / Grilling  $20.00',
+      status: 'Confirmed',
     },
     checkin: {
       hotel_name: form.hotel_name,

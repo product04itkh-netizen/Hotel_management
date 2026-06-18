@@ -15,8 +15,22 @@ interface TelegramPayload {
 function buildMessage(event: TelegramEvent, data: Record<string, string | number | undefined>): string {
   const hotel = data.hotel_name ?? 'Hotel'
   switch (event) {
-    case 'new_reservation':
-      return `📋 *New Reservation — ${hotel}*\n\nGuest: ${data.guest_name}\nHouse: ${data.house_name ?? data.room_number}\nCheck-in: ${data.check_in}\nCheck-out: ${data.check_out}\nRef: \`${data.reservation_number}\``
+    case 'new_reservation': {
+      const addOns = data.add_ons ? String(data.add_ons) : 'None'
+      return (
+        `📋 *New Reservation — ${hotel}*\n\n` +
+        `👤 *Guest:* ${data.guest_name}\n` +
+        `🏠 *House:* ${data.house_name ?? data.room_number}\n` +
+        `📅 *Check-in:* ${data.check_in}  →  *Check-out:* ${data.check_out}\n` +
+        `👥 *Pax:* ${data.pax ?? '—'}\n\n` +
+        `💰 *Total:* ${data.total_amount ?? '—'}\n` +
+        `💵 *Deposit:* ${data.deposit ?? '—'}\n` +
+        `🔴 *Remaining:* ${data.remaining ?? '—'}\n\n` +
+        `📦 *Add-ons:*\n${addOns}\n\n` +
+        `📌 *Status:* ${data.status ?? '—'}\n` +
+        `🔖 *Ref:* \`${data.reservation_number}\``
+      )
+    }
 
     case 'checkin':
       return `✅ *Guest Checked In — ${hotel}*\n\nGuest: ${data.guest_name}\nHouse: ${data.house_name ?? data.room_number}\nTime: ${data.time}\nRef: \`${data.reservation_number}\``
