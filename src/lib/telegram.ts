@@ -12,46 +12,58 @@ interface TelegramPayload {
   data: Record<string, string | number | undefined>
 }
 
+function esc(v: string | number | undefined): string {
+  return String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+function b(v: string | number | undefined): string {
+  return `<b>${esc(v)}</b>`
+}
+
+function code(v: string | number | undefined): string {
+  return `<code>${esc(v)}</code>`
+}
+
 function buildMessage(event: TelegramEvent, data: Record<string, string | number | undefined>): string {
-  const hotel = data.hotel_name ?? 'Hotel'
+  const hotel = esc(data.hotel_name ?? 'Hotel')
   switch (event) {
     case 'new_reservation': {
-      const addOns = data.add_ons ? String(data.add_ons) : 'None'
+      const addOns = data.add_ons ? esc(String(data.add_ons)) : 'None'
       return (
-        `📋 *New Reservation — ${hotel}*\n\n` +
-        `👤 *Guest:* ${data.guest_name}\n` +
-        `🏠 *House:* ${data.house_name ?? data.room_number}\n` +
-        `📅 *Check-in:* ${data.check_in}  →  *Check-out:* ${data.check_out}\n` +
-        `👥 *Pax:* ${data.pax ?? '—'}\n\n` +
-        `💰 *Total:* ${data.total_amount ?? '—'}\n` +
-        `💵 *Deposit:* ${data.deposit ?? '—'}\n` +
-        `🔴 *Remaining:* ${data.remaining ?? '—'}\n\n` +
-        `📦 *Add-ons:*\n${addOns}\n\n` +
-        `📌 *Status:* ${data.status ?? '—'}\n` +
-        `🔖 *Ref:* \`${data.reservation_number}\``
+        `📋 ${b(`New Reservation — ${hotel}`)}\n\n` +
+        `👤 <b>Guest:</b> ${esc(data.guest_name)}\n` +
+        `🏠 <b>House:</b> ${esc(data.house_name ?? data.room_number)}\n` +
+        `📅 <b>Check-in:</b> ${esc(data.check_in)}  →  <b>Check-out:</b> ${esc(data.check_out)}\n` +
+        `👥 <b>Pax:</b> ${esc(data.pax ?? '—')}\n\n` +
+        `💰 <b>Total:</b> ${esc(data.total_amount ?? '—')}\n` +
+        `💵 <b>Deposit:</b> ${esc(data.deposit ?? '—')}\n` +
+        `🔴 <b>Remaining:</b> ${esc(data.remaining ?? '—')}\n\n` +
+        `📦 <b>Add-ons:</b>\n${addOns}\n\n` +
+        `📌 <b>Status:</b> ${esc(data.status ?? '—')}\n` +
+        `🔖 <b>Ref:</b> ${code(data.reservation_number)}`
       )
     }
 
     case 'checkin':
-      return `✅ *Guest Checked In — ${hotel}*\n\nGuest: ${data.guest_name}\nHouse: ${data.house_name ?? data.room_number}\nTime: ${data.time}\nRef: \`${data.reservation_number}\``
+      return `✅ ${b(`Guest Checked In — ${hotel}`)}\n\nGuest: ${esc(data.guest_name)}\nHouse: ${esc(data.house_name ?? data.room_number)}\nTime: ${esc(data.time)}\nRef: ${code(data.reservation_number)}`
 
     case 'checkout':
-      return `🔑 *Guest Checked Out — ${hotel}*\n\nGuest: ${data.guest_name}\nHouse: ${data.house_name ?? data.room_number}\nTime: ${data.time}\nRef: \`${data.reservation_number}\``
+      return `🔑 ${b(`Guest Checked Out — ${hotel}`)}\n\nGuest: ${esc(data.guest_name)}\nHouse: ${esc(data.house_name ?? data.room_number)}\nTime: ${esc(data.time)}\nRef: ${code(data.reservation_number)}`
 
     case 'payment':
-      return `💳 *Payment Received — ${hotel}*\n\nGuest: ${data.guest_name}\nAmount: ${data.amount}\nMethod: ${data.method}\nInvoice: \`${data.invoice_number}\``
+      return `💳 ${b(`Payment Received — ${hotel}`)}\n\nGuest: ${esc(data.guest_name)}\nAmount: ${esc(data.amount)}\nMethod: ${esc(data.method)}\nInvoice: ${code(data.invoice_number)}`
 
     case 'housekeeping_complete':
-      return `🧹 *Room Ready — ${hotel}*\n\nRoom ${data.room_number} has been cleaned and is now available.\nStaff: ${data.staff_name}`
+      return `🧹 ${b(`Room Ready — ${hotel}`)}\n\nRoom ${esc(data.room_number)} has been cleaned and is now available.\nStaff: ${esc(data.staff_name)}`
 
     case 'room_maintenance':
-      return `🔧 *Maintenance Alert — ${hotel}*\n\n${data.house_name ?? data.room_number} has been flagged for maintenance.\nNotes: ${data.notes ?? 'None'}`
+      return `🔧 ${b(`Maintenance Alert — ${hotel}`)}\n\n${esc(data.house_name ?? data.room_number)} has been flagged for maintenance.\nNotes: ${esc(data.notes ?? 'None')}`
 
     case 'cancellation':
-      return `❌ *Reservation Cancelled — ${hotel}*\n\nGuest: ${data.guest_name}\nRoom: ${data.room_number}\nRef: \`${data.reservation_number}\`\nReason: ${data.reason ?? 'Not specified'}`
+      return `❌ ${b(`Reservation Cancelled — ${hotel}`)}\n\nGuest: ${esc(data.guest_name)}\nHouse: ${esc(data.house_name ?? data.room_number)}\nRef: ${code(data.reservation_number)}\nReason: ${esc(data.reason ?? 'Not specified')}`
 
     default:
-      return `ℹ️ *Hotel Notification — ${hotel}*\n\n${JSON.stringify(data, null, 2)}`
+      return `ℹ️ ${b(`Hotel Notification — ${hotel}`)}\n\n${esc(JSON.stringify(data, null, 2))}`
   }
 }
 
@@ -59,7 +71,7 @@ export async function sendTelegramNotification(
   botToken: string,
   chatId: string,
   payload: TelegramPayload
-): Promise<boolean> {
+): Promise<{ ok: boolean; error?: string }> {
   try {
     const message = buildMessage(payload.event, payload.data)
     const url = `https://api.telegram.org/bot${botToken}/sendMessage`
@@ -69,12 +81,13 @@ export async function sendTelegramNotification(
       body: JSON.stringify({
         chat_id: chatId,
         text: message,
-        parse_mode: 'Markdown',
+        parse_mode: 'HTML',
       }),
     })
     const json = await res.json()
-    return json.ok === true
-  } catch {
-    return false
+    if (json.ok) return { ok: true }
+    return { ok: false, error: json.description ?? 'Telegram API error' }
+  } catch (err) {
+    return { ok: false, error: String(err) }
   }
 }

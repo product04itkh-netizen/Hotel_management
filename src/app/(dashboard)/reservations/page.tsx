@@ -4,11 +4,12 @@ import { TopBar } from '@/components/layout/TopBar'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { createClient } from '@/lib/supabase/client'
 import { formatDate, calculateNights, generateReservationNumber, formatCurrency, capitalize } from '@/lib/utils'
 import { toast } from '@/components/ui/Toast'
 import { useBranch } from '@/context/BranchContext'
-import type { Reservation, House } from '@/types'
+import type { Reservation, House, DepositReceipt } from '@/types'
 
 const STATUSES = ['all', 'pending', 'confirmed', 'checked_in', 'checked_out', 'cancelled', 'no_show']
 const SOURCES = ['walk_in', 'phone', 'online', 'ota', 'referral']
@@ -45,6 +46,7 @@ export default function ReservationsPage() {
   const [reservations, setReservations] = useState<Reservation[]>([])
   const [houses, setHouses] = useState<House[]>([])
   const [loading, setLoading] = useState(true)
+  const [confirmDialog, setConfirmDialog] = useState<{ title: string; message?: string; confirmLabel?: string; variant?: 'default' | 'danger'; onConfirm: () => void } | null>(null)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [modalOpen, setModalOpen] = useState(false)
@@ -53,6 +55,9 @@ export default function ReservationsPage() {
   const [lineItems, setLineItems] = useState<LineItemForm[]>([])
   const [deposit, setDeposit] = useState<number | string>(0)
   const [depositMethod, setDepositMethod] = useState<string>('cash')
+  const [discountAmount, setDiscountAmount] = useState<number | string>(0)
+  const [discountLabel, setDiscountLabel] = useState('')
+  const [receiptModalRes, setReceiptModalRes] = useState<any>(null)
   const [paxCount, setPaxCount] = useState<number | string>('')
   const [arrivalTime, setArrivalTime] = useState('')
   const [saving, setSaving] = useState(false)
@@ -97,7 +102,7 @@ export default function ReservationsPage() {
     if (!activeBranch) return
     const [resRes, houseRes] = await Promise.all([
       supabase.from('reservations')
-        .select('*, guest:guests(full_name, email, phone), house:houses(name, house_type, base_rate_per_night), line_items:reservation_line_items(id, label, amount, sort_order)')
+        .select('*, guest:guests(full_name, email, phone), house:houses(name, house_type, base_rate_per_night), line_items:reservation_line_items(id, label, amount, sort_order), deposit_receipts(id, receipt_number, amount, payment_method, receipt_date, status)')
         .eq('branch_id', activeBranch.id)
         .order('check_in_date', { ascending: false }),
       supabase.from('houses')
@@ -128,6 +133,8 @@ export default function ReservationsPage() {
     setLineItems([])
     setDeposit(0)
     setDepositMethod('cash')
+    setDiscountAmount(0)
+    setDiscountLabel('')
     setPaxCount('')
     setArrivalTime('')
     setModalOpen(true)
@@ -158,6 +165,8 @@ export default function ReservationsPage() {
     )
     setDeposit(res.deposit ?? 0)
     setDepositMethod((res as any).deposit_method ?? 'cash')
+    setDiscountAmount((res as any).discount_amount ?? 0)
+    setDiscountLabel((res as any).discount_label ?? '')
     setPaxCount(res.pax_count ?? '')
     setArrivalTime(res.arrival_time ?? '')
     setModalOpen(true)
@@ -182,6 +191,31 @@ export default function ReservationsPage() {
     setLineItems(prev => prev.filter((_, i) => i !== idx))
   }
 
+  async function generateDepositReceiptNumber(): Promise<string> {
+    const now = new Date()
+    const yyyymm = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`
+    const location = activeBranch?.location ?? ''
+    const words = location.trim().split(/\s+/)
+    const branchCode = words.length === 1
+      ? location.slice(0, 3).toUpperCase()
+      : words.map(w => w[0]).join('').toUpperCase()
+    const prefix = `DR-${branchCode}-${yyyymm}-`
+    const { data } = await supabase
+      .from('deposit_receipts')
+      .select('receipt_number')
+      .eq('branch_id', activeBranch!.id)
+      .like('receipt_number', `${prefix}%`)
+      .order('receipt_number', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    let seq = 1
+    if (data?.receipt_number) {
+      const lastNum = parseInt((data.receipt_number as string).slice(prefix.length), 10)
+      if (!isNaN(lastNum)) seq = lastNum + 1
+    }
+    return `${prefix}${String(seq).padStart(3, '0')}`
+  }
+
   // Cost calculations (live as user types)
   const nights = form.check_in_date && form.check_out_date
     ? calculateNights(form.check_in_date, form.check_out_date)
@@ -190,8 +224,10 @@ export default function ReservationsPage() {
   const houseBase = selectedHouse && nights > 0 ? selectedHouse.base_rate_per_night * nights : 0
   const addOnsTotal = lineItems.reduce((s, i) => s + Number(i.amount || 0), 0)
   const subtotal = houseBase + addOnsTotal
+  const discountNum = Number(discountAmount || 0)
+  const netTotal = subtotal - discountNum
   const depositNum = Number(deposit || 0)
-  const balanceDue = subtotal - depositNum
+  const balanceDue = netTotal - depositNum
 
   async function handleSave() {
     if (!form.guest_name || !form.check_in_date || !form.check_out_date || !form.house_id) {
@@ -229,12 +265,37 @@ export default function ReservationsPage() {
         special_requests: form.special_requests || null,
         status: form.status,
         notes: form.notes || null,
-        total_amount: subtotal,
+        total_amount: netTotal,
         deposit: depositNum,
         deposit_method: depositNum > 0 ? depositMethod : null,
+        discount_amount: discountNum,
+        discount_label: discountLabel || null,
         updated_at: new Date().toISOString(),
       }).eq('id', editId)
       if (error) { toast(error.message, 'error'); setSaving(false); return }
+
+      // Sync deposit receipt: update existing held receipt, create new, or mark refunded
+      const { data: existingReceipt } = await supabase
+        .from('deposit_receipts').select('id, amount').eq('reservation_id', editId).eq('status', 'held').maybeSingle()
+      if (depositNum > 0) {
+        if (existingReceipt) {
+          await supabase.from('deposit_receipts').update({
+            amount: depositNum, payment_method: depositMethod, updated_at: new Date().toISOString(),
+          }).eq('id', existingReceipt.id)
+        } else {
+          const receiptNum = await generateDepositReceiptNumber()
+          await supabase.from('deposit_receipts').insert({
+            receipt_number: receiptNum, reservation_id: editId, branch_id: activeBranch.id,
+            amount: depositNum, payment_method: depositMethod,
+            receipt_date: new Date().toISOString().split('T')[0], status: 'held',
+          })
+        }
+      } else if (existingReceipt) {
+        await supabase.from('deposit_receipts').update({
+          status: 'refunded', updated_at: new Date().toISOString(),
+        }).eq('id', existingReceipt.id)
+      }
+
       toast('Reservation updated')
     } else {
       const { data: newRes, error } = await supabase.from('reservations').insert({
@@ -252,13 +313,29 @@ export default function ReservationsPage() {
         special_requests: form.special_requests || null,
         status: form.status,
         notes: form.notes || null,
-        total_amount: subtotal,
+        total_amount: netTotal,
         deposit: depositNum,
         deposit_method: depositNum > 0 ? depositMethod : null,
+        discount_amount: discountNum,
+        discount_label: discountLabel || null,
       }).select().single()
 
       if (error) { toast(error.message, 'error'); setSaving(false); return }
       reservationId = newRes?.id ?? null
+
+      // Create deposit receipt if a deposit was taken
+      if (newRes && depositNum > 0) {
+        const receiptNum = await generateDepositReceiptNumber()
+        await supabase.from('deposit_receipts').insert({
+          receipt_number: receiptNum,
+          reservation_id: newRes.id,
+          branch_id: activeBranch.id,
+          amount: depositNum,
+          payment_method: depositMethod,
+          receipt_date: new Date().toISOString().split('T')[0],
+          status: 'held',
+        })
+      }
 
       if (newRes) {
         const paxStr = [
@@ -268,7 +345,7 @@ export default function ReservationsPage() {
         const addOnsStr = validItems.length > 0
           ? validItems.map(i => `• ${i.label}  $${Number(i.amount || 0).toFixed(2)}`).join('\n')
           : 'None'
-        const remainingAmt = subtotal - depositNum
+        const remainingAmt = netTotal - depositNum
         fetch('/api/telegram/notify', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -280,7 +357,7 @@ export default function ReservationsPage() {
               check_out: form.check_out_date,
               reservation_number: newRes.reservation_number,
               pax: paxStr,
-              total_amount: formatCurrency(subtotal),
+              total_amount: formatCurrency(netTotal),
               deposit: depositNum > 0 ? formatCurrency(depositNum) : '—',
               remaining: remainingAmt > 0 ? formatCurrency(remainingAmt) : '$0.00',
               add_ons: addOnsStr,
@@ -355,19 +432,31 @@ export default function ReservationsPage() {
     setNotifyingId(null)
   }
 
-  async function handleCancel(res: any) {
-    if (!confirm('Cancel this reservation?')) return
-    await supabase.from('reservations').update({ status: 'cancelled', updated_at: new Date().toISOString() }).eq('id', res.id)
-    fetch('/api/telegram/notify', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ event: 'cancellation', branch_id: activeBranch?.id, data: {
-        guest_name: (res.guest as any)?.full_name ?? res.guest_name,
-        house_name: (res.house as any)?.name,
-        reservation_number: res.reservation_number,
-      }}),
-    }).catch(() => {})
-    toast('Reservation cancelled', 'info')
-    loadData()
+  function handleCancel(res: any) {
+    const guestName = (res.guest as any)?.full_name ?? res.guest_name ?? 'this reservation'
+    setConfirmDialog({
+      title: 'Cancel Reservation',
+      message: `Cancel ${guestName}'s reservation (${res.reservation_number})? Any held deposit will be marked for refund.`,
+      confirmLabel: 'Cancel Reservation',
+      variant: 'danger',
+      onConfirm: async () => {
+        setConfirmDialog(null)
+        await supabase.from('reservations').update({ status: 'cancelled', updated_at: new Date().toISOString() }).eq('id', res.id)
+        await supabase.from('deposit_receipts').update({
+          status: 'refunded', updated_at: new Date().toISOString(),
+        }).eq('reservation_id', res.id).eq('status', 'held')
+        fetch('/api/telegram/notify', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ event: 'cancellation', branch_id: activeBranch?.id, data: {
+            guest_name: (res.guest as any)?.full_name ?? res.guest_name,
+            house_name: (res.house as any)?.name,
+            reservation_number: res.reservation_number,
+          }}),
+        }).catch(() => {})
+        toast('Reservation cancelled', 'info')
+        loadData()
+      },
+    })
   }
 
   return (
@@ -526,6 +615,18 @@ export default function ReservationsPage() {
                             <button onClick={() => openEdit(res)} className="text-xs text-navy hover:underline">Edit</button>
                             {!['cancelled', 'checked_out', 'no_show'].includes(res.status) && (
                               <button onClick={() => handleCancel(res)} className="text-xs text-red-500 hover:underline">Cancel</button>
+                            )}
+                            {/* Deposit receipt — shown only if a receipt exists */}
+                            {((res as any).deposit_receipts ?? []).length > 0 && (
+                              <button
+                                onClick={() => setReceiptModalRes(res)}
+                                title="View deposit receipt"
+                                className="text-hmuted hover:text-green-600 transition-colors"
+                              >
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                </svg>
+                              </button>
                             )}
                             <button
                               onClick={() => handleNotify(res)}
@@ -771,6 +872,16 @@ export default function ReservationsPage() {
           )
         })()}
       </div>
+
+      <ConfirmDialog
+        open={!!confirmDialog}
+        title={confirmDialog?.title ?? ''}
+        message={confirmDialog?.message}
+        confirmLabel={confirmDialog?.confirmLabel}
+        variant={confirmDialog?.variant}
+        onConfirm={() => confirmDialog?.onConfirm()}
+        onCancel={() => setConfirmDialog(null)}
+      />
 
       {/* Create / Edit Modal */}
       <Modal
@@ -1038,6 +1149,36 @@ export default function ReservationsPage() {
                   <span className="font-semibold text-dark-navy">{formatCurrency(subtotal)}</span>
                 </div>
 
+                {/* Discount */}
+                <div className="flex items-center justify-between text-sm gap-2">
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className="text-hmuted">Discount</span>
+                    <input
+                      value={discountLabel}
+                      onChange={e => setDiscountLabel(e.target.value)}
+                      placeholder="reason…"
+                      className="text-xs border border-hborder rounded px-2 py-0.5 w-24 focus:outline-none focus:border-navy bg-hbg text-hmuted"
+                    />
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <span className="text-red-400 text-xs">−$</span>
+                    <input
+                      type="number" min={0} step={0.01}
+                      value={discountAmount}
+                      onChange={e => setDiscountAmount(e.target.value)}
+                      placeholder="0"
+                      className="w-20 text-right border border-hborder rounded-md px-2 py-0.5 text-sm focus:outline-none focus:border-navy bg-hbg"
+                    />
+                  </div>
+                </div>
+
+                {discountNum > 0 && (
+                  <div className="flex justify-between text-sm border-t border-hborder pt-1.5">
+                    <span className="text-hmuted font-medium">Total (after discount)</span>
+                    <span className="font-semibold text-dark-navy">{formatCurrency(netTotal)}</span>
+                  </div>
+                )}
+
                 {/* Deposit inline input */}
                 <div className="flex items-center justify-between text-sm gap-2">
                   <span className="text-hmuted shrink-0">Deposit Paid</span>
@@ -1087,6 +1228,145 @@ export default function ReservationsPage() {
           </div>
         </div>
       </Modal>
+
+      {/* ── Deposit Receipt Modal ── */}
+      {receiptModalRes && (() => {
+        const receipts: DepositReceipt[] = (receiptModalRes as any).deposit_receipts ?? []
+        const receipt = receipts[receipts.length - 1] // most recent
+        if (!receipt) return null
+        const guest = (receiptModalRes as any).guest
+        const house = (receiptModalRes as any).house
+        const statusColor: Record<string, string> = {
+          held: 'bg-yellow-100 text-yellow-700',
+          applied: 'bg-green-100 text-green-700',
+          refunded: 'bg-red-100 text-red-600',
+        }
+        const methodLabel: Record<string, string> = {
+          cash: 'Cash', bank_transfer: 'Bank Transfer', aba_pay: 'ABA Pay',
+          wing: 'Wing', bakong: 'Bakong', online: 'Online (OTA)', other: 'Other',
+        }
+        function printDepositReceipt() {
+          const content = document.getElementById('deposit-receipt-printable')?.innerHTML ?? ''
+          const w = window.open('', '_blank', 'width=680,height=860')
+          if (!w) return
+          w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Deposit Receipt ${receipt.receipt_number}</title>
+          <style>
+            *{box-sizing:border-box;margin:0;padding:0}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#fff;color:#1a1a2e;padding:40px;max-width:620px;margin:0 auto}
+            .hdr{background:#1a1a2e;color:#fff;padding:22px 28px;border-radius:12px 12px 0 0;display:flex;justify-content:space-between;align-items:center}
+            .badge{display:inline-block;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:600}
+            .body{border:1px solid #e8edf3;border-top:none;border-radius:0 0 12px 12px;padding:24px 28px}
+            .row{display:flex;justify-content:space-between;font-size:13px;padding:6px 0;border-bottom:1px solid #f0f4f8}
+            .row:last-child{border:none}
+            .label{color:#6b7280}.val{font-weight:600;color:#1a1a2e}
+            .total-row{background:#f8fafc;padding:14px 16px;border-radius:8px;margin:16px 0;display:flex;justify-content:space-between;align-items:center}
+            .note{font-size:12px;color:#6b7280;margin-top:16px;border-top:1px dashed #e8edf3;padding-top:14px}
+            @media print{body{padding:0}}
+          </style></head><body>${content}</body></html>`)
+          w.document.close(); w.focus(); setTimeout(() => w.print(), 400)
+        }
+        return (
+          <Modal open={true} onClose={() => setReceiptModalRes(null)} title="Deposit Receipt" size="md">
+            <div className="flex justify-end gap-2 mb-4">
+              <Button variant="ghost" onClick={() => setReceiptModalRes(null)}>Close</Button>
+              <Button onClick={printDepositReceipt}>Print / Save PDF</Button>
+            </div>
+            <div id="deposit-receipt-printable">
+              {/* Header */}
+              <div style={{ background: '#1a1a2e', borderRadius: '12px 12px 0 0', padding: '22px 28px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <div style={{ color: '#c89b3c', fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 2 }}>Deposit Receipt</div>
+                  <div style={{ color: '#a0aec0', fontSize: 11, marginTop: 3 }}>{activeBranch?.location ?? ''}</div>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontSize: 20, fontWeight: 800, color: '#c89b3c' }}>{receipt.receipt_number}</div>
+                  <div style={{ fontSize: 11, color: '#a0aec0', marginTop: 2 }}>{receipt.receipt_date}</div>
+                </div>
+              </div>
+              {/* Body */}
+              <div style={{ border: '1px solid #e8edf3', borderTop: 'none', borderRadius: '0 0 12px 12px', padding: '24px 28px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
+                  <div>
+                    <p style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: 2, color: '#9ca3af', marginBottom: 4 }}>Guest</p>
+                    <p style={{ fontSize: 15, fontWeight: 700, color: '#1a1a2e' }}>{guest?.full_name ?? '—'}</p>
+                    {guest?.phone && <p style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>{guest.phone}</p>}
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <p style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: 2, color: '#9ca3af', marginBottom: 4 }}>Property</p>
+                    <p style={{ fontSize: 13, fontWeight: 600 }}>{house?.name ?? '—'}</p>
+                    <p style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>{formatDate(receiptModalRes.check_in_date)} → {formatDate(receiptModalRes.check_out_date)}</p>
+                  </div>
+                </div>
+                {/* Details */}
+                {[
+                  ['Reservation Ref', receiptModalRes.reservation_number],
+                  ['Payment Method', methodLabel[receipt.payment_method] ?? receipt.payment_method],
+                  ['Receipt Date', receipt.receipt_date],
+                ].map(([l, v]) => (
+                  <div key={l} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '6px 0', borderBottom: '1px solid #f0f4f8' }}>
+                    <span style={{ color: '#6b7280' }}>{l}</span>
+                    <span style={{ fontWeight: 600 }}>{v}</span>
+                  </div>
+                ))}
+                {/* Financial summary */}
+                {(() => {
+                  const netTotal = Number(receiptModalRes.total_amount ?? 0)
+                  const discount = Number((receiptModalRes as any).discount_amount ?? 0)
+                  const discLabel = (receiptModalRes as any).discount_label
+                  const grossTotal = netTotal + discount
+                  const remaining = netTotal - receipt.amount
+                  const rowStyle = { display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '6px 0', borderBottom: '1px solid #f0f4f8' } as React.CSSProperties
+                  return (
+                    <div style={{ margin: '16px 0' }}>
+                      {discount > 0 && (
+                        <div style={rowStyle}>
+                          <span style={{ color: '#6b7280' }}>Subtotal</span>
+                          <span style={{ fontWeight: 600 }}>{formatCurrency(grossTotal)}</span>
+                        </div>
+                      )}
+                      {discount > 0 && (
+                        <div style={rowStyle}>
+                          <span style={{ color: '#6b7280' }}>Discount{discLabel ? ` (${discLabel})` : ''}</span>
+                          <span style={{ fontWeight: 600, color: '#dc2626' }}>−{formatCurrency(discount)}</span>
+                        </div>
+                      )}
+                      <div style={{ ...rowStyle, borderBottom: '2px solid #1a1a2e', paddingBottom: 10, marginBottom: 2 }}>
+                        <span style={{ fontWeight: 700, color: '#1a1a2e' }}>Total Amount</span>
+                        <span style={{ fontWeight: 700, fontSize: 15, color: '#1a1a2e' }}>{formatCurrency(netTotal)}</span>
+                      </div>
+                      <div style={{ background: '#f0fdf4', padding: '12px 14px', borderRadius: 8, margin: '12px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: 13, color: '#374151', fontWeight: 600 }}>Deposit Received</span>
+                        <span style={{ fontSize: 20, fontWeight: 800, color: '#1a7a4a' }}>{formatCurrency(receipt.amount)}</span>
+                      </div>
+                      <div style={{ ...rowStyle, borderBottom: 'none', paddingTop: 4 }}>
+                        <span style={{ fontWeight: 700, color: remaining > 0 ? '#b91c1c' : '#1a7a4a' }}>
+                          {remaining > 0 ? 'Balance Due at Checkout' : 'Fully Paid'}
+                        </span>
+                        <span style={{ fontWeight: 800, fontSize: 15, color: remaining > 0 ? '#b91c1c' : '#1a7a4a' }}>
+                          {remaining > 0 ? formatCurrency(remaining) : '—'}
+                        </span>
+                      </div>
+                    </div>
+                  )
+                })()}
+                {/* Status */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, paddingTop: 4, borderTop: '1px solid #f0f4f8' }}>
+                  <span style={{ fontSize: 12, color: '#6b7280' }}>Deposit Status</span>
+                  <span className={`text-xs px-2.5 py-1 rounded-full font-semibold ${statusColor[receipt.status] ?? 'bg-gray-100 text-gray-600'}`}>
+                    {receipt.status === 'held' ? '🟡 Held — pending checkout' : receipt.status === 'applied' ? '✅ Applied to invoice' : '↩ Refunded'}
+                  </span>
+                </div>
+                <p style={{ fontSize: 12, color: '#6b7280', marginTop: 16, borderTop: '1px dashed #e8edf3', paddingTop: 14 }}>
+                  {receipt.status === 'held'
+                    ? `This deposit will be applied toward your invoice upon checkout on ${formatDate(receiptModalRes.check_out_date)}.`
+                    : receipt.status === 'refunded'
+                    ? 'This deposit has been marked for refund due to cancellation.'
+                    : 'This deposit has been applied to the final invoice.'}
+                </p>
+              </div>
+            </div>
+          </Modal>
+        )
+      })()}
     </>
   )
 }

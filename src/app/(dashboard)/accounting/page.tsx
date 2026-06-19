@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { TopBar } from '@/components/layout/TopBar'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { createClient } from '@/lib/supabase/client'
 import { formatCurrency, formatDate, generateJournalEntryNumber, capitalize } from '@/lib/utils'
 import { exportXlsx } from '@/lib/excel'
@@ -71,6 +72,8 @@ export default function AccountingPage() {
   const supabase = createClient()
   const { activeBranch } = useBranch()
   const [tab, setTab] = useState<Tab>('overview')
+
+  const [confirmDialog, setConfirmDialog] = useState<{ title: string; message?: string; confirmLabel?: string; variant?: 'default' | 'danger'; onConfirm: () => void } | null>(null)
 
   // COA
   const [accounts, setAccounts] = useState<ChartOfAccount[]>([])
@@ -188,7 +191,13 @@ export default function AccountingPage() {
     if (!activeBranch) return
     const { data } = await supabase.from('chart_of_accounts')
       .select('*').eq('branch_id', activeBranch.id).order('code')
-    setAccounts((data ?? []) as ChartOfAccount[])
+    const accts = (data ?? []) as ChartOfAccount[]
+    setAccounts(accts)
+    const requiredCodes = ['1010', '1020', '2100', '5800']
+    const missing = requiredCodes.filter(c => !accts.find(a => a.code === c && a.is_active))
+    if (missing.length) {
+      toast(`Missing required COA accounts: ${missing.join(', ')} — auto journal entries will be skipped until added`, 'error')
+    }
   }
 
   async function loadEntries() {
@@ -385,66 +394,71 @@ export default function AccountingPage() {
       toast('Cannot void a reversing entry — the original is already cancelled.', 'error')
       return
     }
-    if (!confirm(`Void ${entry.entry_number}? A reversing entry will be posted.`)) return
-    let lines: any[] = entryLines[entry.id] ?? []
-    if (lines.length === 0) {
-      const { data } = await supabase.from('journal_entry_lines').select('*').eq('entry_id', entry.id)
-      lines = data ?? []
-    }
-    if (lines.length === 0) { toast('No lines found for this entry', 'error'); return }
-    const { data: reversal, error } = await supabase.from('journal_entries').insert({
-      entry_number: generateJournalEntryNumber(),
-      entry_date: todayStr(),
-      reference: entry.entry_number,
-      reference_type: 'void',
-      description: `VOID: ${entry.description}`,
-      branch_id: activeBranch?.id ?? null,
-    }).select().single()
-    if (error || !reversal) { toast(error?.message ?? 'Failed to create reversal', 'error'); return }
-    await supabase.from('journal_entry_lines').insert(
-      lines.map((l: any) => ({
-        entry_id: reversal.id,
-        account_id: l.account_id,
-        description: l.description ?? null,
-        debit: Number(l.credit),
-        credit: Number(l.debit),
-      }))
-    )
-    await supabase.from('journal_entries').update({
-      is_void: true,
-      voided_at: new Date().toISOString(),
-      void_entry_id: reversal.id,
-    }).eq('id', entry.id)
-
-    // Roll back invoice + reservation when a payment JE is voided
-    if (entry.reference_type === 'invoice' && entry.reference && activeBranch) {
-      const paymentAmount = lines.reduce((s: number, l: any) => s + Number(l.debit || 0), 0)
-      const { data: inv } = await supabase.from('invoices')
-        .select('id, total, amount_paid, reservation_id')
-        .eq('invoice_number', entry.reference)
-        .eq('branch_id', activeBranch.id)
-        .maybeSingle()
-      if (inv) {
-        const newPaid = Math.max(0, Number(inv.amount_paid) - paymentAmount)
-        const newStatus = newPaid <= 0 ? 'unpaid' : newPaid >= Number(inv.total) ? 'paid' : 'partial'
-        await supabase.from('invoices').update({
-          amount_paid: newPaid,
-          status: newStatus,
-          paid_at: newStatus === 'paid' ? new Date().toISOString() : null,
-          updated_at: new Date().toISOString(),
-        }).eq('id', inv.id)
-        if (inv.reservation_id) {
-          await supabase.from('reservations').update({
-            deposit: newPaid,
-            updated_at: new Date().toISOString(),
-          }).eq('id', inv.reservation_id)
+    setConfirmDialog({
+      title: `Void ${entry.entry_number}?`,
+      message: 'A reversing journal entry will be posted to cancel this entry. This cannot be undone.',
+      confirmLabel: 'Void Entry',
+      variant: 'danger',
+      onConfirm: async () => {
+        setConfirmDialog(null)
+        let lines: any[] = entryLines[entry.id] ?? []
+        if (lines.length === 0) {
+          const { data } = await supabase.from('journal_entry_lines').select('*').eq('entry_id', entry.id)
+          lines = data ?? []
         }
-      }
-    }
-
-    toast(`${entry.entry_number} voided — ${reversal.entry_number} posted`)
-    setEntryLines({})
-    loadEntries()
+        if (lines.length === 0) { toast('No lines found for this entry', 'error'); return }
+        const { data: reversal, error } = await supabase.from('journal_entries').insert({
+          entry_number: generateJournalEntryNumber(),
+          entry_date: todayStr(),
+          reference: entry.entry_number,
+          reference_type: 'void',
+          description: `VOID: ${entry.description}`,
+          branch_id: activeBranch?.id ?? null,
+        }).select().single()
+        if (error || !reversal) { toast(error?.message ?? 'Failed to create reversal', 'error'); return }
+        await supabase.from('journal_entry_lines').insert(
+          lines.map((l: any) => ({
+            entry_id: reversal.id,
+            account_id: l.account_id,
+            description: l.description ?? null,
+            debit: Number(l.credit),
+            credit: Number(l.debit),
+          }))
+        )
+        await supabase.from('journal_entries').update({
+          is_void: true,
+          voided_at: new Date().toISOString(),
+          void_entry_id: reversal.id,
+        }).eq('id', entry.id)
+        if (entry.reference_type === 'invoice' && entry.reference && activeBranch) {
+          const paymentAmount = lines.reduce((s: number, l: any) => s + Number(l.debit || 0), 0)
+          const { data: inv } = await supabase.from('invoices')
+            .select('id, total, amount_paid, reservation_id')
+            .eq('invoice_number', entry.reference)
+            .eq('branch_id', activeBranch.id)
+            .maybeSingle()
+          if (inv) {
+            const newPaid = Math.max(0, Number(inv.amount_paid) - paymentAmount)
+            const newStatus = newPaid <= 0 ? 'unpaid' : newPaid >= Number(inv.total) ? 'paid' : 'partial'
+            await supabase.from('invoices').update({
+              amount_paid: newPaid,
+              status: newStatus,
+              paid_at: newStatus === 'paid' ? new Date().toISOString() : null,
+              updated_at: new Date().toISOString(),
+            }).eq('id', inv.id)
+            if (inv.reservation_id) {
+              await supabase.from('reservations').update({
+                deposit: newPaid,
+                updated_at: new Date().toISOString(),
+              }).eq('id', inv.reservation_id)
+            }
+          }
+        }
+        toast(`${entry.entry_number} voided — ${reversal.entry_number} posted`)
+        setEntryLines({})
+        loadEntries()
+      },
+    })
   }
 
   // ── Bills ──────────────────────────────────────────────────────
@@ -452,6 +466,9 @@ export default function AccountingPage() {
   async function saveBill() {
     if (!billForm.description || Number(billForm.subtotal) <= 0) {
       toast('Description and amount required', 'error'); return
+    }
+    if (!billForm.expense_account_id) {
+      toast('Expense account is required', 'error'); return
     }
     setBillSaving(true)
     const subtotal = Number(billForm.subtotal)
@@ -1941,6 +1958,16 @@ export default function AccountingPage() {
           </div>
         </div>
       </Modal>
+
+      <ConfirmDialog
+        open={!!confirmDialog}
+        title={confirmDialog?.title ?? ''}
+        message={confirmDialog?.message}
+        confirmLabel={confirmDialog?.confirmLabel}
+        variant={confirmDialog?.variant}
+        onConfirm={() => confirmDialog?.onConfirm()}
+        onCancel={() => setConfirmDialog(null)}
+      />
 
       {/* ── Journal Entry Modal ── */}
       <Modal open={jeFormOpen} onClose={() => setJeFormOpen(false)} title="New Journal Entry" size="lg">

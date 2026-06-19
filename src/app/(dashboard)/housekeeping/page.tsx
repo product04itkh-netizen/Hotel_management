@@ -8,7 +8,7 @@ import { createClient } from '@/lib/supabase/client'
 import { formatDate, capitalize } from '@/lib/utils'
 import { toast } from '@/components/ui/Toast'
 import { useBranch } from '@/context/BranchContext'
-import type { HousekeepingTask, Room, Staff } from '@/types'
+import type { HousekeepingTask, House, Room, Staff } from '@/types'
 
 const TASK_TYPES = ['cleaning', 'turndown', 'inspection', 'maintenance', 'special']
 const PRIORITIES = ['low', 'normal', 'high', 'urgent']
@@ -18,27 +18,34 @@ export default function HousekeepingPage() {
   const supabase = createClient()
   const { activeBranch } = useBranch()
   const [tasks, setTasks] = useState<HousekeepingTask[]>([])
+  const [houses, setHouses] = useState<House[]>([])
   const [rooms, setRooms] = useState<Room[]>([])
   const [staff, setStaff] = useState<Staff[]>([])
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState('all')
   const [addOpen, setAddOpen] = useState(false)
   const [saving, setSaving] = useState(false)
+  // target: 'house:{id}' or 'room:{id}'
+  const [targetValue, setTargetValue] = useState('')
   const [form, setForm] = useState({
-    room_id: '', task_type: 'cleaning', priority: 'normal', assigned_to: '', notes: '', due_date: '',
+    task_type: 'cleaning', priority: 'normal', assigned_to: '', notes: '', due_date: '',
   })
 
   useEffect(() => { if (activeBranch) loadData() }, [activeBranch]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadData() {
     if (!activeBranch) return
-    const [taskRes, roomRes, staffRes] = await Promise.all([
+    const [taskRes, houseRes, roomRes, staffRes] = await Promise.all([
       supabase.from('housekeeping_tasks')
-        .select('*, room:rooms(room_number, room_type, floor, house:houses(name)), staff:staff(full_name)')
+        .select('*, room:rooms(id, room_number, room_type, house:houses(id, name)), house:houses(id, name, house_type), staff:staff(full_name)')
         .eq('branch_id', activeBranch.id)
         .order('created_at', { ascending: false }),
+      supabase.from('houses')
+        .select('*, rooms(id, room_number, room_type)')
+        .eq('branch_id', activeBranch.id)
+        .order('name'),
       supabase.from('rooms')
-        .select('id, room_number, room_type, floor, house:houses(name)')
+        .select('id, room_number, room_type, house_id, house:houses(id, name)')
         .eq('branch_id', activeBranch.id)
         .order('room_number'),
       supabase.from('staff')
@@ -49,6 +56,7 @@ export default function HousekeepingPage() {
         .order('full_name'),
     ])
     setTasks((taskRes.data ?? []) as unknown as HousekeepingTask[])
+    setHouses((houseRes.data ?? []) as unknown as House[])
     setRooms((roomRes.data ?? []) as unknown as Room[])
     setStaff((staffRes.data ?? []) as unknown as Staff[])
     setLoading(false)
@@ -56,24 +64,57 @@ export default function HousekeepingPage() {
 
   const filtered = tasks.filter(t => tab === 'all' || t.status === tab)
 
+  function getTaskLabel(task: HousekeepingTask): { primary: string; secondary: string } {
+    const house = (task as any).house
+    const room = (task as any).room
+    if (room?.room_number) {
+      const houseName = room.house?.name ?? house?.name ?? ''
+      return {
+        primary: houseName ? `${houseName} — ${room.room_number}` : room.room_number,
+        secondary: capitalize(room.room_type ?? ''),
+      }
+    }
+    if (house?.name) {
+      return {
+        primary: house.name,
+        secondary: capitalize((house.house_type ?? '').replace('_', ' ')) + ' (whole property)',
+      }
+    }
+    // Fall back: parse notes for house name (legacy tasks)
+    const notesMatch = task.notes?.match(/—\s*(.+?)\s*—\s*reservation/i)
+    if (notesMatch) return { primary: notesMatch[1], secondary: 'From notes' }
+    return { primary: '—', secondary: '' }
+  }
+
   async function updateStatus(id: string, status: string) {
     const update: Record<string, string> = { status, updated_at: new Date().toISOString() }
     if (status === 'completed') {
       update.completed_at = new Date().toISOString()
       const task = tasks.find(t => t.id === id)
-      if (task?.room_id) {
-        await supabase.from('rooms').update({ status: 'available', updated_at: new Date().toISOString() }).eq('id', task.room_id)
+      if (task) {
+        // Mark room available if room-level task
+        if (task.room_id) {
+          await supabase.from('rooms').update({ status: 'available', updated_at: new Date().toISOString() }).eq('id', task.room_id)
+        }
+        // Mark house available if house-level task (no specific room)
+        const houseId = (task as any).house?.id ?? (task as any).room?.house?.id
+        if (!task.room_id && houseId) {
+          await supabase.from('houses').update({ status: 'available', updated_at: new Date().toISOString() }).eq('id', houseId)
+        }
+        // Telegram notify
+        const roomNumber = (task as any).room?.room_number ?? (task as any).house?.name ?? 'Property'
+        const staffName = (task as any).staff?.full_name ?? 'Staff'
         fetch('/api/telegram/notify', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ event: 'housekeeping_complete', branch_id: activeBranch?.id, data: {
-            room_number: (task.room as any)?.room_number,
-            staff_name: (task.staff as any)?.full_name ?? 'Staff',
+            room_number: roomNumber,
+            staff_name: staffName,
           }})
         }).catch(() => {})
       }
     }
     await supabase.from('housekeeping_tasks').update(update).eq('id', id)
-    toast(status === 'completed' ? 'Task completed — room marked available' : 'Task updated')
+    toast(status === 'completed' ? 'Task completed — property marked available' : 'Task updated')
     loadData()
   }
 
@@ -84,10 +125,14 @@ export default function HousekeepingPage() {
   }
 
   async function handleAdd() {
-    if (!form.room_id || !form.task_type) { toast('Room and task type required', 'error'); return }
+    if (!targetValue || !form.task_type) { toast('Select a property or room', 'error'); return }
     setSaving(true)
-    const { error } = await supabase.from('housekeeping_tasks').insert({
-      room_id: form.room_id,
+
+    const isHouse = targetValue.startsWith('house:')
+    const isRoom = targetValue.startsWith('room:')
+    const targetId = targetValue.split(':')[1]
+
+    const payload: Record<string, unknown> = {
       task_type: form.task_type,
       priority: form.priority,
       assigned_to: form.assigned_to || null,
@@ -95,12 +140,24 @@ export default function HousekeepingPage() {
       due_date: form.due_date || null,
       branch_id: activeBranch?.id ?? null,
       status: 'pending',
-    })
+    }
+
+    if (isHouse) {
+      payload.room_id = null
+      payload.house_id = targetId
+    } else if (isRoom) {
+      const room = rooms.find(r => r.id === targetId)
+      payload.room_id = targetId
+      payload.house_id = room?.house_id ?? null
+    }
+
+    const { error } = await supabase.from('housekeeping_tasks').insert(payload)
     if (error) { toast(error.message, 'error'); setSaving(false); return }
     toast('Task created')
     setSaving(false)
     setAddOpen(false)
-    setForm({ room_id: '', task_type: 'cleaning', priority: 'normal', assigned_to: '', notes: '', due_date: '' })
+    setTargetValue('')
+    setForm({ task_type: 'cleaning', priority: 'normal', assigned_to: '', notes: '', due_date: '' })
     loadData()
   }
 
@@ -139,7 +196,7 @@ export default function HousekeepingPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-hsurface2">
-                <th className="px-5 py-3 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide">Room</th>
+                <th className="px-5 py-3 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide">Property / Room</th>
                 <th className="px-5 py-3 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide">Task</th>
                 <th className="px-5 py-3 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide">Priority</th>
                 <th className="px-5 py-3 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide">Due</th>
@@ -153,48 +210,47 @@ export default function HousekeepingPage() {
                 <tr><td colSpan={7} className="px-5 py-10 text-center text-hmuted">Loading…</td></tr>
               ) : filtered.length === 0 ? (
                 <tr><td colSpan={7} className="px-5 py-10 text-center text-hmuted">No tasks found</td></tr>
-              ) : filtered.map(task => (
-                <tr key={task.id} className="border-t border-hborder hover:bg-hbg/40">
-                  <td className="px-5 py-3">
-                    <p className="font-medium text-htext">
-                      {(task.room as any)?.house?.name
-                        ? `${(task.room as any).house.name} — ${(task.room as any).room_number}`
-                        : (task.room as any)?.room_number
-                          ? `Room ${(task.room as any).room_number}`
-                          : '—'
-                      }
-                    </p>
-                    <p className="text-xs text-hmuted">{capitalize((task.room as any)?.room_type ?? '')}</p>
-                  </td>
-                  <td className="px-5 py-3 capitalize text-hmuted">{task.task_type}</td>
-                  <td className="px-5 py-3"><Badge status={task.priority} /></td>
-                  <td className="px-5 py-3 text-hmuted text-xs">{task.due_date ? formatDate(task.due_date) : '—'}</td>
-                  <td className="px-5 py-3">
-                    <select
-                      value={task.assigned_to ?? ''}
-                      onChange={e => handleAssign(task.id, e.target.value)}
-                      className="border border-hborder rounded-lg px-2 py-1 text-xs bg-white focus:outline-none focus:border-navy"
-                    >
-                      <option value="">Unassigned</option>
-                      {staff.map(s => <option key={s.id} value={s.id}>{s.full_name}</option>)}
-                    </select>
-                  </td>
-                  <td className="px-5 py-3"><Badge status={task.status} /></td>
-                  <td className="px-5 py-3">
-                    <div className="flex gap-1.5">
-                      {task.status === 'pending' && (
-                        <Button size="sm" variant="ghost" onClick={() => updateStatus(task.id, 'in_progress')}>Start</Button>
+              ) : filtered.map(task => {
+                const { primary, secondary } = getTaskLabel(task)
+                return (
+                  <tr key={task.id} className="border-t border-hborder hover:bg-hbg/40">
+                    <td className="px-5 py-3">
+                      <p className="font-medium text-htext">{primary}</p>
+                      {secondary && <p className="text-xs text-hmuted">{secondary}</p>}
+                      {task.notes && !secondary.includes('From notes') && (
+                        <p className="text-xs text-hmuted/70 italic mt-0.5 truncate max-w-[200px]">{task.notes}</p>
                       )}
-                      {task.status === 'in_progress' && (
-                        <Button size="sm" variant="success" onClick={() => updateStatus(task.id, 'completed')}>Complete</Button>
-                      )}
-                      {task.status === 'pending' && (
-                        <Button size="sm" variant="ghost" onClick={() => updateStatus(task.id, 'skipped')}>Skip</Button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                    </td>
+                    <td className="px-5 py-3 capitalize text-hmuted">{task.task_type}</td>
+                    <td className="px-5 py-3"><Badge status={task.priority} /></td>
+                    <td className="px-5 py-3 text-hmuted text-xs">{task.due_date ? formatDate(task.due_date) : '—'}</td>
+                    <td className="px-5 py-3">
+                      <select
+                        value={task.assigned_to ?? ''}
+                        onChange={e => handleAssign(task.id, e.target.value)}
+                        className="border border-hborder rounded-lg px-2 py-1 text-xs bg-white focus:outline-none focus:border-navy"
+                      >
+                        <option value="">Unassigned</option>
+                        {staff.map(s => <option key={s.id} value={s.id}>{s.full_name}</option>)}
+                      </select>
+                    </td>
+                    <td className="px-5 py-3"><Badge status={task.status} /></td>
+                    <td className="px-5 py-3">
+                      <div className="flex gap-1.5">
+                        {task.status === 'pending' && (
+                          <Button size="sm" variant="ghost" onClick={() => updateStatus(task.id, 'in_progress')}>Start</Button>
+                        )}
+                        {task.status === 'in_progress' && (
+                          <Button size="sm" variant="success" onClick={() => updateStatus(task.id, 'completed')}>Complete</Button>
+                        )}
+                        {task.status === 'pending' && (
+                          <Button size="sm" variant="ghost" onClick={() => updateStatus(task.id, 'skipped')}>Skip</Button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
@@ -203,21 +259,33 @@ export default function HousekeepingPage() {
       <Modal open={addOpen} onClose={() => setAddOpen(false)} title="New Housekeeping Task">
         <div className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
+            {/* Property / Room selector */}
             <div className="col-span-2">
-              <label className="block text-xs text-hmuted mb-1">Room *</label>
+              <label className="block text-xs text-hmuted mb-1">Property / Room *</label>
               <select
-                value={form.room_id}
-                onChange={e => setForm(f => ({ ...f, room_id: e.target.value }))}
+                value={targetValue}
+                onChange={e => setTargetValue(e.target.value)}
                 className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg"
               >
-                <option value="">Select room…</option>
-                {rooms.map(r => (
-                  <option key={r.id} value={r.id}>
-                    {(r as any).house?.name ? `${(r as any).house.name} — ` : ''}{r.room_number}
-                  </option>
-                ))}
+                <option value="">Select property or room…</option>
+                {houses.map(house => {
+                  const houseRooms = rooms.filter(r => r.house_id === house.id)
+                  return (
+                    <optgroup key={house.id} label={house.name}>
+                      <option value={`house:${house.id}`}>
+                        {house.name} — Whole Property
+                      </option>
+                      {houseRooms.map(room => (
+                        <option key={room.id} value={`room:${room.id}`}>
+                          {house.name} — {room.room_number} ({capitalize(room.room_type)})
+                        </option>
+                      ))}
+                    </optgroup>
+                  )
+                })}
               </select>
             </div>
+
             <div>
               <label className="block text-xs text-hmuted mb-1">Task Type</label>
               <select

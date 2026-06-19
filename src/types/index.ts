@@ -296,6 +296,9 @@ export interface Reservation {
   source: BookingSource
   notes?: string
   deposit?: number
+  deposit_method?: string
+  discount_amount?: number
+  discount_label?: string
   pax_count?: number
   arrival_time?: string
   created_by?: string
@@ -308,6 +311,23 @@ export interface Reservation {
   guest?: Guest
   room?: Room
   line_items?: ReservationLineItem[]
+  deposit_receipts?: DepositReceipt[]
+}
+
+export type DepositReceiptStatus = 'held' | 'applied' | 'refunded'
+
+export interface DepositReceipt {
+  id: string
+  receipt_number: string
+  reservation_id: string
+  branch_id?: string
+  amount: number
+  payment_method: string
+  receipt_date: string
+  status: DepositReceiptStatus
+  notes?: string
+  created_at: string
+  updated_at: string
 }
 
 export type InvoiceStatus = 'unpaid' | 'partial' | 'paid' | 'refunded' | 'void'

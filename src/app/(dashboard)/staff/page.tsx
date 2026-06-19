@@ -4,6 +4,7 @@ import { TopBar } from '@/components/layout/TopBar'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { Modal } from '@/components/ui/Modal'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { createClient } from '@/lib/supabase/client'
 import { formatDate, capitalize } from '@/lib/utils'
 import { toast } from '@/components/ui/Toast'
@@ -23,6 +24,7 @@ export default function StaffPage() {
   const { activeBranch } = useBranch()
   const [staff, setStaff] = useState<Staff[]>([])
   const [loading, setLoading] = useState(true)
+  const [confirmDialog, setConfirmDialog] = useState<{ title: string; message?: string; confirmLabel?: string; variant?: 'default' | 'danger'; onConfirm: () => void } | null>(null)
   const [search, setSearch] = useState('')
   const [roleFilter, setRoleFilter] = useState('all')
   const [modalOpen, setModalOpen] = useState(false)
@@ -95,11 +97,19 @@ export default function StaffPage() {
     loadStaff()
   }
 
-  async function handleDelete(id: string) {
-    if (!confirm('Remove this staff member?')) return
-    await supabase.from('staff').delete().eq('id', id)
-    toast('Staff member removed', 'info')
-    loadStaff()
+  function handleDelete(id: string) {
+    setConfirmDialog({
+      title: 'Remove Staff Member',
+      message: 'This will permanently remove the staff member from the system.',
+      confirmLabel: 'Remove',
+      variant: 'danger',
+      onConfirm: async () => {
+        setConfirmDialog(null)
+        await supabase.from('staff').delete().eq('id', id)
+        toast('Staff member removed', 'info')
+        loadStaff()
+      },
+    })
   }
 
   const roleColors: Record<string, string> = {
@@ -203,6 +213,16 @@ export default function StaffPage() {
           </table>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={!!confirmDialog}
+        title={confirmDialog?.title ?? ''}
+        message={confirmDialog?.message}
+        confirmLabel={confirmDialog?.confirmLabel}
+        variant={confirmDialog?.variant}
+        onConfirm={() => confirmDialog?.onConfirm()}
+        onCancel={() => setConfirmDialog(null)}
+      />
 
       <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={editId ? 'Edit Staff Member' : 'Add Staff Member'} size="md">
         <div className="space-y-3">

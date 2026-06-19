@@ -33,6 +33,8 @@ export default function BillingPage() {
   const [taxRate, setTaxRate] = useState(0)
   const [settings, setSettings] = useState<any>(null)
   const [receiptInvoice, setReceiptInvoice] = useState<Invoice | null>(null)
+  const [reservationReceipt, setReservationReceipt] = useState<any>(null)
+  const [showAllReservations, setShowAllReservations] = useState(false)
   const [form, setForm] = useState({
     reservation_id: '',
     items: [{ description: 'House charge', quantity: 1, unit_price: 0, total: 0 }] as InvoiceItem[],
@@ -90,8 +92,16 @@ export default function BillingPage() {
   const taxAmount = (subtotal - discountAmount) * (taxRate / 100)
   const total = subtotal - discountAmount + taxAmount
 
-  function openCreateInvoice(reservation?: Reservation) {
+  async function openCreateInvoice(reservation?: Reservation) {
+    setReservationReceipt(null)
+    setShowAllReservations(false)
     if (reservation) {
+      // Load the held deposit receipt for this reservation (if any)
+      const { data: receipt } = await supabase
+        .from('deposit_receipts').select('*')
+        .eq('reservation_id', reservation.id).eq('status', 'held').maybeSingle()
+      setReservationReceipt(receipt ?? null)
+
       const house = (reservation as any).house
       const lineItems: any[] = ((reservation as any).line_items ?? [])
       const nights = calculateNights(reservation.check_in_date, reservation.check_out_date)
@@ -144,13 +154,15 @@ export default function BillingPage() {
       if ((reservation as any).arrival_time) noteParts.push(`Arrival: ${(reservation as any).arrival_time}`)
       if ((reservation as any).pax_count) noteParts.push(`Pax: ${(reservation as any).pax_count}`)
 
+      const resDiscount = Number((reservation as any).discount_amount ?? 0)
+      const resDiscountLabel = (reservation as any).discount_label ?? ''
       setForm({
         reservation_id: reservation.id,
         items,
-        discount_amount: 0,
+        discount_amount: resDiscount,
         discount_pct: 0,
         discount_type: '$',
-        discount_reason: '',
+        discount_reason: resDiscountLabel,
         notes: noteParts.join(' · '),
       })
     } else {
@@ -191,8 +203,13 @@ export default function BillingPage() {
   }
 
   async function handleCreate() {
-    setSaving(true)
+    const today = new Date().toISOString().split('T')[0]
     const selectedRes = reservations.find(r => r.id === form.reservation_id) ?? null
+    if (selectedRes && selectedRes.check_out_date > today) {
+      toast('Update the check-out date in Reservations first, then create the invoice.', 'error')
+      return
+    }
+    setSaving(true)
     const guestId = selectedRes?.guest_id ?? null
     const deposit = Number((selectedRes as any)?.deposit ?? 0)
 
@@ -227,11 +244,19 @@ export default function BillingPage() {
       await supabase.from('payment_transactions').insert({
         invoice_id: inv.id,
         amount: initialPaid,
-        payment_method: 'cash',
+        payment_method: (selectedRes as any)?.deposit_method ?? 'cash',
         payment_date: new Date().toISOString(),
-        notes: 'Deposit recorded at invoice creation',
+        notes: 'Deposit applied at invoice creation',
         branch_id: activeBranch?.id ?? null,
       })
+    }
+
+    // Mark the held deposit receipt as applied
+    if (inv && reservationReceipt?.id) {
+      await supabase.from('deposit_receipts').update({
+        status: 'applied', updated_at: new Date().toISOString(),
+      }).eq('id', reservationReceipt.id)
+      setReservationReceipt(null)
     }
 
     toast('Invoice created')
@@ -379,6 +404,7 @@ export default function BillingPage() {
         </div>
 
         <div className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
+          <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-hsurface2">
@@ -431,6 +457,7 @@ export default function BillingPage() {
               })}
             </tbody>
           </table>
+          </div>
         </div>
       </div>
 
@@ -438,23 +465,66 @@ export default function BillingPage() {
       <Modal open={invoiceOpen} onClose={() => setInvoiceOpen(false)} title="Create Invoice" size="lg">
         <div className="space-y-4">
           <div>
-            <label className="block text-xs text-hmuted mb-1">Link to Reservation (optional)</label>
-            <select
-              value={form.reservation_id}
-              onChange={e => {
-                const res = reservations.find(r => r.id === e.target.value)
-                if (res) openCreateInvoice(res)
-                else setForm(f => ({ ...f, reservation_id: e.target.value }))
-              }}
-              className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg"
-            >
-              <option value="">— No reservation —</option>
-              {reservations.map(r => (
-                <option key={r.id} value={r.id}>
-                  {(r.guest as any)?.full_name ?? 'Guest'} — {(r as any).reservation_number} · {(r as any).house?.name ?? 'No house linked'}
-                </option>
-              ))}
-            </select>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-xs text-hmuted">Link to Reservation</label>
+              <label className="flex items-center gap-1.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={showAllReservations}
+                  onChange={e => setShowAllReservations(e.target.checked)}
+                  className="w-3.5 h-3.5 rounded"
+                />
+                <span className="text-xs text-hmuted">Include pre-checkout</span>
+              </label>
+            </div>
+            {(() => {
+              const today = new Date().toISOString().split('T')[0]
+              // Exclude reservations that already have a non-void invoice
+              const invoicedIds = new Set(
+                invoices
+                  .filter(i => i.reservation_id && i.status !== 'void')
+                  .map(i => i.reservation_id!)
+              )
+              const eligible = (showAllReservations
+                ? reservations
+                : reservations.filter(r => r.check_out_date <= today)
+              ).filter(r => !invoicedIds.has(r.id))
+              return (
+                <>
+                  <select
+                    value={form.reservation_id}
+                    onChange={e => {
+                      const res = reservations.find(r => r.id === e.target.value)
+                      if (res) openCreateInvoice(res)
+                      else { setForm(f => ({ ...f, reservation_id: e.target.value })); setReservationReceipt(null) }
+                    }}
+                    className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg"
+                  >
+                    <option value="">— No reservation —</option>
+                    {eligible.map(r => (
+                      <option key={r.id} value={r.id}>
+                        {(r.guest as any)?.full_name ?? 'Guest'} — {(r as any).reservation_number} · {(r as any).house?.name ?? 'No house linked'}
+                        {r.check_out_date > today ? ` ⚠ checks out ${r.check_out_date}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                  {form.reservation_id && (() => {
+                    const selectedR = reservations.find(r => r.id === form.reservation_id)
+                    return selectedR && selectedR.check_out_date > today ? (
+                      <div className="mt-1.5 rounded-lg bg-red-50 border border-red-200 px-3 py-2.5">
+                        <p className="text-xs font-semibold text-red-700">Guest has not checked out yet</p>
+                        <p className="text-xs text-red-600 mt-0.5">
+                          Go to <strong>Reservations</strong> and update the check-out date to today first, then return here to create the invoice.
+                        </p>
+                      </div>
+                    ) : null
+                  })()}
+                  {eligible.length === 0 && !showAllReservations && (
+                    <p className="text-xs text-hmuted mt-1">No reservations ready for checkout today. Check "Include pre-checkout" to see all.</p>
+                  )}
+                </>
+              )
+            })()}
           </div>
 
           {/* Reservation info banner */}
@@ -489,12 +559,21 @@ export default function BillingPage() {
                   <span className="text-hmuted">Pax</span>
                   <span className="font-medium text-htext">{(res as any).pax_count ?? (res.adults ?? 0) + (res.children ?? 0)}</span>
                 </div>
-                {(res as any).deposit > 0 && (
+                {reservationReceipt ? (
+                  <div className="col-span-2 flex justify-between border-t border-hborder pt-1.5 mt-0.5 items-center">
+                    <span className="text-hmuted">Deposit Receipt</span>
+                    <span className="flex items-center gap-2">
+                      <span className="font-semibold text-green-700">{formatCurrency(Number(reservationReceipt.amount))}</span>
+                      <span className="font-mono text-[10px] text-hmuted">{reservationReceipt.receipt_number}</span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-yellow-100 text-yellow-700 font-semibold">Held</span>
+                    </span>
+                  </div>
+                ) : (res as any).deposit > 0 ? (
                   <div className="col-span-2 flex justify-between border-t border-hborder pt-1.5 mt-0.5">
                     <span className="text-hmuted">Deposit on file</span>
                     <span className="font-semibold text-green-700">{formatCurrency(Number((res as any).deposit))}</span>
                   </div>
-                )}
+                ) : null}
                 {!house && (
                   <div className="col-span-2 text-orange-600 text-[10px] mt-0.5">
                     ⚠ No house linked to this reservation — enter the rate manually or update the reservation.
@@ -632,7 +711,14 @@ export default function BillingPage() {
           </div>
           <div className="flex justify-end gap-3">
             <Button variant="ghost" onClick={() => setInvoiceOpen(false)}>Cancel</Button>
-            <Button onClick={handleCreate} disabled={saving}>{saving ? 'Creating…' : 'Create Invoice'}</Button>
+            <Button
+              onClick={handleCreate}
+              disabled={saving || (() => {
+                const t = new Date().toISOString().split('T')[0]
+                const r = reservations.find(r => r.id === form.reservation_id)
+                return !!(r && r.check_out_date > t)
+              })()}
+            >{saving ? 'Creating…' : 'Create Invoice'}</Button>
           </div>
         </div>
       </Modal>

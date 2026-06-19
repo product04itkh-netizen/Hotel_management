@@ -3,6 +3,7 @@ import { useEffect, useState, useMemo } from 'react'
 import { TopBar } from '@/components/layout/TopBar'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { createClient } from '@/lib/supabase/client'
 import { formatCurrency, formatDate, capitalize } from '@/lib/utils'
 import { toast } from '@/components/ui/Toast'
@@ -56,6 +57,7 @@ export default function AssetsPage() {
   const [tab, setTab] = useState<Tab>('overview')
   const [assets, setAssets] = useState<FixedAsset[]>([])
   const [loading, setLoading] = useState(true)
+  const [confirmDialog, setConfirmDialog] = useState<{ title: string; message?: string; confirmLabel?: string; variant?: 'default' | 'danger'; onConfirm: () => void } | null>(null)
 
   // Register filters
   const [search, setSearch] = useState('')
@@ -286,11 +288,19 @@ export default function AssetsPage() {
     setSaving(false); setModalOpen(false); load()
   }
 
-  async function disposeAsset(id: string) {
-    if (!confirm('Mark asset as disposed? This cannot be undone easily.')) return
-    await supabase.from('fixed_assets').update({ status: 'disposed', date_disposed: new Date().toISOString().slice(0, 10), updated_at: new Date().toISOString() }).eq('id', id)
-    toast('Asset marked disposed')
-    load()
+  function disposeAsset(id: string) {
+    setConfirmDialog({
+      title: 'Mark Asset as Disposed',
+      message: 'This will set the asset status to Disposed and record today as the disposal date. This action is difficult to reverse.',
+      confirmLabel: 'Dispose Asset',
+      variant: 'danger',
+      onConfirm: async () => {
+        setConfirmDialog(null)
+        await supabase.from('fixed_assets').update({ status: 'disposed', date_disposed: new Date().toISOString().slice(0, 10), updated_at: new Date().toISOString() }).eq('id', id)
+        toast('Asset marked disposed')
+        load()
+      },
+    })
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -670,6 +680,16 @@ export default function AssetsPage() {
           </div>
         )}
       </div>
+
+      <ConfirmDialog
+        open={!!confirmDialog}
+        title={confirmDialog?.title ?? ''}
+        message={confirmDialog?.message}
+        confirmLabel={confirmDialog?.confirmLabel}
+        variant={confirmDialog?.variant}
+        onConfirm={() => confirmDialog?.onConfirm()}
+        onCancel={() => setConfirmDialog(null)}
+      />
 
       {/* ── Add / Edit Asset Modal ────────────────────────────────────────── */}
       <Modal

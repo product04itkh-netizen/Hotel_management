@@ -43,8 +43,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, error: 'Telegram not configured' })
     }
 
-    const success = await sendTelegramNotification(botToken, chatId, { event, data })
-    return NextResponse.json({ ok: success, error: success ? undefined : 'Failed to send message' })
+    const result = await sendTelegramNotification(botToken, chatId, { event, data })
+    return NextResponse.json(result)
   } catch (err) {
     return NextResponse.json({ ok: false, error: String(err) }, { status: 500 })
   }

@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { TopBar } from '@/components/layout/TopBar'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { Badge } from '@/components/ui/Badge'
 import { createClient } from '@/lib/supabase/client'
 import { formatCurrency, formatDate, capitalize } from '@/lib/utils'
@@ -46,6 +47,7 @@ export default function PropertiesPage() {
 
   const [houses, setHouses] = useState<House[]>([])
   const [loading, setLoading] = useState(true)
+  const [confirmDialog, setConfirmDialog] = useState<{ title: string; message?: string; confirmLabel?: string; variant?: 'default' | 'danger'; onConfirm: () => void } | null>(null)
 
   // Selected house for detail view
   const [selectedHouseId, setSelectedHouseId] = useState<string | null>(null)
@@ -166,12 +168,20 @@ export default function PropertiesPage() {
     setSelectedHouseId(house.id)
   }
 
-  async function deleteHouse(id: string) {
-    if (!confirm('Delete this house? This will also remove all rooms inside it.')) return
-    await supabase.from('houses').delete().eq('id', id)
-    toast('House deleted')
-    setSelectedHouseId(null)
-    loadHouses()
+  function deleteHouse(id: string) {
+    setConfirmDialog({
+      title: 'Delete House',
+      message: 'This will permanently delete the house and all rooms inside it. This cannot be undone.',
+      confirmLabel: 'Delete House',
+      variant: 'danger',
+      onConfirm: async () => {
+        setConfirmDialog(null)
+        await supabase.from('houses').delete().eq('id', id)
+        toast('House deleted')
+        setSelectedHouseId(null)
+        loadHouses()
+      },
+    })
   }
 
   // ── Room CRUD ─────────────────────────────────────────────────
@@ -230,12 +240,20 @@ export default function PropertiesPage() {
     setSelectedHouseId(roomFormHouseId)
   }
 
-  async function deleteRoom(room: Room) {
-    if (!confirm(`Delete room "${room.room_number}"?`)) return
-    await supabase.from('rooms').delete().eq('id', room.id)
-    toast('Room deleted')
-    await loadHouses()
-    setSelectedHouseId(roomFormHouseId ?? (room as any).house_id)
+  function deleteRoom(room: Room) {
+    setConfirmDialog({
+      title: `Delete Room "${room.room_number}"`,
+      message: 'This will permanently remove the room.',
+      confirmLabel: 'Delete Room',
+      variant: 'danger',
+      onConfirm: async () => {
+        setConfirmDialog(null)
+        await supabase.from('rooms').delete().eq('id', room.id)
+        toast('Room deleted')
+        await loadHouses()
+        setSelectedHouseId(roomFormHouseId ?? (room as any).house_id)
+      },
+    })
   }
 
   async function changeRoomStatus(room: Room, status: RoomStatus) {
@@ -519,6 +537,16 @@ export default function PropertiesPage() {
           )
         })()}
       </Modal>
+
+      <ConfirmDialog
+        open={!!confirmDialog}
+        title={confirmDialog?.title ?? ''}
+        message={confirmDialog?.message}
+        confirmLabel={confirmDialog?.confirmLabel}
+        variant={confirmDialog?.variant}
+        onConfirm={() => confirmDialog?.onConfirm()}
+        onCancel={() => setConfirmDialog(null)}
+      />
 
       {/* ── Add / Edit House Modal ── */}
       <Modal
