@@ -283,7 +283,6 @@ export default function BillingPage() {
     // Auto journal entry: clear deposit liability → credit revenue
     if (inv && initialPaid > 0 && selectedRes) {
       try {
-        const depositMethod = (selectedRes as any)?.deposit_method ?? 'cash'
         const { data: accounts } = await supabase.from('chart_of_accounts')
           .select('id, code')
           .eq('branch_id', activeBranch!.id)
@@ -356,12 +355,12 @@ export default function BillingPage() {
       const { data: accounts } = await supabase.from('chart_of_accounts')
         .select('id, code')
         .eq('branch_id', activeBranch.id)
-        .in('code', [cashCode, '4100'])
+        .in('code', [cashCode, '4000', '2200'])
 
       const cashAcct = accounts?.find(a => a.code === cashCode)
-      const revenueAcct = accounts?.find(a => a.code === '4100')
+      const revenueAcct = accounts?.find(a => a.code === '4000')
 
-      if (cashAcct && revenueAcct) {
+      if (cashAcct && revenueAcct && amountReceived > 0) {
         const { data: je } = await supabase.from('journal_entries').insert({
           entry_number: generateJournalEntryNumber(),
           entry_date: new Date().toISOString().split('T')[0],
@@ -379,6 +378,34 @@ export default function BillingPage() {
           ])
         }
       }
+
+      // Backward compatibility: ensure deposit was applied to JE if it exists
+      if (selectedInvoice.reservation_id) {
+        const { data: res } = await supabase.from('reservations').select('deposit').eq('id', selectedInvoice.reservation_id).single()
+        if (res && res.deposit > 0) {
+          const { data: existingDepositJe } = await supabase.from('journal_entries').select('id').eq('reference', selectedInvoice.invoice_number).eq('reference_type', 'deposit_applied').maybeSingle()
+          if (!existingDepositJe) {
+            const depositLiabilityAcc = accounts?.find(a => a.code === '2200')
+            if (depositLiabilityAcc && revenueAcct) {
+              const { data: depJe } = await supabase.from('journal_entries').insert({
+                entry_number: generateJournalEntryNumber(),
+                entry_date: new Date().toISOString().split('T')[0],
+                reference: selectedInvoice.invoice_number,
+                reference_type: 'deposit_applied',
+                description: `Deposit applied to invoice ${selectedInvoice.invoice_number} (${(selectedInvoice.guest as any)?.full_name ?? 'Guest'})`,
+                branch_id: activeBranch.id,
+              }).select().single()
+              if (depJe) {
+                await supabase.from('journal_entry_lines').insert([
+                  { entry_id: depJe.id, account_id: depositLiabilityAcc.id, debit: res.deposit, credit: 0, description: 'Deposit Applied — Liability Cleared' },
+                  { entry_id: depJe.id, account_id: revenueAcct.id, debit: 0, credit: res.deposit, description: `Revenue — ${selectedInvoice.invoice_number}` },
+                ])
+              }
+            }
+          }
+        }
+      }
+
     } catch { /* COA not set up yet — skip JE silently */ }
 
     // Record payment transaction
