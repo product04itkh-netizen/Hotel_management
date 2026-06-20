@@ -355,7 +355,7 @@ export default function ReservationsPage() {
 
       // Sync deposit receipt: update existing held receipt, create new, or mark refunded
       const { data: existingReceipt } = await supabase
-        .from('deposit_receipts').select('id, amount').eq('reservation_id', editId).eq('status', 'held').maybeSingle()
+        .from('deposit_receipts').select('id, amount, payment_method').eq('reservation_id', editId).eq('status', 'held').maybeSingle()
       if (depositNum > 0) {
         if (existingReceipt) {
           await supabase.from('deposit_receipts').update({
