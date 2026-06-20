@@ -1378,8 +1378,11 @@ export default function AccountingPage() {
                           {!e.is_void && (
                             <button
                               onClick={() => voidJournalEntry(e)}
-                              className="text-xs text-red-400 hover:text-red-600 hover:underline"
-                            >Void</button>
+                              className="text-[11px] font-medium text-red-600 border border-red-200 bg-red-50 hover:bg-red-100 px-2 py-1 rounded transition-colors flex items-center gap-1"
+                            >
+                              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                              Void
+                            </button>
                           )}
                         </td>
                       </tr>
