@@ -352,16 +352,17 @@ export default function BillingPage() {
       const cashCode = (selectedPm as any)?.account_code || (selectedPm?.is_cash ? '1010' : '1020')
 
       // Find cash account and revenue account for this branch
-      const { data: accounts } = await supabase.from('chart_of_accounts')
+      const { data: accounts, error: acctErr } = await supabase.from('chart_of_accounts')
         .select('id, code')
         .eq('branch_id', activeBranch.id)
+        .eq('is_active', true)
         .in('code', [cashCode, '4000', '2200'])
 
       const cashAcct = accounts?.find(a => a.code === cashCode)
       const revenueAcct = accounts?.find(a => a.code === '4000')
 
       if (cashAcct && revenueAcct && amountReceived > 0) {
-        const { data: je } = await supabase.from('journal_entries').insert({
+        const { data: je, error: jeErr } = await supabase.from('journal_entries').insert({
           entry_number: generateJournalEntryNumber(),
           entry_date: new Date().toISOString().split('T')[0],
           reference: selectedInvoice.invoice_number,
@@ -406,7 +407,7 @@ export default function BillingPage() {
         }
       }
 
-    } catch { /* COA not set up yet — skip JE silently */ }
+    } catch (err) { console.error('[JE] failed silently:', err) }
 
     // Record payment transaction
     await supabase.from('payment_transactions').insert({
