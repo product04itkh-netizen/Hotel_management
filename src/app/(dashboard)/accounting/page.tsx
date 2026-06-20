@@ -583,7 +583,7 @@ export default function AccountingPage() {
     const apAcct   = accounts.find(a => a.code === '2100')
     const cashCode = (() => {
       const pm = paymentMethods.find(m => m.value === billPayForm.payment_method)
-      return (pm as any)?.account_code || (pm?.is_cash ?? billPayForm.payment_method === 'cash') ? '1010' : '1020'
+      return (pm as any)?.account_code || ((pm?.is_cash ?? (billPayForm.payment_method === 'cash')) ? '1010' : '1020')
     })()
     const cashAcct = accounts.find(a => a.code === cashCode)
     let jeId: string | null = null
