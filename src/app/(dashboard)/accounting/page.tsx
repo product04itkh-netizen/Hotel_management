@@ -484,6 +484,12 @@ export default function AccountingPage() {
           voided_at: new Date().toISOString(),
           void_entry_id: reversal.id,
         }).eq('id', entry.id)
+
+        // If this was a petty_cash entry, delete the linked petty_cash_transaction so the balance stays correct
+        if (entry.reference_type === 'petty_cash') {
+          await supabase.from('petty_cash_transactions').delete().eq('journal_entry_id', entry.id)
+        }
+
         if (entry.reference_type === 'invoice' && entry.reference && activeBranch) {
           const paymentAmount = lines.reduce((s: number, l: any) => s + Number(l.debit || 0), 0)
           const { data: inv } = await supabase.from('invoices')
@@ -510,7 +516,7 @@ export default function AccountingPage() {
         }
         toast(`${entry.entry_number} voided — ${reversal.entry_number} posted`)
         setEntryLines({})
-        loadEntries()
+        loadEntries(); loadPetty()
       },
     })
   }
