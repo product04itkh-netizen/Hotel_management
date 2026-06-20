@@ -13,15 +13,30 @@ import { toast } from '@/components/ui/Toast'
 import { useBranch } from '@/context/BranchContext'
 import type { Invoice, Reservation, InvoiceItem } from '@/types'
 
-const PAYMENT_METHODS = ['cash', 'card', 'bank_transfer', 'qr', 'online']
-// cash → 1010, everything else → 1020
-const CASH_ACCOUNT_CODE: Record<string, string> = {
-  cash: '1010', card: '1020', bank_transfer: '1020', qr: '1020', online: '1020',
+interface PaymentMethod {
+  id: string
+  name: string
+  value: string
+  is_cash: boolean
+  is_active: boolean
+  sort_order: number
 }
+
+// Fallback static map for receipts/labels on old records
+const FALLBACK_METHODS: PaymentMethod[] = [
+  { id: '1', name: 'Cash', value: 'cash', is_cash: true, is_active: true, sort_order: 1 },
+  { id: '2', name: 'Bank Transfer', value: 'bank_transfer', is_cash: false, is_active: true, sort_order: 2 },
+  { id: '3', name: 'ABA Pay', value: 'aba_pay', is_cash: false, is_active: true, sort_order: 3 },
+  { id: '4', name: 'Wing', value: 'wing', is_cash: false, is_active: true, sort_order: 4 },
+  { id: '5', name: 'Bakong', value: 'bakong', is_cash: false, is_active: true, sort_order: 5 },
+  { id: '6', name: 'Online (OTA)', value: 'online', is_cash: false, is_active: true, sort_order: 6 },
+  { id: '7', name: 'Other', value: 'other', is_cash: false, is_active: true, sort_order: 7 },
+]
 
 export default function BillingPage() {
   const supabase = createClient()
   const { activeBranch } = useBranch()
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>(FALLBACK_METHODS)
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [reservations, setReservations] = useState<Reservation[]>([])
   const [loading, setLoading] = useState(true)
@@ -46,7 +61,13 @@ export default function BillingPage() {
   })
   const [payForm, setPayForm] = useState({ payment_method: 'cash', amount_paid: 0, notes: '' })
 
-  useEffect(() => { if (activeBranch) loadData() }, [activeBranch]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (activeBranch) { loadData(); loadPaymentMethods() } }, [activeBranch]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function loadPaymentMethods() {
+    if (!activeBranch) return
+    const { data } = await supabase.from('payment_methods').select('*').eq('branch_id', activeBranch.id).eq('is_active', true).order('sort_order')
+    if (data && data.length > 0) setPaymentMethods(data as PaymentMethod[])
+  }
 
   async function loadData() {
     if (!activeBranch) return
@@ -259,6 +280,38 @@ export default function BillingPage() {
       setReservationReceipt(null)
     }
 
+    // Auto journal entry: clear deposit liability → credit revenue
+    if (inv && initialPaid > 0 && selectedRes) {
+      try {
+        const depositMethod = (selectedRes as any)?.deposit_method ?? 'cash'
+        const { data: accounts } = await supabase.from('chart_of_accounts')
+          .select('id, code')
+          .eq('branch_id', activeBranch!.id)
+          .in('code', ['2200', '4000'])
+
+        const depositLiabilityAcc = accounts?.find(a => a.code === '2200')
+        const revenueAcc = accounts?.find(a => a.code === '4000')
+
+        if (depositLiabilityAcc && revenueAcc) {
+          const { data: je } = await supabase.from('journal_entries').insert({
+            entry_number: generateJournalEntryNumber(),
+            entry_date: new Date().toISOString().split('T')[0],
+            reference: inv.invoice_number,
+            reference_type: 'deposit_applied',
+            description: `Deposit applied to invoice ${inv.invoice_number} (${(selectedRes.guest as any)?.full_name ?? 'Guest'})`,
+            branch_id: activeBranch!.id,
+          }).select().single()
+
+          if (je) {
+            await supabase.from('journal_entry_lines').insert([
+              { entry_id: je.id, account_id: depositLiabilityAcc.id, debit: initialPaid, credit: 0, description: 'Deposit Applied — Liability Cleared' },
+              { entry_id: je.id, account_id: revenueAcc.id, debit: 0, credit: initialPaid, description: `Revenue — ${inv.invoice_number}` },
+            ])
+          }
+        }
+      } catch { /* COA not set up yet — skip JE silently */ }
+    }
+
     toast('Invoice created')
     setSaving(false)
     setInvoiceOpen(false)
@@ -295,13 +348,17 @@ export default function BillingPage() {
     // ── Auto journal entry: DR Cash → CR Revenue ──────────────
     let jeId: string | null = null
     try {
+      // Determine account code based on dynamic payment method account_code or is_cash flag
+      const selectedPm = paymentMethods.find(m => m.value === payForm.payment_method)
+      const cashCode = (selectedPm as any)?.account_code || (selectedPm?.is_cash ? '1010' : '1020')
+
       // Find cash account and revenue account for this branch
       const { data: accounts } = await supabase.from('chart_of_accounts')
         .select('id, code')
         .eq('branch_id', activeBranch.id)
-        .in('code', [CASH_ACCOUNT_CODE[payForm.payment_method] ?? '1020', '4100'])
+        .in('code', [cashCode, '4100'])
 
-      const cashAcct = accounts?.find(a => a.code === (CASH_ACCOUNT_CODE[payForm.payment_method] ?? '1020'))
+      const cashAcct = accounts?.find(a => a.code === cashCode)
       const revenueAcct = accounts?.find(a => a.code === '4100')
 
       if (cashAcct && revenueAcct) {
@@ -758,12 +815,12 @@ export default function BillingPage() {
                 onChange={e => setPayForm(f => ({ ...f, payment_method: e.target.value }))}
                 className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg"
               >
-                {PAYMENT_METHODS.map(m => (
-                  <option key={m} value={m}>{capitalize(m.replace('_', ' '))}</option>
+                {paymentMethods.map(m => (
+                  <option key={m.value} value={m.value}>{m.name}</option>
                 ))}
               </select>
               <p className="text-[10px] text-hmuted mt-1">
-                Posts to: {payForm.payment_method === 'cash' ? '1010 Cash on Hand' : '1020 Cash at Bank (ABA)'}
+                Posts to: {(() => { const pm = paymentMethods.find(m => m.value === payForm.payment_method); const code = (pm as any)?.account_code || (pm?.is_cash ? '1010' : '1020'); return code === '1010' ? '1010 Cash on Hand' : `${code} Bank` })()}
               </p>
             </div>
             <div>

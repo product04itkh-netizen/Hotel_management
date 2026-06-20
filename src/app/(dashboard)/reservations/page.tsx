@@ -6,10 +6,19 @@ import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { createClient } from '@/lib/supabase/client'
-import { formatDate, calculateNights, generateReservationNumber, formatCurrency, capitalize } from '@/lib/utils'
+import { formatDate, calculateNights, generateReservationNumber, formatCurrency, capitalize, generateJournalEntryNumber } from '@/lib/utils'
 import { toast } from '@/components/ui/Toast'
 import { useBranch } from '@/context/BranchContext'
 import type { Reservation, House, DepositReceipt } from '@/types'
+
+interface PaymentMethod {
+  id: string
+  name: string
+  value: string
+  is_cash: boolean
+  is_active: boolean
+  sort_order: number
+}
 
 const STATUSES = ['all', 'pending', 'confirmed', 'checked_in', 'checked_out', 'cancelled', 'no_show']
 const SOURCES = ['walk_in', 'phone', 'online', 'ota', 'referral']
@@ -70,10 +79,17 @@ export default function ReservationsPage() {
   const [dateTo, setDateTo] = useState('')
   const [khHolidays, setKhHolidays] = useState<Record<string, string>>({})
   const [notifyingId, setNotifyingId] = useState<string | null>(null)
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([])
 
   useEffect(() => {
-    if (activeBranch) loadData()
+    if (activeBranch) { loadData(); loadPaymentMethods() }
   }, [activeBranch]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function loadPaymentMethods() {
+    if (!activeBranch) return
+    const { data } = await supabase.from('payment_methods').select('*').eq('branch_id', activeBranch.id).eq('is_active', true).order('sort_order')
+    setPaymentMethods((data ?? []) as PaymentMethod[])
+  }
 
   // Fetch Cambodian public holidays from Calendarific (once per year, cached 90 days)
   useEffect(() => {
@@ -216,6 +232,69 @@ export default function ReservationsPage() {
     return `${prefix}${String(seq).padStart(3, '0')}`
   }
 
+  async function syncDepositJournalEntry(resNum: string, guestName: string, depositAmt: number, method: string) {
+    if (!activeBranch) return
+    const pm = paymentMethods.find(m => m.value === method)
+    const cashCode = (pm as any)?.account_code || (pm?.is_cash ? '1010' : (method === 'cash' ? '1010' : '1020'))
+    const { data: accounts } = await supabase.from('chart_of_accounts').select('id, code').eq('branch_id', activeBranch.id).in('code', [cashCode, '2200'])
+    if (!accounts) return
+    const assetAcc = accounts.find(a => a.code === cashCode)?.id
+    const depositAcc = accounts.find(a => a.code === '2200')?.id
+    if (!assetAcc || !depositAcc) return
+
+    const { data: existingJes } = await supabase.from('journal_entries').select('id').eq('reference', resNum).eq('reference_type', 'deposit')
+    if (existingJes && existingJes.length > 0) {
+      const jeIds = existingJes.map(je => je.id)
+      await supabase.from('journal_entry_lines').delete().in('entry_id', jeIds)
+      await supabase.from('journal_entries').delete().in('id', jeIds)
+    }
+
+    if (depositAmt > 0) {
+      const { data: entry } = await supabase.from('journal_entries').insert({
+        entry_number: generateJournalEntryNumber(),
+        entry_date: new Date().toISOString().split('T')[0],
+        reference: resNum,
+        reference_type: 'deposit',
+        description: `Deposit received for ${guestName} (${resNum})`,
+        branch_id: activeBranch.id
+      }).select().single()
+
+      if (entry) {
+        await supabase.from('journal_entry_lines').insert([
+          { entry_id: entry.id, account_id: assetAcc, debit: depositAmt, credit: 0, description: 'Deposit Received' },
+          { entry_id: entry.id, account_id: depositAcc, debit: 0, credit: depositAmt, description: 'Guest Deposit Liability' }
+        ])
+      }
+    }
+  }
+
+  async function createRefundJournalEntry(resNum: string, guestName: string, depositAmt: number, method: string) {
+    if (!activeBranch || depositAmt <= 0) return
+    const pm = paymentMethods.find(m => m.value === method)
+    const cashCode = (pm as any)?.account_code || (pm?.is_cash ? '1010' : (method === 'cash' ? '1010' : '1020'))
+    const { data: accounts } = await supabase.from('chart_of_accounts').select('id, code').eq('branch_id', activeBranch.id).in('code', [cashCode, '2200'])
+    if (!accounts) return
+    const assetAcc = accounts.find(a => a.code === cashCode)?.id
+    const depositAcc = accounts.find(a => a.code === '2200')?.id
+    if (!assetAcc || !depositAcc) return
+
+    const { data: entry } = await supabase.from('journal_entries').insert({
+      entry_number: generateJournalEntryNumber(),
+      entry_date: new Date().toISOString().split('T')[0],
+      reference: resNum,
+      reference_type: 'deposit_refund',
+      description: `Deposit refunded for ${guestName} (${resNum})`,
+      branch_id: activeBranch.id
+    }).select().single()
+
+    if (entry) {
+      await supabase.from('journal_entry_lines').insert([
+        { entry_id: entry.id, account_id: depositAcc, debit: depositAmt, credit: 0, description: 'Deposit Refunded Liability Clear' },
+        { entry_id: entry.id, account_id: assetAcc, debit: 0, credit: depositAmt, description: 'Deposit Refunded Cash Out' }
+      ])
+    }
+  }
+
   // Cost calculations (live as user types)
   const nights = form.check_in_date && form.check_out_date
     ? calculateNights(form.check_in_date, form.check_out_date)
@@ -290,10 +369,15 @@ export default function ReservationsPage() {
             receipt_date: new Date().toISOString().split('T')[0], status: 'held',
           })
         }
+        const resNum = reservations.find(r => r.id === editId)?.reservation_number || ''
+        await syncDepositJournalEntry(resNum, form.guest_name, depositNum, depositMethod)
       } else if (existingReceipt) {
         await supabase.from('deposit_receipts').update({
           status: 'refunded', updated_at: new Date().toISOString(),
         }).eq('id', existingReceipt.id)
+        
+        const resNum = reservations.find(r => r.id === editId)?.reservation_number || ''
+        await createRefundJournalEntry(resNum, form.guest_name, existingReceipt.amount, existingReceipt.payment_method)
       }
 
       toast('Reservation updated')
@@ -335,6 +419,7 @@ export default function ReservationsPage() {
           receipt_date: new Date().toISOString().split('T')[0],
           status: 'held',
         })
+        await syncDepositJournalEntry(newRes.reservation_number, form.guest_name, depositNum, depositMethod)
       }
 
       if (newRes) {
@@ -442,9 +527,14 @@ export default function ReservationsPage() {
       onConfirm: async () => {
         setConfirmDialog(null)
         await supabase.from('reservations').update({ status: 'cancelled', updated_at: new Date().toISOString() }).eq('id', res.id)
-        await supabase.from('deposit_receipts').update({
-          status: 'refunded', updated_at: new Date().toISOString(),
-        }).eq('reservation_id', res.id).eq('status', 'held')
+        // Find existing held receipt to know exact amount and method
+        const { data: heldReceipt } = await supabase.from('deposit_receipts').select('*').eq('reservation_id', res.id).eq('status', 'held').maybeSingle()
+        if (heldReceipt) {
+          await supabase.from('deposit_receipts').update({
+            status: 'refunded', updated_at: new Date().toISOString(),
+          }).eq('id', heldReceipt.id)
+          await createRefundJournalEntry(res.reservation_number, guestName, heldReceipt.amount, heldReceipt.payment_method)
+        }
         fetch('/api/telegram/notify', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ event: 'cancellation', branch_id: activeBranch?.id, data: {
@@ -1188,13 +1278,22 @@ export default function ReservationsPage() {
                       onChange={e => setDepositMethod(e.target.value)}
                       className="border border-hborder rounded-md px-2 py-0.5 text-xs focus:outline-none focus:border-navy bg-hbg text-htext"
                     >
-                      <option value="cash">Cash</option>
-                      <option value="bank_transfer">Bank Transfer</option>
-                      <option value="aba_pay">ABA Pay</option>
-                      <option value="wing">Wing</option>
-                      <option value="bakong">Bakong</option>
-                      <option value="online">Online (OTA)</option>
-                      <option value="other">Other</option>
+                      {paymentMethods.length > 0
+                        ? paymentMethods.map(pm => (
+                            <option key={pm.value} value={pm.value}>{pm.name}</option>
+                          ))
+                        : (
+                            <>
+                              <option value="cash">Cash</option>
+                              <option value="bank_transfer">Bank Transfer</option>
+                              <option value="aba_pay">ABA Pay</option>
+                              <option value="wing">Wing</option>
+                              <option value="bakong">Bakong</option>
+                              <option value="online">Online (OTA)</option>
+                              <option value="other">Other</option>
+                            </>
+                          )
+                      }
                     </select>
                     <span className="text-hmuted text-xs">$</span>
                     <input
@@ -1244,6 +1343,7 @@ export default function ReservationsPage() {
         const methodLabel: Record<string, string> = {
           cash: 'Cash', bank_transfer: 'Bank Transfer', aba_pay: 'ABA Pay',
           wing: 'Wing', bakong: 'Bakong', online: 'Online (OTA)', other: 'Other',
+          ...(Object.fromEntries(paymentMethods.map(pm => [pm.value, pm.name])))
         }
         function printDepositReceipt() {
           const content = document.getElementById('deposit-receipt-printable')?.innerHTML ?? ''

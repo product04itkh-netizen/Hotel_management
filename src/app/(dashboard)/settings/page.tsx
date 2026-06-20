@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import { TopBar } from '@/components/layout/TopBar'
 import { Button } from '@/components/ui/Button'
+import { Modal } from '@/components/ui/Modal'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from '@/components/ui/Toast'
 import type { HotelSettings } from '@/types'
@@ -17,6 +18,16 @@ const NOTIFICATION_EVENTS = [
   { key: 'cancellation', label: 'Reservation Cancelled' },
 ]
 
+interface PaymentMethod {
+  id: string
+  name: string
+  value: string
+  is_cash: boolean
+  account_code: string
+  is_active: boolean
+  sort_order: number
+}
+
 export default function SettingsPage() {
   const supabase = createClient()
   const { activeBranch } = useBranch()
@@ -25,6 +36,14 @@ export default function SettingsPage() {
   const [testingTelegram, setTestingTelegram] = useState(false)
   const [testEvent, setTestEvent] = useState('new_reservation')
   const [settingsId, setSettingsId] = useState<string | null>(null)
+
+  // Payment Methods state
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([])
+  const [pmModalOpen, setPmModalOpen] = useState(false)
+  const [editingPm, setEditingPm] = useState<PaymentMethod | null>(null)
+  const [pmForm, setPmForm] = useState({ name: '', value: '', account_code: '1020' })
+  const [pmSaving, setPmSaving] = useState(false)
+  const [coaAccounts, setCoaAccounts] = useState<{ id: string; code: string; name: string }[]>([])
   const [form, setForm] = useState({
     hotel_name: 'OnlyOne Homestay',
     hotel_address: '',
@@ -40,7 +59,96 @@ export default function SettingsPage() {
     check_out_time: '12:00',
   })
 
-  useEffect(() => { if (activeBranch) loadSettings() }, [activeBranch]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (activeBranch) { loadSettings(); loadPaymentMethods(); loadCoaAccounts() } }, [activeBranch]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function loadCoaAccounts() {
+    if (!activeBranch) return
+    const { data } = await supabase.from('chart_of_accounts')
+      .select('id, code, name')
+      .eq('branch_id', activeBranch.id)
+      .eq('is_active', true)
+      .in('type', ['asset'])
+      .order('code')
+    setCoaAccounts((data ?? []) as { id: string; code: string; name: string }[])
+  }
+
+  async function loadPaymentMethods() {
+    if (!activeBranch) return
+    const { data } = await supabase.from('payment_methods').select('*').eq('branch_id', activeBranch.id).order('sort_order')
+    setPaymentMethods((data ?? []) as PaymentMethod[])
+  }
+
+  function openAddPm() {
+    setEditingPm(null)
+    setPmForm({ name: '', value: '', account_code: '1020' })
+    setPmModalOpen(true)
+  }
+
+  function openEditPm(pm: PaymentMethod) {
+    setEditingPm(pm)
+    setPmForm({ name: pm.name, value: pm.value, account_code: pm.account_code || (pm.is_cash ? '1010' : '1020') })
+    setPmModalOpen(true)
+  }
+
+  async function savePm() {
+    if (!pmForm.name.trim()) { toast('Name is required', 'error'); return }
+    if (!pmForm.value.trim()) { toast('Slug/value is required', 'error'); return }
+    if (!activeBranch) return
+    setPmSaving(true)
+    const isCash = pmForm.account_code === '1010'
+    if (editingPm) {
+      const { error } = await supabase.from('payment_methods').update({
+        name: pmForm.name.trim(),
+        value: pmForm.value.trim().toLowerCase().replace(/\s+/g, '_'),
+        account_code: pmForm.account_code,
+        is_cash: isCash,
+        updated_at: new Date().toISOString(),
+      }).eq('id', editingPm.id)
+      if (error) { toast(error.message, 'error'); setPmSaving(false); return }
+      toast('Payment method updated')
+    } else {
+      const nextOrder = paymentMethods.length > 0 ? Math.max(...paymentMethods.map(m => m.sort_order)) + 1 : 1
+      const { error } = await supabase.from('payment_methods').insert({
+        branch_id: activeBranch.id,
+        name: pmForm.name.trim(),
+        value: pmForm.value.trim().toLowerCase().replace(/\s+/g, '_'),
+        account_code: pmForm.account_code,
+        is_cash: isCash,
+        is_active: true,
+        sort_order: nextOrder,
+      })
+      if (error) { toast(error.message, 'error'); setPmSaving(false); return }
+      toast('Payment method added')
+    }
+    setPmSaving(false)
+    setPmModalOpen(false)
+    loadPaymentMethods()
+  }
+
+  async function togglePmActive(pm: PaymentMethod) {
+    await supabase.from('payment_methods').update({ is_active: !pm.is_active, updated_at: new Date().toISOString() }).eq('id', pm.id)
+    loadPaymentMethods()
+  }
+
+  async function deletePm(pm: PaymentMethod) {
+    if (!confirm(`Delete "${pm.name}"? This cannot be undone.`)) return
+    await supabase.from('payment_methods').delete().eq('id', pm.id)
+    toast('Payment method deleted', 'info')
+    loadPaymentMethods()
+  }
+
+  async function movePm(pm: PaymentMethod, dir: 'up' | 'down') {
+    const sorted = [...paymentMethods].sort((a, b) => a.sort_order - b.sort_order)
+    const idx = sorted.findIndex(m => m.id === pm.id)
+    const swapIdx = dir === 'up' ? idx - 1 : idx + 1
+    if (swapIdx < 0 || swapIdx >= sorted.length) return
+    const a = sorted[idx], b = sorted[swapIdx]
+    await Promise.all([
+      supabase.from('payment_methods').update({ sort_order: b.sort_order }).eq('id', a.id),
+      supabase.from('payment_methods').update({ sort_order: a.sort_order }).eq('id', b.id),
+    ])
+    loadPaymentMethods()
+  }
 
   async function loadSettings() {
     if (!activeBranch) return
@@ -377,7 +485,125 @@ export default function SettingsPage() {
           </div>
 
         </div>
+
+        {/* ── Payment Methods CRUD ── */}
+        <div className="mt-6 bg-white border border-hborder rounded-2xl p-6 shadow-card">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="font-serif text-lg text-dark-navy">Payment Methods</h3>
+              <p className="text-xs text-hmuted mt-0.5">Manage accepted deposit &amp; invoice payment methods for this branch</p>
+            </div>
+            <Button onClick={openAddPm} size="sm">+ Add Method</Button>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-hsurface2">
+                  {['Order', 'Name', 'Value / Slug', 'Maps to Account', 'Status', 'Actions'].map(h => (
+                    <th key={h} className="px-4 py-2.5 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide whitespace-nowrap">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {paymentMethods.length === 0 ? (
+                  <tr><td colSpan={6} className="px-4 py-8 text-center text-hmuted text-sm">No payment methods yet — click "+ Add Method" to start.</td></tr>
+                ) : paymentMethods.map((pm, idx) => (
+                  <tr key={pm.id} className="border-t border-hborder hover:bg-hbg/40 transition-colors">
+                    <td className="px-4 py-2.5">
+                      <div className="flex gap-1">
+                        <button onClick={() => movePm(pm, 'up')} disabled={idx === 0} className="text-hmuted hover:text-navy disabled:opacity-30 text-xs px-1">▲</button>
+                        <button onClick={() => movePm(pm, 'down')} disabled={idx === paymentMethods.length - 1} className="text-hmuted hover:text-navy disabled:opacity-30 text-xs px-1">▼</button>
+                      </div>
+                    </td>
+                    <td className="px-4 py-2.5 font-medium text-htext">{pm.name}</td>
+                    <td className="px-4 py-2.5 font-mono text-xs text-hmuted">{pm.value}</td>
+                    <td className="px-4 py-2.5">
+                      {(() => {
+                        const code = (pm as any).account_code || (pm.is_cash ? '1010' : '1020')
+                        const acct = coaAccounts.find(a => a.code === code)
+                        const label = acct ? `${acct.code} — ${acct.name}` : code
+                        const isCash = code === '1010'
+                        return (
+                          <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${isCash ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
+                            {label}
+                          </span>
+                        )
+                      })()}
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <button
+                        onClick={() => togglePmActive(pm)}
+                        className={`text-xs font-semibold px-2 py-0.5 rounded-full transition-colors ${pm.is_active ? 'bg-emerald-100 text-emerald-700 hover:bg-red-100 hover:text-red-600' : 'bg-gray-100 text-gray-500 hover:bg-emerald-100 hover:text-emerald-700'}`}
+                      >
+                        {pm.is_active ? 'Active' : 'Inactive'}
+                      </button>
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <div className="flex gap-3">
+                        <button onClick={() => openEditPm(pm)} className="text-xs text-navy hover:underline">Edit</button>
+                        <button onClick={() => deletePm(pm)} className="text-xs text-red-500 hover:underline">Delete</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
       </div>
+
+      {/* ── Payment Method Modal ── */}
+      <Modal open={pmModalOpen} onClose={() => setPmModalOpen(false)} title={editingPm ? 'Edit Payment Method' : 'Add Payment Method'} size="sm">
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs text-hmuted mb-1">Display Name *</label>
+            <input
+              value={pmForm.name}
+              onChange={e => setPmForm(f => ({ ...f, name: e.target.value }))}
+              placeholder="e.g. ABA Pay"
+              className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-hmuted mb-1">Slug / Value *</label>
+            <input
+              value={pmForm.value}
+              onChange={e => setPmForm(f => ({ ...f, value: e.target.value.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '') }))}
+              placeholder="e.g. aba_pay"
+              className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg font-mono"
+            />
+            <p className="text-[10px] text-hmuted mt-1">Lowercase letters, numbers and underscores only. Used internally as the method key.</p>
+          </div>
+          <div>
+            <label className="block text-xs text-hmuted mb-1">Maps to Account (Accounting) *</label>
+            <select
+              value={pmForm.account_code}
+              onChange={e => setPmForm(f => ({ ...f, account_code: e.target.value }))}
+              className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg"
+            >
+              {coaAccounts.length === 0 ? (
+                <>
+                  <option value="1010">1010 — Cash on Hand (default)</option>
+                  <option value="1020">1020 — Bank (default)</option>
+                </>
+              ) : (
+                coaAccounts.map(a => (
+                  <option key={a.id} value={a.code}>{a.code} — {a.name}</option>
+                ))
+              )}
+            </select>
+            <p className="text-[10px] text-hmuted mt-1">
+              When this payment method is used, the journal entry will debit/credit this account.
+              {pmForm.account_code === '1010' ? ' ✔ Marked as Cash on Hand.' : ' This account will be treated as a Bank / Electronic account.'}
+            </p>
+          </div>
+          <div className="flex justify-end gap-3">
+            <Button variant="ghost" onClick={() => setPmModalOpen(false)}>Cancel</Button>
+            <Button onClick={savePm} disabled={pmSaving}>{pmSaving ? 'Saving…' : editingPm ? 'Update' : 'Add Method'}</Button>
+          </div>
+        </div>
+      </Modal>
     </>
   )
 }

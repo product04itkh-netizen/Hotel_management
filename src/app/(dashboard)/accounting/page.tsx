@@ -64,7 +64,7 @@ function agingColor(od: number) {
   return 'bg-red-100 text-red-700'
 }
 const todayStr = () => new Date().toISOString().split('T')[0]
-const emptyCoaForm = { code: '', name: '', type: 'expense' as AccountType, category: 'operating_expense' }
+const emptyCoaForm = { code: '', name: '', type: 'expense' as AccountType, category: 'operating_expense', is_active: true, opening_balance: '', opening_balance_date: todayStr(), offset_account_id: '' }
 const emptyJeLine = () => ({ account_id: '', description: '', debit: '' as number | string, credit: '' as number | string })
 
 // ── Page ───────────────────────────────────────────────────────
@@ -177,13 +177,31 @@ export default function AccountingPage() {
   // AR Aging Report modal
   const [showAgingReport, setShowAgingReport] = useState(false)
 
+  // Payment Methods (dynamic, loaded from DB)
+  const [paymentMethods, setPaymentMethods] = useState<{ name: string; value: string; is_cash: boolean }[]>([
+    { name: 'Cash', value: 'cash', is_cash: true },
+    { name: 'Bank Transfer', value: 'bank_transfer', is_cash: false },
+    { name: 'ABA Pay', value: 'aba_pay', is_cash: false },
+    { name: 'Wing', value: 'wing', is_cash: false },
+    { name: 'Bakong', value: 'bakong', is_cash: false },
+    { name: 'Online (OTA)', value: 'online', is_cash: false },
+    { name: 'Other', value: 'other', is_cash: false },
+  ])
+
   useEffect(() => {
     if (activeBranch) {
       loadAccounts(); loadEntries(); loadPetty()
       loadAR(); loadBills(); loadVendors()
       loadPeriods(); loadRecurring()
+      loadPaymentMethods()
     }
   }, [activeBranch]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function loadPaymentMethods() {
+    if (!activeBranch) return
+    const { data } = await supabase.from('payment_methods').select('name, value, is_cash').eq('branch_id', activeBranch.id).eq('is_active', true).order('sort_order')
+    if (data && data.length > 0) setPaymentMethods(data as { name: string; value: string; is_cash: boolean }[])
+  }
 
   // ── Load ───────────────────────────────────────────────────────
 
@@ -328,17 +346,53 @@ export default function AccountingPage() {
   function openAddAccount() { setEditAccountId(null); setCoaForm({ ...emptyCoaForm }); setCoaFormOpen(true) }
   function openEditAccount(a: ChartOfAccount) {
     setEditAccountId(a.id)
-    setCoaForm({ code: a.code, name: a.name, type: a.type, category: a.category })
+    setCoaForm({ code: a.code, name: a.name, type: a.type, category: a.category, is_active: a.is_active ?? true, opening_balance: '', opening_balance_date: todayStr(), offset_account_id: '' })
     setCoaFormOpen(true)
   }
   async function saveAccount() {
     if (!coaForm.code || !coaForm.name) { toast('Code and name required', 'error'); return }
+    if (coaForm.opening_balance && Number(coaForm.opening_balance) > 0 && !coaForm.offset_account_id) { toast('Offset account required for opening balance', 'error'); return }
     setCoaSaving(true)
-    const payload = { ...coaForm, updated_at: new Date().toISOString() }
-    const { error } = editAccountId
-      ? await supabase.from('chart_of_accounts').update(payload).eq('id', editAccountId)
-      : await supabase.from('chart_of_accounts').insert({ ...payload, branch_id: activeBranch?.id ?? null })
-    if (error) { toast(error.message, 'error'); setCoaSaving(false); return }
+    const payload = { code: coaForm.code, name: coaForm.name, type: coaForm.type, category: coaForm.category, is_active: coaForm.is_active, updated_at: new Date().toISOString() }
+    
+    let savedAccountId = editAccountId
+    if (editAccountId) {
+      const { error } = await supabase.from('chart_of_accounts').update(payload).eq('id', editAccountId)
+      if (error) { toast(error.message, 'error'); setCoaSaving(false); return }
+    } else {
+      const { data, error } = await supabase.from('chart_of_accounts').insert({ ...payload, branch_id: activeBranch?.id ?? null }).select().single()
+      if (error || !data) { toast(error?.message ?? 'Error', 'error'); setCoaSaving(false); return }
+      savedAccountId = data.id
+    }
+      
+    if (coaForm.opening_balance && Number(coaForm.opening_balance) > 0 && coaForm.offset_account_id) {
+      const bal = Number(coaForm.opening_balance)
+      const isDebit = coaForm.type === 'asset' || coaForm.type === 'expense'
+      const { data: entryReq } = await supabase.from('journal_entries').insert({
+        entry_number: generateJournalEntryNumber(),
+        entry_date: coaForm.opening_balance_date,
+        reference: coaForm.code,
+        reference_type: 'opening_balance',
+        description: `Opening balance for ${coaForm.name}`,
+        branch_id: activeBranch?.id ?? null
+      }).select().single()
+      
+      if (entryReq) {
+        await supabase.from('journal_entry_lines').insert([
+          {
+            entry_id: entryReq.id, account_id: savedAccountId,
+            debit: isDebit ? bal : 0, credit: isDebit ? 0 : bal,
+            description: 'Opening Balance'
+          },
+          {
+            entry_id: entryReq.id, account_id: coaForm.offset_account_id,
+            debit: isDebit ? 0 : bal, credit: isDebit ? bal : 0,
+            description: 'Opening Balance Offset'
+          }
+        ])
+      }
+    }
+    
     toast(editAccountId ? 'Account updated' : 'Account added')
     setCoaSaving(false); setCoaFormOpen(false); loadAccounts()
   }
@@ -521,7 +575,10 @@ export default function AccountingPage() {
     const newStatus = newPaid >= Number(selectedBill.total) ? 'paid' : 'partial'
 
     const apAcct   = accounts.find(a => a.code === '2100')
-    const cashCode = billPayForm.payment_method === 'cash' ? '1010' : '1020'
+    const cashCode = (() => {
+      const pm = paymentMethods.find(m => m.value === billPayForm.payment_method)
+      return (pm as any)?.account_code || (pm?.is_cash ?? billPayForm.payment_method === 'cash') ? '1010' : '1020'
+    })()
     const cashAcct = accounts.find(a => a.code === cashCode)
     let jeId: string | null = null
     if (apAcct && cashAcct) {
@@ -1952,7 +2009,35 @@ export default function AccountingPage() {
             <label className="block text-xs text-hmuted mb-1">Category</label>
             <input value={coaForm.category} onChange={e => setCoaForm(f => ({ ...f, category: e.target.value }))} placeholder="e.g. operating_expense" className={input} />
           </div>
-          <div className="flex justify-end gap-3 pt-1">
+          <div className="flex items-center gap-2 pt-1">
+            <input type="checkbox" checked={coaForm.is_active} onChange={e => setCoaForm(f => ({ ...f, is_active: e.target.checked }))} className="w-4 h-4 accent-navy cursor-pointer" />
+            <label className="text-sm font-medium text-htext">Active Account</label>
+          </div>
+          
+          <div className="mt-4 pt-4 border-t border-hborder/50 space-y-3">
+            <p className="text-xs font-semibold text-navy uppercase tracking-wide">Opening Balance</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs text-hmuted mb-1">Amount ($)</label>
+                <input type="number" min={0} step={0.01} value={coaForm.opening_balance} onChange={e => setCoaForm(f => ({ ...f, opening_balance: e.target.value }))} placeholder="0.00" className={input} />
+              </div>
+              <div>
+                <label className="block text-xs text-hmuted mb-1">As Of Date</label>
+                <input type="date" value={coaForm.opening_balance_date} onChange={e => setCoaForm(f => ({ ...f, opening_balance_date: e.target.value }))} className={input} />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs text-hmuted mb-1">Offset Account (Equity)</label>
+              <select value={coaForm.offset_account_id} onChange={e => setCoaForm(f => ({ ...f, offset_account_id: e.target.value }))} className={input}>
+                <option value="">Select offset account…</option>
+                {accounts.filter(a => a.is_active && a.type === 'equity').map(a => (
+                  <option key={a.id} value={a.id}>{a.code} — {a.name}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-3 pt-2">
             <Button variant="ghost" onClick={() => setCoaFormOpen(false)}>Cancel</Button>
             <Button onClick={saveAccount} disabled={coaSaving}>{coaSaving ? 'Saving…' : editAccountId ? 'Update' : 'Add Account'}</Button>
           </div>
@@ -2128,8 +2213,8 @@ export default function AccountingPage() {
             <div>
               <label className="block text-xs text-hmuted mb-1">Payment Method</label>
               <select value={billPayForm.payment_method} onChange={e => setBillPayForm(f => ({ ...f, payment_method: e.target.value }))} className={input}>
-                {['cash', 'bank_transfer', 'card', 'qr', 'online'].map(m => (
-                  <option key={m} value={m}>{capitalize(m.replace('_', ' '))}</option>
+                {paymentMethods.map(m => (
+                  <option key={m.value} value={m.value}>{m.name}</option>
                 ))}
               </select>
             </div>
@@ -2138,7 +2223,7 @@ export default function AccountingPage() {
               <input value={billPayForm.reference} onChange={e => setBillPayForm(f => ({ ...f, reference: e.target.value }))} placeholder="Transfer ref, receipt #…" className={input} />
             </div>
             <p className="text-[10px] text-hmuted bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">
-              Auto journal: DR 2100 Accounts Payable / CR {billPayForm.payment_method === 'cash' ? '1010 Cash on Hand' : '1020 Cash at Bank'}
+              Auto journal: DR 2100 Accounts Payable / CR {(paymentMethods.find(m => m.value === billPayForm.payment_method)?.is_cash ?? (billPayForm.payment_method === 'cash')) ? '1010 Cash on Hand' : '1020 Cash at Bank'}
             </p>
             <div className="flex justify-end gap-3 pt-1">
               <Button variant="ghost" onClick={() => { setBillPayOpen(false); setSelectedBill(null) }}>Cancel</Button>
