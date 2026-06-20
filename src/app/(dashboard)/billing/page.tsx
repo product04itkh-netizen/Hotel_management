@@ -72,7 +72,7 @@ export default function BillingPage() {
 
   async function loadData() {
     if (!activeBranch) return
-    const [invRes, resRes, settingsRes] = await Promise.all([
+    const [invRes, resRes, settingsRes, coaRes] = await Promise.all([
       supabase.from('invoices')
         .select('*, reservation:reservations(reservation_number, check_in_date, check_out_date), guest:guests(full_name, phone), house:houses(name)')
         .eq('branch_id', activeBranch.id)
