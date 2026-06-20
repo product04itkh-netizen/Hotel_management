@@ -94,12 +94,14 @@ export default function HousekeepingPage() {
       if (task) {
         // Mark room available if room-level task
         if (task.room_id) {
-          await supabase.from('rooms').update({ status: 'available', updated_at: new Date().toISOString() }).eq('id', task.room_id)
+          const { error: rErr } = await supabase.from('rooms').update({ status: 'available', updated_at: new Date().toISOString() }).eq('id', task.room_id)
+          if (rErr) toast(`Warning: could not mark room available: ${rErr.message}`, 'error')
         }
         // Mark house available if house-level task (no specific room)
         const houseId = (task as any).house?.id ?? (task as any).room?.house?.id
         if (!task.room_id && houseId) {
-          await supabase.from('houses').update({ status: 'available', updated_at: new Date().toISOString() }).eq('id', houseId)
+          const { error: hErr } = await supabase.from('houses').update({ status: 'available', updated_at: new Date().toISOString() }).eq('id', houseId)
+          if (hErr) toast(`Warning: could not mark house available: ${hErr.message}`, 'error')
         }
         // Telegram notify
         const roomNumber = (task as any).room?.room_number ?? (task as any).house?.name ?? 'Property'
@@ -113,13 +115,15 @@ export default function HousekeepingPage() {
         }).catch(() => {})
       }
     }
-    await supabase.from('housekeeping_tasks').update(update).eq('id', id)
+    const { error: tErr } = await supabase.from('housekeeping_tasks').update(update).eq('id', id)
+    if (tErr) { toast(tErr.message, 'error'); return }
     toast(status === 'completed' ? 'Task completed — property marked available' : 'Task updated')
     loadData()
   }
 
   async function handleAssign(id: string, staffId: string) {
-    await supabase.from('housekeeping_tasks').update({ assigned_to: staffId || null, updated_at: new Date().toISOString() }).eq('id', id)
+    const { error } = await supabase.from('housekeeping_tasks').update({ assigned_to: staffId || null, updated_at: new Date().toISOString() }).eq('id', id)
+    if (error) { toast(error.message, 'error'); return }
     toast('Task assigned')
     loadData()
   }

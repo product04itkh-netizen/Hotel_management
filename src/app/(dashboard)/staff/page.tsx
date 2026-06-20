@@ -105,7 +105,8 @@ export default function StaffPage() {
       variant: 'danger',
       onConfirm: async () => {
         setConfirmDialog(null)
-        await supabase.from('staff').delete().eq('id', id)
+        const { error } = await supabase.from('staff').delete().eq('id', id)
+        if (error) { toast(`Failed to remove staff: ${error.message}`, 'error'); return }
         toast('Staff member removed', 'info')
         loadStaff()
       },

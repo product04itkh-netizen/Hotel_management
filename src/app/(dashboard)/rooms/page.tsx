@@ -153,7 +153,8 @@ export default function PropertiesPage() {
   }
 
   async function changeHouseStatus(house: House, status: HouseStatus) {
-    await supabase.from('houses').update({ status, updated_at: new Date().toISOString() }).eq('id', house.id)
+    const { error } = await supabase.from('houses').update({ status, updated_at: new Date().toISOString() }).eq('id', house.id)
+    if (error) { toast(`Failed to change status: ${error.message}`, 'error'); return }
     if (status === 'maintenance') {
       fetch('/api/telegram/notify', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -176,7 +177,8 @@ export default function PropertiesPage() {
       variant: 'danger',
       onConfirm: async () => {
         setConfirmDialog(null)
-        await supabase.from('houses').delete().eq('id', id)
+        const { error } = await supabase.from('houses').delete().eq('id', id)
+        if (error) { toast(`Failed to delete house: ${error.message}`, 'error'); return }
         toast('House deleted')
         setSelectedHouseId(null)
         loadHouses()
@@ -248,7 +250,8 @@ export default function PropertiesPage() {
       variant: 'danger',
       onConfirm: async () => {
         setConfirmDialog(null)
-        await supabase.from('rooms').delete().eq('id', room.id)
+        const { error } = await supabase.from('rooms').delete().eq('id', room.id)
+        if (error) { toast(`Failed to delete room: ${error.message}`, 'error'); return }
         toast('Room deleted')
         await loadHouses()
         setSelectedHouseId(roomFormHouseId ?? (room as any).house_id)
@@ -257,7 +260,8 @@ export default function PropertiesPage() {
   }
 
   async function changeRoomStatus(room: Room, status: RoomStatus) {
-    await supabase.from('rooms').update({ status, updated_at: new Date().toISOString() }).eq('id', room.id)
+    const { error } = await supabase.from('rooms').update({ status, updated_at: new Date().toISOString() }).eq('id', room.id)
+    if (error) { toast(`Failed to change room status: ${error.message}`, 'error'); return }
     if (status === 'maintenance') {
       fetch('/api/telegram/notify', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },

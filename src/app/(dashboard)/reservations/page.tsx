@@ -250,7 +250,7 @@ export default function ReservationsPage() {
     }
 
     if (depositAmt > 0) {
-      const { data: entry } = await supabase.from('journal_entries').insert({
+      const { data: entry, error: entryErr } = await supabase.from('journal_entries').insert({
         entry_number: generateJournalEntryNumber(),
         entry_date: new Date().toISOString().split('T')[0],
         reference: resNum,
@@ -259,11 +259,16 @@ export default function ReservationsPage() {
         branch_id: activeBranch.id
       }).select().single()
 
+      if (entryErr) { console.error('JE error:', entryErr); return }
       if (entry) {
-        await supabase.from('journal_entry_lines').insert([
+        const { error: lineErr } = await supabase.from('journal_entry_lines').insert([
           { entry_id: entry.id, account_id: assetAcc, debit: depositAmt, credit: 0, description: 'Deposit Received' },
           { entry_id: entry.id, account_id: depositAcc, debit: 0, credit: depositAmt, description: 'Guest Deposit Liability' }
         ])
+        if (lineErr) {
+          await supabase.from('journal_entries').delete().eq('id', entry.id)
+          console.error('JE line error:', lineErr)
+        }
       }
     }
   }
@@ -278,7 +283,7 @@ export default function ReservationsPage() {
     const depositAcc = accounts.find(a => a.code === '2200')?.id
     if (!assetAcc || !depositAcc) return
 
-    const { data: entry } = await supabase.from('journal_entries').insert({
+    const { data: entry, error: entryErr } = await supabase.from('journal_entries').insert({
       entry_number: generateJournalEntryNumber(),
       entry_date: new Date().toISOString().split('T')[0],
       reference: resNum,
@@ -287,11 +292,16 @@ export default function ReservationsPage() {
       branch_id: activeBranch.id
     }).select().single()
 
+    if (entryErr) { console.error('Refund JE error:', entryErr); return }
     if (entry) {
-      await supabase.from('journal_entry_lines').insert([
+      const { error: lineErr } = await supabase.from('journal_entry_lines').insert([
         { entry_id: entry.id, account_id: depositAcc, debit: depositAmt, credit: 0, description: 'Deposit Refunded Liability Clear' },
         { entry_id: entry.id, account_id: assetAcc, debit: 0, credit: depositAmt, description: 'Deposit Refunded Cash Out' }
       ])
+      if (lineErr) {
+        await supabase.from('journal_entries').delete().eq('id', entry.id)
+        console.error('Refund JE line error:', lineErr)
+      }
     }
   }
 
@@ -320,12 +330,13 @@ export default function ReservationsPage() {
     // Upsert guest
     let guestId = form.guest_id
     if (!guestId && form.guest_name) {
-      const { data: newGuest } = await supabase.from('guests').insert({
+      const { data: newGuest, error: guestErr } = await supabase.from('guests').insert({
         full_name: form.guest_name,
         email: form.guest_email || null,
         phone: form.guest_phone || null,
         visit_count: 1,
       }).select().single()
+      if (guestErr) { toast(`Failed to create guest: ${guestErr.message}`, 'error'); setSaving(false); return }
       guestId = newGuest?.id ?? null
     }
 
@@ -410,7 +421,7 @@ export default function ReservationsPage() {
       // Create deposit receipt if a deposit was taken
       if (newRes && depositNum > 0) {
         const receiptNum = await generateDepositReceiptNumber()
-        await supabase.from('deposit_receipts').insert({
+        const { error: recErr } = await supabase.from('deposit_receipts').insert({
           receipt_number: receiptNum,
           reservation_id: newRes.id,
           branch_id: activeBranch.id,
@@ -419,6 +430,7 @@ export default function ReservationsPage() {
           receipt_date: new Date().toISOString().split('T')[0],
           status: 'held',
         })
+        if (recErr) toast(`Reservation saved but receipt error: ${recErr.message}`, 'error')
         await syncDepositJournalEntry(newRes.reservation_number, form.guest_name, depositNum, depositMethod)
       }
 
@@ -458,7 +470,7 @@ export default function ReservationsPage() {
     if (reservationId) {
       await supabase.from('reservation_line_items').delete().eq('reservation_id', reservationId)
       if (validItems.length > 0) {
-        await supabase.from('reservation_line_items').insert(
+        const { error: lineErr } = await supabase.from('reservation_line_items').insert(
           validItems.map((item, i) => ({
             reservation_id: reservationId,
             label: item.label.trim(),
@@ -466,6 +478,7 @@ export default function ReservationsPage() {
             sort_order: i,
           }))
         )
+        if (lineErr) toast(`Failed to save line items: ${lineErr.message}`, 'error')
       }
     }
 

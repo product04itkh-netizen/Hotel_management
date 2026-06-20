@@ -126,13 +126,15 @@ export default function SettingsPage() {
   }
 
   async function togglePmActive(pm: PaymentMethod) {
-    await supabase.from('payment_methods').update({ is_active: !pm.is_active, updated_at: new Date().toISOString() }).eq('id', pm.id)
+    const { error } = await supabase.from('payment_methods').update({ is_active: !pm.is_active, updated_at: new Date().toISOString() }).eq('id', pm.id)
+    if (error) toast(`Failed to update: ${error.message}`, 'error')
     loadPaymentMethods()
   }
 
   async function deletePm(pm: PaymentMethod) {
     if (!confirm(`Delete "${pm.name}"? This cannot be undone.`)) return
-    await supabase.from('payment_methods').delete().eq('id', pm.id)
+    const { error } = await supabase.from('payment_methods').delete().eq('id', pm.id)
+    if (error) { toast(`Failed to delete: ${error.message}`, 'error'); return }
     toast('Payment method deleted', 'info')
     loadPaymentMethods()
   }

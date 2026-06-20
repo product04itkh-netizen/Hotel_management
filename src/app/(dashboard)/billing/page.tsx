@@ -39,6 +39,7 @@ export default function BillingPage() {
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>(FALLBACK_METHODS)
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [reservations, setReservations] = useState<Reservation[]>([])
+  const [revenueAccounts, setRevenueAccounts] = useState<{code: string, name: string}[]>([])
   const [loading, setLoading] = useState(true)
   const [statusFilter, setStatusFilter] = useState('all')
   const [invoiceOpen, setInvoiceOpen] = useState(false)
@@ -82,10 +83,12 @@ export default function BillingPage() {
         .in('status', ['confirmed', 'checked_in', 'checked_out'])
         .order('created_at', { ascending: false }),
       supabase.from('hotel_settings').select('*').eq('branch_id', activeBranch.id).single(),
+      supabase.from('chart_of_accounts').select('code, name').eq('branch_id', activeBranch.id).eq('is_active', true).eq('type', 'revenue').order('code'),
     ])
     setInvoices((invRes.data ?? []) as unknown as Invoice[])
     setReservations((resRes.data ?? []) as unknown as Reservation[])
     if (settingsRes.data) { setTaxRate(Number(settingsRes.data.tax_rate)); setSettings(settingsRes.data) }
+    setRevenueAccounts((coaRes.data ?? []) as any)
     setLoading(false)
   }
 
@@ -138,6 +141,7 @@ export default function BillingPage() {
           quantity: nights,
           unit_price: Number(house.base_rate_per_night),
           total: nights * Number(house.base_rate_per_night),
+          account_code: '4000',
         })
       } else if (nights > 0 && totalAmount > 0) {
         // Fallback: reservation has a total_amount but no house rate — spread per night
@@ -147,6 +151,7 @@ export default function BillingPage() {
           quantity: nights,
           unit_price: perNight,
           total: totalAmount,
+          account_code: '4000',
         })
       } else if (nights > 0) {
         // No rate data at all — at least show the correct nights count
@@ -155,19 +160,25 @@ export default function BillingPage() {
           quantity: nights,
           unit_price: 0,
           total: 0,
+          account_code: '4000',
         })
       }
 
       // Add each reservation add-on line item
-      const sorted = [...lineItems].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
       sorted.forEach(item => {
         if (item.label) {
-          items.push({ description: item.label, quantity: 1, unit_price: Number(item.amount), total: Number(item.amount) })
+          const l = item.label.toLowerCase()
+          let code = '4400' // Default to Other Revenue
+          if (l.includes('house') || l.includes('room') || l.includes('bed')) code = '4000'
+          else if (l.includes('food') || l.includes('drink') || l.includes('breakfast') || l.includes('lunch') || l.includes('dinner') || l.includes('meal') || l.includes('restaurant') || l.includes('bar')) code = '4100'
+          else if (l.includes('tour') || l.includes('activity') || l.includes('rental') || l.includes('bike') || l.includes('car') || l.includes('guide') || l.includes('transfer') || l.includes('boat')) code = '4200'
+          
+          items.push({ description: item.label, quantity: 1, unit_price: Number(item.amount), total: Number(item.amount), account_code: code })
         }
       })
 
       if (items.length === 0) {
-        items.push({ description: 'House charge', quantity: 1, unit_price: 0, total: 0 })
+        items.push({ description: 'House charge', quantity: 1, unit_price: 0, total: 0, account_code: '4000' })
       }
 
       const noteParts: string[] = []
@@ -189,7 +200,7 @@ export default function BillingPage() {
     } else {
       setForm({
         reservation_id: '',
-        items: [{ description: 'House charge', quantity: 1, unit_price: 0, total: 0 }],
+        items: [{ description: 'House charge', quantity: 1, unit_price: 0, total: 0, account_code: '4000' }],
         discount_amount: 0, discount_pct: 0, discount_type: '$', discount_reason: '', notes: '',
       })
     }
@@ -283,16 +294,16 @@ export default function BillingPage() {
     // Auto journal entry: clear deposit liability → credit revenue
     if (inv && initialPaid > 0 && selectedRes) {
       try {
+        const itemCodes = new Set(form.items.map(i => i.account_code || '4400'))
         const { data: accounts } = await supabase.from('chart_of_accounts')
           .select('id, code')
           .eq('branch_id', activeBranch!.id)
-          .in('code', ['2200', '4000'])
+          .in('code', ['2200', ...Array.from(itemCodes)])
 
         const depositLiabilityAcc = accounts?.find(a => a.code === '2200')
-        const revenueAcc = accounts?.find(a => a.code === '4000')
 
-        if (depositLiabilityAcc && revenueAcc) {
-          const { data: je } = await supabase.from('journal_entries').insert({
+        if (depositLiabilityAcc) {
+          const { data: je, error: jeErr } = await supabase.from('journal_entries').insert({
             entry_number: generateJournalEntryNumber(),
             entry_date: new Date().toISOString().split('T')[0],
             reference: inv.invoice_number,
@@ -301,14 +312,40 @@ export default function BillingPage() {
             branch_id: activeBranch!.id,
           }).select().single()
 
-          if (je) {
-            await supabase.from('journal_entry_lines').insert([
-              { entry_id: je.id, account_id: depositLiabilityAcc.id, debit: initialPaid, credit: 0, description: 'Deposit Applied — Liability Cleared' },
-              { entry_id: je.id, account_id: revenueAcc.id, debit: 0, credit: initialPaid, description: `Revenue — ${inv.invoice_number}` },
-            ])
+          if (jeErr) { toast(`Invoice created but JE failed: ${jeErr.message}`, 'error') }
+          else if (je) {
+            const lines = [{ entry_id: je.id, account_id: depositLiabilityAcc.id, debit: initialPaid, credit: 0, description: 'Deposit Applied — Liability Cleared' }]
+            
+            const accountTotals: Record<string, number> = {}
+            form.items.forEach(item => {
+              const code = item.account_code || '4400'
+              accountTotals[code] = (accountTotals[code] || 0) + Number(item.total)
+            })
+            const invoiceSubtotal = Object.values(accountTotals).reduce((a,b) => a+b, 0)
+            
+            let remainingPaid = initialPaid
+            for (const [code, itemTotal] of Object.entries(accountTotals)) {
+              const acc = accounts?.find(a => a.code === code)
+              if (!acc) continue
+              const ratio = invoiceSubtotal > 0 ? itemTotal / invoiceSubtotal : (1 / Object.keys(accountTotals).length)
+              const amount = Math.round((initialPaid * ratio) * 100) / 100
+              if (amount > 0) {
+                lines.push({ entry_id: je.id, account_id: acc.id, debit: 0, credit: amount, description: `Revenue — ${inv.invoice_number}` })
+                remainingPaid -= amount
+              }
+            }
+            if (Math.abs(remainingPaid) > 0.001 && lines.length > 1) {
+              lines[1].credit = Math.round((lines[1].credit + remainingPaid) * 100) / 100
+            }
+
+            const { error: lineErr } = await supabase.from('journal_entry_lines').insert(lines)
+            if (lineErr) {
+              await supabase.from('journal_entries').delete().eq('id', je.id)
+              toast(`Invoice created but JE lines failed: ${lineErr.message}`, 'error')
+            }
           }
         }
-      } catch { /* COA not set up yet — skip JE silently */ }
+      } catch (err: any) { toast(err.message || 'JE error', 'error') }
     }
 
     toast('Invoice created')
@@ -351,17 +388,18 @@ export default function BillingPage() {
       const selectedPm = paymentMethods.find(m => m.value === payForm.payment_method)
       const cashCode = (selectedPm as any)?.account_code || (selectedPm?.is_cash ? '1010' : '1020')
 
+      const itemCodes = new Set(selectedInvoice.items.map(i => (i as any).account_code || '4400'))
+
       // Find cash account and revenue account for this branch
       const { data: accounts, error: acctErr } = await supabase.from('chart_of_accounts')
         .select('id, code')
         .eq('branch_id', activeBranch.id)
         .eq('is_active', true)
-        .in('code', [cashCode, '4000', '2200'])
+        .in('code', [cashCode, '2200', ...Array.from(itemCodes)])
 
       const cashAcct = accounts?.find(a => a.code === cashCode)
-      const revenueAcct = accounts?.find(a => a.code === '4000')
 
-      if (cashAcct && revenueAcct && amountReceived > 0) {
+      if (cashAcct && amountReceived > 0) {
         const { data: je, error: jeErr } = await supabase.from('journal_entries').insert({
           entry_number: generateJournalEntryNumber(),
           entry_date: new Date().toISOString().split('T')[0],
@@ -371,12 +409,38 @@ export default function BillingPage() {
           branch_id: activeBranch.id,
         }).select().single()
 
+        if (jeErr) throw jeErr
         if (je) {
           jeId = je.id
-          await supabase.from('journal_entry_lines').insert([
-            { entry_id: je.id, account_id: cashAcct.id, description: `${capitalize(payForm.payment_method.replace('_', ' '))} received`, debit: amountReceived, credit: 0 },
-            { entry_id: je.id, account_id: revenueAcct.id, description: selectedInvoice.invoice_number, debit: 0, credit: amountReceived },
-          ])
+          const lines = [{ entry_id: je.id, account_id: cashAcct.id, description: `${capitalize(payForm.payment_method.replace('_', ' '))} received`, debit: amountReceived, credit: 0 }]
+          
+          const accountTotals: Record<string, number> = {}
+          selectedInvoice.items.forEach(item => {
+            const code = (item as any).account_code || '4400'
+            accountTotals[code] = (accountTotals[code] || 0) + Number(item.total)
+          })
+          const invoiceSubtotal = Object.values(accountTotals).reduce((a,b) => a+b, 0)
+          
+          let remainingPaid = amountReceived
+          for (const [code, itemTotal] of Object.entries(accountTotals)) {
+            const acc = accounts?.find(a => a.code === code)
+            if (!acc) continue
+            const ratio = invoiceSubtotal > 0 ? itemTotal / invoiceSubtotal : (1 / Object.keys(accountTotals).length)
+            const amount = Math.round((amountReceived * ratio) * 100) / 100
+            if (amount > 0) {
+              lines.push({ entry_id: je.id, account_id: acc.id, description: selectedInvoice.invoice_number, debit: 0, credit: amount })
+              remainingPaid -= amount
+            }
+          }
+          if (Math.abs(remainingPaid) > 0.001 && lines.length > 1) {
+            lines[1].credit = Math.round((lines[1].credit + remainingPaid) * 100) / 100
+          }
+
+          const { error: lineErr } = await supabase.from('journal_entry_lines').insert(lines)
+          if (lineErr) {
+            await supabase.from('journal_entries').delete().eq('id', je.id)
+            throw lineErr
+          }
         }
       }
 
@@ -387,8 +451,8 @@ export default function BillingPage() {
           const { data: existingDepositJe } = await supabase.from('journal_entries').select('id').eq('reference', selectedInvoice.invoice_number).eq('reference_type', 'deposit_applied').maybeSingle()
           if (!existingDepositJe) {
             const depositLiabilityAcc = accounts?.find(a => a.code === '2200')
-            if (depositLiabilityAcc && revenueAcct) {
-              const { data: depJe } = await supabase.from('journal_entries').insert({
+            if (depositLiabilityAcc) {
+              const { data: depJe, error: depJeErr } = await supabase.from('journal_entries').insert({
                 entry_number: generateJournalEntryNumber(),
                 entry_date: new Date().toISOString().split('T')[0],
                 reference: selectedInvoice.invoice_number,
@@ -396,21 +460,47 @@ export default function BillingPage() {
                 description: `Deposit applied to invoice ${selectedInvoice.invoice_number} (${(selectedInvoice.guest as any)?.full_name ?? 'Guest'})`,
                 branch_id: activeBranch.id,
               }).select().single()
+              if (depJeErr) throw depJeErr
               if (depJe) {
-                await supabase.from('journal_entry_lines').insert([
-                  { entry_id: depJe.id, account_id: depositLiabilityAcc.id, debit: res.deposit, credit: 0, description: 'Deposit Applied — Liability Cleared' },
-                  { entry_id: depJe.id, account_id: revenueAcct.id, debit: 0, credit: res.deposit, description: `Revenue — ${selectedInvoice.invoice_number}` },
-                ])
+                const lines = [{ entry_id: depJe.id, account_id: depositLiabilityAcc.id, debit: res.deposit, credit: 0, description: 'Deposit Applied — Liability Cleared' }]
+                
+                const accountTotals: Record<string, number> = {}
+                selectedInvoice.items.forEach(item => {
+                  const code = (item as any).account_code || '4400'
+                  accountTotals[code] = (accountTotals[code] || 0) + Number(item.total)
+                })
+                const invoiceSubtotal = Object.values(accountTotals).reduce((a,b) => a+b, 0)
+                
+                let remainingPaid = res.deposit
+                for (const [code, itemTotal] of Object.entries(accountTotals)) {
+                  const acc = accounts?.find(a => a.code === code)
+                  if (!acc) continue
+                  const ratio = invoiceSubtotal > 0 ? itemTotal / invoiceSubtotal : (1 / Object.keys(accountTotals).length)
+                  const amount = Math.round((res.deposit * ratio) * 100) / 100
+                  if (amount > 0) {
+                    lines.push({ entry_id: depJe.id, account_id: acc.id, debit: 0, credit: amount, description: `Revenue — ${selectedInvoice.invoice_number}` })
+                    remainingPaid -= amount
+                  }
+                }
+                if (Math.abs(remainingPaid) > 0.001 && lines.length > 1) {
+                  lines[1].credit = Math.round((lines[1].credit + remainingPaid) * 100) / 100
+                }
+
+                const { error: depLineErr } = await supabase.from('journal_entry_lines').insert(lines)
+                if (depLineErr) {
+                  await supabase.from('journal_entries').delete().eq('id', depJe.id)
+                  throw depLineErr
+                }
               }
             }
           }
         }
       }
 
-    } catch (err) { console.error('[JE] failed silently:', err) }
+    } catch (err: any) { toast(`Payment logged, but JE failed: ${err.message}`, 'error') }
 
     // Record payment transaction
-    await supabase.from('payment_transactions').insert({
+    const { error: pmtErr } = await supabase.from('payment_transactions').insert({
       invoice_id: selectedInvoice.id,
       amount: amountReceived,
       payment_method: payForm.payment_method,
@@ -419,13 +509,20 @@ export default function BillingPage() {
       journal_entry_id: jeId,
       branch_id: activeBranch.id,
     })
+    
+    if (pmtErr) {
+      if (jeId) await supabase.from('journal_entries').delete().eq('id', jeId)
+      toast(`Failed to record payment transaction: ${pmtErr.message}`, 'error')
+      setSaving(false); return
+    }
 
     // Sync deposit back to reservation so Remaining column stays accurate
     if (selectedInvoice.reservation_id) {
-      await supabase.from('reservations').update({
+      const { error: resErr } = await supabase.from('reservations').update({
         deposit: newPaid,
         updated_at: new Date().toISOString(),
       }).eq('id', selectedInvoice.reservation_id)
+      if (resErr) toast(`Warning: failed to sync reservation deposit: ${resErr.message}`, 'error')
     }
 
     if (newStatus === 'paid') {
@@ -676,9 +773,10 @@ export default function BillingPage() {
             </div>
             <div className="space-y-2">
               <div className="grid grid-cols-12 gap-2 px-0.5">
-                <span className="col-span-5 text-[10px] text-hmuted uppercase tracking-wide">Description</span>
-                <span className="col-span-2 text-[10px] text-hmuted uppercase tracking-wide">Qty</span>
-                <span className="col-span-3 text-[10px] text-hmuted uppercase tracking-wide">Unit Price</span>
+                <span className="col-span-4 text-[10px] text-hmuted uppercase tracking-wide">Description</span>
+                <span className="col-span-3 text-[10px] text-hmuted uppercase tracking-wide">Account</span>
+                <span className="col-span-1 text-[10px] text-hmuted uppercase tracking-wide text-center">Qty</span>
+                <span className="col-span-2 text-[10px] text-hmuted uppercase tracking-wide">Unit Price</span>
                 <span className="col-span-1 text-[10px] text-hmuted uppercase tracking-wide text-right">Total</span>
               </div>
               {form.items.map((item, idx) => (
@@ -687,19 +785,28 @@ export default function BillingPage() {
                     value={item.description}
                     onChange={e => updateItem(idx, 'description', e.target.value)}
                     placeholder="Description"
-                    className="col-span-5 border border-hborder rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-navy bg-hbg"
+                    className="col-span-4 border border-hborder rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-navy bg-hbg"
                   />
+                  <select
+                    value={item.account_code || '4400'}
+                    onChange={e => updateItem(idx, 'account_code', e.target.value)}
+                    className="col-span-3 border border-hborder rounded-lg px-1.5 py-1.5 text-xs focus:outline-none focus:border-navy bg-hbg text-hmuted"
+                  >
+                    {revenueAccounts.map(a => (
+                      <option key={a.code} value={a.code}>{a.code} - {a.name}</option>
+                    ))}
+                  </select>
                   <input
                     type="number" min={1}
                     value={item.quantity}
                     onChange={e => updateItem(idx, 'quantity', Number(e.target.value))}
-                    className="col-span-2 border border-hborder rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-navy bg-hbg"
+                    className="col-span-1 border border-hborder rounded-lg px-1.5 py-1.5 text-sm text-center focus:outline-none focus:border-navy bg-hbg"
                   />
                   <input
                     type="number" min={0} step={0.01}
                     value={item.unit_price}
                     onChange={e => updateItem(idx, 'unit_price', Number(e.target.value))}
-                    className="col-span-3 border border-hborder rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-navy bg-hbg"
+                    className="col-span-2 border border-hborder rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-navy bg-hbg"
                     placeholder="0.00"
                   />
                   <span className="col-span-1 text-sm font-medium text-right text-dark-navy">{formatCurrency(item.total)}</span>

@@ -338,6 +338,7 @@ export interface InvoiceItem {
   quantity: number
   unit_price: number
   total: number
+  account_code?: string
 }
 
 export interface Invoice {

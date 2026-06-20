@@ -52,6 +52,7 @@ export default function ReportsPage() {
   const [pl, setPl] = useState<PLData>({
     revenueByType: [], expenseByCategory: [], totalRevenue: 0, totalExpenses: 0, netIncome: 0,
   })
+  const [expandedAccounts, setExpandedAccounts] = useState<Record<string, boolean>>({})
 
   useEffect(() => { if (activeBranch) loadReports() }, [activeBranch]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -61,11 +62,12 @@ export default function ReportsPage() {
     sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 5)
     const startDate = sixMonthsAgo.toISOString().split('T')[0]
 
-    const [invRes, resRes, houseRes, allInvRes] = await Promise.all([
+    const [invRes, resRes, houseRes, allInvRes, coaRes] = await Promise.all([
       supabase.from('invoices').select('total, paid_at').eq('status', 'paid').eq('branch_id', activeBranch.id).gte('paid_at', startDate),
       supabase.from('reservations').select('source, check_in_date, check_out_date, status, house:houses(house_type)').eq('branch_id', activeBranch.id).gte('created_at', startDate),
       supabase.from('houses').select('house_type, status').eq('branch_id', activeBranch.id),
       supabase.from('invoices').select('total, amount_paid, status, discount_amount').eq('branch_id', activeBranch.id),
+      supabase.from('chart_of_accounts').select('code, name, type').eq('branch_id', activeBranch.id).eq('is_active', true).in('type', ['revenue', 'expense']).order('code'),
     ])
     // 2-step: get this branch's JE IDs first, then fetch their lines (journal_entry_lines has no branch_id)
     const { data: jeIdData } = await supabase.from('journal_entries')
@@ -82,6 +84,8 @@ export default function ReportsPage() {
     const allHouses = houseRes.data ?? []
     const allInvoices = allInvRes.data ?? []
     const jeLines = jeLineRes.data ?? []
+    // All active revenue & expense accounts — used as base for P&L so every account shows
+    const allCoaAccounts: { code: string; name: string; type: string }[] = coaRes.data ?? []
 
     // Monthly breakdown
     const months: MonthlyData[] = []
@@ -144,8 +148,14 @@ export default function ReportsPage() {
       .reduce((s, i) => s + Number(i.amount_paid), 0)
     const grossBilling = allInvoices
       .filter(i => !['void'].includes(i.status))
-      .reduce((s, i) => s + Number(i.total), 0)
-    const totalDiscounts = allInvoices.reduce((s, i) => s + Number(i.discount_amount ?? 0), 0)
+      .reduce((s, i) => s + Number(i.total) + Number(i.discount_amount ?? 0), 0)
+    const totalDiscounts = allInvoices
+      .filter(i => !['void'].includes(i.status))
+      .reduce((s, i) => s + Number(i.discount_amount ?? 0), 0)
+    const netRevenue = allInvoices
+      .filter(i => !['void'].includes(i.status))
+      .reduce((s, i) => s + Number(i.total), 0) - refundsIssued
+
     setBalance({
       cashCollected,
       accountsReceivable,
@@ -156,24 +166,43 @@ export default function ReportsPage() {
       totalLiabilities: unpaidTotal + partialBalance + refundsIssued,
       grossBilling,
       totalDiscounts,
-      netRevenue: cashCollected - refundsIssued,
+      netRevenue,
     })
 
     // ── P&L from journal entry lines ──
+    // Seed maps from COA so every account appears even with $0 activity
     const revenueMap: Record<string, number> = {}
     const expenseMap: Record<string, number> = {}
+    const revenueDetails: Record<string, { desc: string, amount: number }[]> = {}
+    const expenseDetails: Record<string, { desc: string, amount: number }[]> = {}
+
+    allCoaAccounts.forEach(a => {
+      if (a.type === 'revenue') { revenueMap[a.name] = 0; revenueDetails[a.name] = [] }
+      if (a.type === 'expense') { expenseMap[a.name] = 0; expenseDetails[a.name] = [] }
+    })
     jeLines.forEach((l: any) => {
       const acct = l.account
       if (!acct) return
-      if (acct.type === 'revenue' && Number(l.credit) > 0) {
-        revenueMap[acct.name] = (revenueMap[acct.name] ?? 0) + Number(l.credit)
+      if (acct.type === 'revenue') {
+        const net = Number(l.credit) - Number(l.debit)
+        revenueMap[acct.name] = (revenueMap[acct.name] ?? 0) + net
+        if (net !== 0) {
+          revenueDetails[acct.name] = revenueDetails[acct.name] || []
+          revenueDetails[acct.name].push({ desc: l.description || 'Revenue', amount: net })
+        }
       }
-      if (acct.type === 'expense' && Number(l.debit) > 0) {
-        expenseMap[acct.name] = (expenseMap[acct.name] ?? 0) + Number(l.debit)
+      if (acct.type === 'expense') {
+        const net = Number(l.debit) - Number(l.credit)
+        expenseMap[acct.name] = (expenseMap[acct.name] ?? 0) + net
+        if (net !== 0) {
+          expenseDetails[acct.name] = expenseDetails[acct.name] || []
+          expenseDetails[acct.name].push({ desc: l.description || 'Expense', amount: net })
+        }
       }
     })
-    const plRevenue = Object.entries(revenueMap).map(([name, amount]) => ({ name, amount })).sort((a, b) => b.amount - a.amount)
-    const plExpense = Object.entries(expenseMap).map(([name, amount]) => ({ name, amount })).sort((a, b) => b.amount - a.amount)
+    // Sort: non-zero first, then zero accounts by their COA order
+    const plRevenue = Object.entries(revenueMap).map(([name, amount]) => ({ name, amount, details: revenueDetails[name] })).sort((a, b) => b.amount - a.amount)
+    const plExpense = Object.entries(expenseMap).map(([name, amount]) => ({ name, amount, details: expenseDetails[name] })).sort((a, b) => b.amount - a.amount)
     const plTotalRev = plRevenue.reduce((s, r) => s + r.amount, 0)
     const plTotalExp = plExpense.reduce((s, e) => s + e.amount, 0)
     setPl({ revenueByType: plRevenue, expenseByCategory: plExpense, totalRevenue: plTotalRev, totalExpenses: plTotalExp, netIncome: plTotalRev - plTotalExp })
@@ -506,10 +535,33 @@ export default function ReportsPage() {
                 <div className="space-y-2.5">
                   {pl.revenueByType.length === 0 ? (
                     <p className="text-xs text-hmuted py-2">No revenue entries</p>
-                  ) : pl.revenueByType.map(r => (
-                    <div key={r.name} className="flex justify-between text-sm">
-                      <span className="text-hmuted">{r.name}</span>
-                      <span className="font-semibold text-dark-navy">{formatCurrency(r.amount)}</span>
+                  ) : pl.revenueByType.map((r: any) => (
+                    <div key={r.name} className="flex flex-col text-sm border-b border-hborder/50 pb-2 mb-2 last:border-0 last:mb-0 last:pb-0">
+                      <div className="flex justify-between items-center group">
+                        <button 
+                          onClick={() => setExpandedAccounts(p => ({ ...p, [r.name]: !p[r.name] }))}
+                          className="flex items-center gap-1.5 text-hmuted hover:text-navy transition-colors text-left"
+                          disabled={!r.details || r.details.length === 0}
+                        >
+                          {r.details && r.details.length > 0 ? (
+                            <svg className={`w-3.5 h-3.5 transition-transform ${expandedAccounts[r.name] ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                            </svg>
+                          ) : <span className="w-3.5 inline-block" />}
+                          <span className={expandedAccounts[r.name] ? 'font-medium text-navy' : ''}>{r.name}</span>
+                        </button>
+                        <span className="font-semibold text-dark-navy">{formatCurrency(r.amount)}</span>
+                      </div>
+                      {expandedAccounts[r.name] && r.details && r.details.length > 0 && (
+                        <div className="mt-2 pl-5 space-y-1">
+                          {r.details.map((d: any, idx: number) => (
+                            <div key={idx} className="flex justify-between text-xs items-center">
+                              <span className="text-hmuted/80 truncate max-w-[150px]" title={d.desc}>{d.desc}</span>
+                              <span className="text-hmuted">{formatCurrency(d.amount)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   ))}
                   <div className="flex justify-between text-sm border-t border-hborder pt-2.5 mt-1">
@@ -525,10 +577,33 @@ export default function ReportsPage() {
                 <div className="space-y-2.5">
                   {pl.expenseByCategory.length === 0 ? (
                     <p className="text-xs text-hmuted py-2">No expense entries</p>
-                  ) : pl.expenseByCategory.map(e => (
-                    <div key={e.name} className="flex justify-between text-sm">
-                      <span className="text-hmuted">{e.name}</span>
-                      <span className="font-semibold text-dark-navy">{formatCurrency(e.amount)}</span>
+                  ) : pl.expenseByCategory.map((e: any) => (
+                    <div key={e.name} className="flex flex-col text-sm border-b border-hborder/50 pb-2 mb-2 last:border-0 last:mb-0 last:pb-0">
+                      <div className="flex justify-between items-center group">
+                        <button 
+                          onClick={() => setExpandedAccounts(p => ({ ...p, [e.name]: !p[e.name] }))}
+                          className="flex items-center gap-1.5 text-hmuted hover:text-navy transition-colors text-left"
+                          disabled={!e.details || e.details.length === 0}
+                        >
+                          {e.details && e.details.length > 0 ? (
+                            <svg className={`w-3.5 h-3.5 transition-transform ${expandedAccounts[e.name] ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                            </svg>
+                          ) : <span className="w-3.5 inline-block" />}
+                          <span className={expandedAccounts[e.name] ? 'font-medium text-navy' : ''}>{e.name}</span>
+                        </button>
+                        <span className="font-semibold text-dark-navy">{formatCurrency(e.amount)}</span>
+                      </div>
+                      {expandedAccounts[e.name] && e.details && e.details.length > 0 && (
+                        <div className="mt-2 pl-5 space-y-1">
+                          {e.details.map((d: any, idx: number) => (
+                            <div key={idx} className="flex justify-between text-xs items-center">
+                              <span className="text-hmuted/80 truncate max-w-[150px]" title={d.desc}>{d.desc}</span>
+                              <span className="text-hmuted">{formatCurrency(d.amount)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   ))}
                   <div className="flex justify-between text-sm border-t border-hborder pt-2.5 mt-1">

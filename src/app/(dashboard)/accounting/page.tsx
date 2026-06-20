@@ -433,13 +433,18 @@ export default function AccountingPage() {
       description: jeForm.description, branch_id: activeBranch?.id ?? null,
     }).select().single()
     if (jeErr || !je) { toast(jeErr?.message ?? 'Error', 'error'); setJeSaving(false); return }
-    await supabase.from('journal_entry_lines').insert(
+    const { error: lineErr } = await supabase.from('journal_entry_lines').insert(
       validLines.map(l => ({
         entry_id: je.id, account_id: l.account_id,
         description: l.description || null,
         debit: Number(l.debit || 0), credit: Number(l.credit || 0),
       }))
     )
+    if (lineErr) {
+      await supabase.from('journal_entries').delete().eq('id', je.id)
+      toast('Failed to save lines, entry cancelled', 'error')
+      setJeSaving(false); return
+    }
     toast('Journal entry posted'); setJeSaving(false); setJeFormOpen(false); loadEntries()
   }
 
@@ -470,7 +475,7 @@ export default function AccountingPage() {
           branch_id: activeBranch?.id ?? null,
         }).select().single()
         if (error || !reversal) { toast(error?.message ?? 'Failed to create reversal', 'error'); return }
-        await supabase.from('journal_entry_lines').insert(
+        const { error: lineErr } = await supabase.from('journal_entry_lines').insert(
           lines.map((l: any) => ({
             entry_id: reversal.id,
             account_id: l.account_id,
@@ -479,6 +484,10 @@ export default function AccountingPage() {
             credit: Number(l.debit),
           }))
         )
+        if (lineErr) {
+          await supabase.from('journal_entries').delete().eq('id', reversal.id)
+          toast('Failed to post reversal lines', 'error'); return
+        }
         await supabase.from('journal_entries').update({
           is_void: true,
           voided_at: new Date().toISOString(),
@@ -546,10 +555,14 @@ export default function AccountingPage() {
       }).select().single()
       if (je) {
         jeId = je.id
-        await supabase.from('journal_entry_lines').insert([
+        const { error: lineErr } = await supabase.from('journal_entry_lines').insert([
           { entry_id: je.id, account_id: expAcct.id, description: billForm.description, debit: total, credit: 0 },
           { entry_id: je.id, account_id: apAcct.id,  description: billForm.description, debit: 0, credit: total },
         ])
+        if (lineErr) {
+          await supabase.from('journal_entries').delete().eq('id', je.id)
+          toast('Failed to save journal lines', 'error'); setBillSaving(false); return
+        }
       }
     }
 
@@ -566,7 +579,10 @@ export default function AccountingPage() {
       journal_entry_id: jeId,
       branch_id: activeBranch?.id ?? null,
     })
-    if (error) { toast(error.message, 'error'); setBillSaving(false); return }
+    if (error) { 
+      if (jeId) await supabase.from('journal_entries').delete().eq('id', jeId)
+      toast(error.message, 'error'); setBillSaving(false); return 
+    }
     toast('Bill recorded')
     setBillSaving(false); setBillFormOpen(false)
     setBillForm({ vendor_id: '', bill_date: todayStr(), due_date: '', description: '', subtotal: '', tax_amount: '0', expense_account_id: '', notes: '' })
@@ -588,30 +604,46 @@ export default function AccountingPage() {
     const cashAcct = accounts.find(a => a.code === cashCode)
     let jeId: string | null = null
     if (apAcct && cashAcct) {
-      const { data: je } = await supabase.from('journal_entries').insert({
+      const { data: je, error: jeErr } = await supabase.from('journal_entries').insert({
         entry_number: generateJournalEntryNumber(), entry_date: billPayForm.payment_date,
         reference: selectedBill.bill_number, reference_type: 'bill_payment',
         description: `Bill payment — ${selectedBill.description}`,
         branch_id: activeBranch?.id ?? null,
       }).select().single()
+      if (jeErr) { toast(jeErr.message, 'error'); setBillSaving(false); return }
       if (je) {
         jeId = je.id
-        await supabase.from('journal_entry_lines').insert([
+        const { error: lineErr } = await supabase.from('journal_entry_lines').insert([
           { entry_id: je.id, account_id: apAcct.id,   debit: payAmt, credit: 0 },
           { entry_id: je.id, account_id: cashAcct.id,  debit: 0, credit: payAmt },
         ])
+        if (lineErr) {
+          await supabase.from('journal_entries').delete().eq('id', je.id)
+          toast('Failed to save journal lines', 'error'); setBillSaving(false); return
+        }
       }
     }
 
-    await supabase.from('bill_payments').insert({
+    const { error: pmtErr } = await supabase.from('bill_payments').insert({
       bill_id: selectedBill.id, payment_date: billPayForm.payment_date,
       amount: payAmt, payment_method: billPayForm.payment_method,
       reference: billPayForm.reference || null, notes: billPayForm.notes || null,
       journal_entry_id: jeId, branch_id: activeBranch?.id ?? null,
     })
-    await supabase.from('bills').update({
+    if (pmtErr) {
+      if (jeId) await supabase.from('journal_entries').delete().eq('id', jeId)
+      toast(pmtErr.message, 'error'); setBillSaving(false); return
+    }
+    
+    const { error: billErr } = await supabase.from('bills').update({
       amount_paid: newPaid, status: newStatus, updated_at: new Date().toISOString(),
     }).eq('id', selectedBill.id)
+    if (billErr) {
+      // rollback payment and JE on failure
+      await supabase.from('bill_payments').delete().eq('bill_id', selectedBill.id).eq('amount', payAmt)
+      if (jeId) await supabase.from('journal_entries').delete().eq('id', jeId)
+      toast(billErr.message, 'error'); setBillSaving(false); return
+    }
 
     toast('Payment recorded')
     setBillSaving(false); setBillPayOpen(false)
@@ -682,16 +714,24 @@ export default function AccountingPage() {
           ]
         }
         if (lines.length > 0) {
-          const { data: je } = await supabase.from('journal_entries').insert({
+          const { data: je, error: jeErr } = await supabase.from('journal_entries').insert({
             entry_number: generateJournalEntryNumber(), entry_date: pcForm.date,
             reference: pcForm.reference || null, reference_type: 'petty_cash',
             description: `Petty cash ${pcForm.type} — ${pcForm.description}`,
             branch_id: activeBranch?.id ?? null,
           }).select().single()
-          if (je) { jeId = je.id; await supabase.from('journal_entry_lines').insert(lines.map(l => ({ ...l, entry_id: je.id }))) }
+          if (jeErr) { toast(jeErr.message, 'error'); setPcSaving(false); return }
+          if (je) { 
+            jeId = je.id; 
+            const { error: lineErr } = await supabase.from('journal_entry_lines').insert(lines.map(l => ({ ...l, entry_id: je.id }))) 
+            if (lineErr) {
+              await supabase.from('journal_entries').delete().eq('id', je.id)
+              toast('Failed to save journal lines', 'error'); setPcSaving(false); return
+            }
+          }
         }
       }
-    } catch { /* skip JE if COA not ready */ }
+    } catch (err) { console.error('[JE] failed:', err) }
 
     const { error } = await supabase.from('petty_cash_transactions').insert({
       transaction_date: pcForm.date, description: pcForm.description, category: pcForm.category,
@@ -699,7 +739,10 @@ export default function AccountingPage() {
       reference: pcForm.reference || null, journal_entry_id: jeId,
       branch_id: activeBranch?.id ?? null,
     })
-    if (error) { toast(error.message, 'error'); setPcSaving(false); return }
+    if (error) { 
+      if (jeId) await supabase.from('journal_entries').delete().eq('id', jeId)
+      toast(error.message, 'error'); setPcSaving(false); return 
+    }
     toast(`Petty cash ${pcForm.type} recorded`)
     setPcSaving(false); setPcFormOpen(false)
     setPcForm({ date: todayStr(), description: '', category: 'Miscellaneous', amount: '', type: 'out', reference: '', expense_account_id: '' })
