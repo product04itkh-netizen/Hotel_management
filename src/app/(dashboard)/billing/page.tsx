@@ -165,6 +165,7 @@ export default function BillingPage() {
       }
 
       // Add each reservation add-on line item
+      const sorted = [...lineItems].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
       sorted.forEach(item => {
         if (item.label) {
           const l = item.label.toLowerCase()
