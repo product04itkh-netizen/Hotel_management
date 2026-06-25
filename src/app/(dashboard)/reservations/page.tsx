@@ -41,6 +41,7 @@ interface LineItemForm {
   id?: string
   label: string
   amount: number | string
+  discount: number | string
 }
 
 const emptyForm = {
@@ -66,6 +67,7 @@ export default function ReservationsPage() {
   const [depositMethod, setDepositMethod] = useState<string>('cash')
   const [discountAmount, setDiscountAmount] = useState<number | string>(0)
   const [discountLabel, setDiscountLabel] = useState('')
+  const [houseDiscount, setHouseDiscount] = useState<number | string>(0)
   const [receiptModalRes, setReceiptModalRes] = useState<any>(null)
   const [paxCount, setPaxCount] = useState<number | string>('')
   const [arrivalTime, setArrivalTime] = useState('')
@@ -151,6 +153,7 @@ export default function ReservationsPage() {
     setDepositMethod('cash')
     setDiscountAmount(0)
     setDiscountLabel('')
+    setHouseDiscount(0)
     setPaxCount('')
     setArrivalTime('')
     setModalOpen(true)
@@ -177,12 +180,13 @@ export default function ReservationsPage() {
     setLineItems(
       [...existing]
         .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
-        .map(i => ({ id: i.id, label: i.label, amount: i.amount }))
+        .map(i => ({ id: i.id, label: i.label, amount: i.amount, discount: i.discount ?? 0 }))
     )
     setDeposit(res.deposit ?? 0)
     setDepositMethod((res as any).deposit_method ?? 'cash')
     setDiscountAmount((res as any).discount_amount ?? 0)
     setDiscountLabel((res as any).discount_label ?? '')
+    setHouseDiscount((res as any).house_discount ?? 0)
     setPaxCount(res.pax_count ?? '')
     setArrivalTime(res.arrival_time ?? '')
     setModalOpen(true)
@@ -192,14 +196,14 @@ export default function ReservationsPage() {
     if (lineItems.some(i => i.label === preset.label)) {
       toast(`${preset.label} already added`, 'info'); return
     }
-    setLineItems(prev => [...prev, { label: preset.label, amount: '' }])
+    setLineItems(prev => [...prev, { label: preset.label, amount: '', discount: 0 }])
   }
 
   function addCustom() {
-    setLineItems(prev => [...prev, { label: '', amount: '' }])
+    setLineItems(prev => [...prev, { label: '', amount: '', discount: 0 }])
   }
 
-  function updateItem(idx: number, field: 'label' | 'amount', value: string | number) {
+  function updateItem(idx: number, field: 'label' | 'amount' | 'discount', value: string | number) {
     setLineItems(prev => prev.map((item, i) => i === idx ? { ...item, [field]: value } : item))
   }
 
@@ -310,8 +314,14 @@ export default function ReservationsPage() {
     ? calculateNights(form.check_in_date, form.check_out_date)
     : 0
   const selectedHouse = houses.find(h => h.id === form.house_id)
-  const houseBase = selectedHouse && nights > 0 ? selectedHouse.base_rate_per_night * nights : 0
-  const addOnsTotal = lineItems.reduce((s, i) => s + Number(i.amount || 0), 0)
+  const houseGross = selectedHouse && nights > 0 ? selectedHouse.base_rate_per_night * nights : 0
+  const houseDiscountNum = Math.max(0, Number(houseDiscount || 0))
+  const houseBase = Math.max(0, houseGross - houseDiscountNum)
+  const addOnsGross = lineItems.reduce((s, i) => s + Number(i.amount || 0), 0)
+  const addOnsItemDiscount = lineItems.reduce((s, i) => s + Math.max(0, Number(i.discount || 0)), 0)
+  const addOnsTotal = lineItems.reduce((s, i) => s + Math.max(0, Number(i.amount || 0) - Number(i.discount || 0)), 0)
+  const totalItemDiscounts = houseDiscountNum + addOnsItemDiscount
+  const grossSubtotal = houseGross + addOnsGross
   const subtotal = houseBase + addOnsTotal
   const discountNum = Number(discountAmount || 0)
   const netTotal = subtotal - discountNum
@@ -360,6 +370,7 @@ export default function ReservationsPage() {
         deposit_method: depositNum > 0 ? depositMethod : null,
         discount_amount: discountNum,
         discount_label: discountLabel || null,
+        house_discount: houseDiscountNum,
         updated_at: new Date().toISOString(),
       }).eq('id', editId)
       if (error) { toast(error.message, 'error'); setSaving(false); return }
@@ -413,6 +424,7 @@ export default function ReservationsPage() {
         deposit_method: depositNum > 0 ? depositMethod : null,
         discount_amount: discountNum,
         discount_label: discountLabel || null,
+        house_discount: houseDiscountNum,
       }).select().single()
 
       if (error) { toast(error.message, 'error'); setSaving(false); return }
@@ -475,6 +487,7 @@ export default function ReservationsPage() {
             reservation_id: reservationId,
             label: item.label.trim(),
             amount: Number(item.amount) || 0,
+            discount: Math.max(0, Number(item.discount) || 0),
             sort_order: i,
           }))
         )
@@ -1187,7 +1200,8 @@ export default function ReservationsPage() {
               <div className="space-y-2 pt-1 border-t border-hborder">
                 <div className="flex items-center gap-2 px-1">
                   <span className="flex-1 text-[10px] font-semibold text-hmuted uppercase tracking-wide">Description</span>
-                  <span className="w-32 text-[10px] font-semibold text-hmuted uppercase tracking-wide text-right">Amount ($)</span>
+                  <span className="w-28 text-[10px] font-semibold text-hmuted uppercase tracking-wide text-right">Amount ($)</span>
+                  <span className="w-24 text-[10px] font-semibold text-orange-500 uppercase tracking-wide text-right">Discount ($)</span>
                   <span className="w-6" />
                 </div>
                 {lineItems.map((item, idx) => (
@@ -1198,16 +1212,24 @@ export default function ReservationsPage() {
                       placeholder="Service description…"
                       className="flex-1 border border-hborder rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-navy bg-hbg"
                     />
-                    <div className="relative w-32 flex-shrink-0">
+                    <div className="relative w-28 flex-shrink-0">
                       <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-hmuted text-sm pointer-events-none">$</span>
                       <input
-                        type="number"
-                        min={0}
-                        step={0.01}
+                        type="number" min={0} step={0.01}
                         value={item.amount}
                         onChange={e => updateItem(idx, 'amount', e.target.value)}
                         placeholder="0.00"
                         className="w-full pl-6 pr-3 py-1.5 border border-hborder rounded-lg text-sm focus:outline-none focus:border-navy bg-hbg text-right"
+                      />
+                    </div>
+                    <div className="relative w-24 flex-shrink-0">
+                      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-orange-400 text-sm pointer-events-none">−$</span>
+                      <input
+                        type="number" min={0} step={0.01}
+                        value={item.discount || ''}
+                        onChange={e => updateItem(idx, 'discount', e.target.value)}
+                        placeholder="0"
+                        className="w-full pl-7 pr-2 py-1.5 border border-orange-200 rounded-lg text-sm focus:outline-none focus:border-orange-400 bg-orange-50 text-orange-700 text-right"
                       />
                     </div>
                     <button
@@ -1233,24 +1255,58 @@ export default function ReservationsPage() {
               </div>
               <div className="px-4 py-3 space-y-1.5 bg-white">
                 {selectedHouse && nights > 0 && (
-                  <div className="flex justify-between text-sm">
-                    <span className="text-hmuted">
-                      House — {nights} night{nights !== 1 ? 's' : ''} × {formatCurrency(selectedHouse.base_rate_per_night)}
-                    </span>
-                    <span className="font-medium text-htext">{formatCurrency(houseBase)}</span>
+                  <>
+                    <div className="flex justify-between items-center text-sm">
+                      <span className="text-hmuted">
+                        House — {nights} night{nights !== 1 ? 's' : ''} × {formatCurrency(selectedHouse.base_rate_per_night)}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1">
+                          <span className="text-orange-400 text-xs">−$</span>
+                          <input
+                            type="number" min={0} step={0.01}
+                            value={houseDiscount || ''}
+                            onChange={e => setHouseDiscount(e.target.value)}
+                            placeholder="0"
+                            className="w-16 text-right border border-orange-200 rounded px-1.5 py-0.5 text-xs focus:outline-none focus:border-orange-400 bg-orange-50 text-orange-700"
+                          />
+                        </div>
+                        <span className="font-medium text-htext w-20 text-right">{formatCurrency(houseBase)}</span>
+                      </div>
+                    </div>
+                  </>
+                )}
+                {lineItems.filter(i => i.label.trim()).map((item, idx) => {
+                  const net = Math.max(0, Number(item.amount || 0) - Number(item.discount || 0))
+                  return (
+                    <div key={idx} className="flex justify-between text-sm">
+                      <span className="text-hmuted">{item.label}</span>
+                      <span className="font-medium text-htext">{formatCurrency(net)}</span>
+                    </div>
+                  )
+                })}
+
+                {totalItemDiscounts > 0 ? (
+                  <>
+                    <div className="flex justify-between text-sm border-t border-hborder pt-2 mt-1">
+                      <span className="text-hmuted">Gross Subtotal</span>
+                      <span className="text-htext">{formatCurrency(grossSubtotal)}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-orange-600">Item Discounts</span>
+                      <span className="text-orange-600 font-medium">−{formatCurrency(totalItemDiscounts)}</span>
+                    </div>
+                    <div className="flex justify-between text-sm border-t border-hborder pt-1.5">
+                      <span className="text-hmuted">Subtotal</span>
+                      <span className="font-semibold text-dark-navy">{formatCurrency(subtotal)}</span>
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex justify-between text-sm border-t border-hborder pt-2 mt-1">
+                    <span className="text-hmuted">Subtotal</span>
+                    <span className="font-semibold text-dark-navy">{formatCurrency(subtotal)}</span>
                   </div>
                 )}
-                {lineItems.filter(i => i.label.trim()).map((item, idx) => (
-                  <div key={idx} className="flex justify-between text-sm">
-                    <span className="text-hmuted">{item.label}</span>
-                    <span className="font-medium text-htext">{formatCurrency(Number(item.amount) || 0)}</span>
-                  </div>
-                ))}
-
-                <div className="flex justify-between text-sm border-t border-hborder pt-2 mt-1">
-                  <span className="text-hmuted">Subtotal</span>
-                  <span className="font-semibold text-dark-navy">{formatCurrency(subtotal)}</span>
-                </div>
 
                 {/* Discount */}
                 <div className="flex items-center justify-between text-sm gap-2">

@@ -5,8 +5,12 @@ import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { CheckInModal } from '@/components/ui/CheckInModal'
+import type { CheckInForm } from '@/components/ui/CheckInModal'
+import { CheckOutModal } from '@/components/ui/CheckOutModal'
+import type { CheckOutForm } from '@/components/ui/CheckOutModal'
 import { createClient } from '@/lib/supabase/client'
-import { formatDate, generateReservationNumber, formatCurrency, calculateNights, capitalize } from '@/lib/utils'
+import { formatDate, generateReservationNumber, formatCurrency, calculateNights, capitalize, generateJournalEntryNumber } from '@/lib/utils'
 import { toast } from '@/components/ui/Toast'
 import { useBranch } from '@/context/BranchContext'
 import type { Reservation, House } from '@/types'
@@ -21,11 +25,6 @@ export default function FrontDeskPage() {
   const [allHouses, setAllHouses] = useState<House[]>([])
   const [loading, setLoading] = useState(true)
   const [walkInOpen, setWalkInOpen] = useState(false)
-  const [saving, setSaving] = useState(false)
-  const [walkIn, setWalkIn] = useState({
-    guest_name: '', guest_phone: '', guest_email: '',
-    house_id: '', check_out_date: '', adults: 1, children: 0,
-  })
 
   // Calendar state
   const [calMonth, setCalMonth] = useState<Date>(() => {
@@ -34,6 +33,8 @@ export default function FrontDeskPage() {
   const [khHolidays, setKhHolidays] = useState<Record<string, string>>({})
   const [calDetailRes, setCalDetailRes] = useState<Reservation | null>(null)
   const [confirmDialog, setConfirmDialog] = useState<{ title: string; message?: string; confirmLabel?: string; variant?: 'default' | 'danger'; onConfirm: () => void } | null>(null)
+  const [checkInTarget, setCheckInTarget] = useState<Reservation | null>(null)
+  const [checkOutTarget, setCheckOutTarget] = useState<Reservation | null>(null)
 
   useEffect(() => { if (activeBranch) loadData() }, [activeBranch]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -65,7 +66,7 @@ export default function FrontDeskPage() {
         .select('*, guest:guests(full_name, email, phone), house:houses(name, house_type, capacity)')
         .eq('branch_id', activeBranch.id)
         .eq('check_out_date', today)
-        .eq('status', 'checked_in')
+        .in('status', ['confirmed', 'checked_in'])
         .order('created_at'),
       supabase.from('houses')
         .select('*')
@@ -91,134 +92,276 @@ export default function FrontDeskPage() {
   }
 
   function handleCheckIn(res: Reservation) {
-    setConfirmDialog({
-      title: `Check in ${(res.guest as any)?.full_name ?? 'guest'}?`,
-      message: `${(res.house as any)?.name ?? ''} · ${res.reservation_number}`,
-      confirmLabel: 'Check In',
-      onConfirm: async () => {
-        setConfirmDialog(null)
-        await supabase.from('reservations').update({
-          status: 'checked_in',
-          actual_check_in: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        }).eq('id', res.id)
-        if (res.house_id) {
-          await supabase.from('houses').update({ status: 'occupied', updated_at: new Date().toISOString() }).eq('id', res.house_id)
+    setCheckInTarget(res)
+    setCalDetailRes(null)
+  }
+
+  async function confirmCheckIn(form: CheckInForm) {
+    const res = checkInTarget
+    if (!res) return
+
+    const now = new Date().toISOString()
+
+    // 1. Update reservation status
+    await supabase.from('reservations').update({
+      status: 'checked_in',
+      actual_check_in: now,
+      updated_at: now,
+    }).eq('id', res.id)
+
+    // 2. Mark house occupied
+    if (res.house_id) {
+      await supabase.from('houses').update({ status: 'occupied', updated_at: now }).eq('id', res.house_id)
+    }
+
+    // 3. Update guest ID info
+    if (res.guest_id) {
+      await supabase.from('guests').update({
+        id_type: form.id_type || null,
+        id_number: form.id_number || null,
+        id_expiry: form.id_expiry || null,
+        nationality: form.nationality || null,
+        updated_at: now,
+      }).eq('id', res.guest_id)
+    }
+
+    // 4. Save check-in record
+    let jeId: string | null = null
+    const totalAmount = Number((res as any).total_amount ?? 0)
+
+    // 5. Post revenue recognition JE (DR AR 1100 / CR House Rental Revenue 4000)
+    if (totalAmount > 0 && activeBranch) {
+      const [{ data: arAcct }, { data: revAcct }] = await Promise.all([
+        supabase.from('chart_of_accounts').select('id').eq('branch_id', activeBranch.id).eq('code', '1100').maybeSingle(),
+        supabase.from('chart_of_accounts').select('id').eq('branch_id', activeBranch.id).eq('code', '4000').maybeSingle(),
+      ])
+      if (arAcct && revAcct) {
+        const { data: je } = await supabase.from('journal_entries').insert({
+          entry_number: generateJournalEntryNumber(),
+          entry_date: now.split('T')[0],
+          reference: res.reservation_number,
+          reference_type: 'check_in',
+          description: `Check-in — ${(res.guest as any)?.full_name ?? 'Guest'} · ${(res.house as any)?.name ?? ''}`,
+          branch_id: activeBranch.id,
+        }).select().single()
+        if (je) {
+          jeId = je.id
+          await supabase.from('journal_entry_lines').insert([
+            { entry_id: je.id, account_id: arAcct.id,  description: `AR — ${res.reservation_number}`, debit: totalAmount, credit: 0 },
+            { entry_id: je.id, account_id: revAcct.id, description: `Revenue — ${res.reservation_number}`, debit: 0, credit: totalAmount },
+          ])
         }
-        fetch('/api/telegram/notify', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ event: 'checkin', branch_id: activeBranch?.id, data: {
-            guest_name: (res.guest as any)?.full_name,
-            house_name: (res.house as any)?.name,
-            time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
-            reservation_number: res.reservation_number,
-          }})
-        }).catch(() => {})
-        toast(`${(res.guest as any)?.full_name} checked in`)
-        setCalDetailRes(null)
-        loadData()
-      },
+      }
+    }
+
+    // 6. Save check-in record
+    await supabase.from('check_in_records').insert({
+      reservation_id: res.id,
+      branch_id: activeBranch?.id ?? null,
+      id_type: form.id_type || null,
+      id_number: form.id_number || null,
+      id_expiry: form.id_expiry || null,
+      nationality: form.nationality || null,
+      vehicle_plate: form.vehicle_plate || null,
+      notes: form.notes || null,
+      checked_in_at: now,
+      journal_entry_id: jeId,
     })
+
+    // 7. Telegram notify
+    fetch('/api/telegram/notify', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ event: 'checkin', branch_id: activeBranch?.id, data: {
+        guest_name: (res.guest as any)?.full_name,
+        house_name: (res.house as any)?.name,
+        time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+        reservation_number: res.reservation_number,
+      }}),
+    }).catch(() => {})
+
+    toast(`${(res.guest as any)?.full_name ?? 'Guest'} checked in — revenue recognized`)
+    setCheckInTarget(null)
+    loadData()
   }
 
   function handleCheckOut(res: Reservation) {
-    setConfirmDialog({
-      title: `Check out ${(res.guest as any)?.full_name ?? 'guest'}?`,
-      message: `${(res.house as any)?.name ?? ''} · ${res.reservation_number}`,
-      confirmLabel: 'Check Out',
-      onConfirm: async () => {
-        setConfirmDialog(null)
-        await supabase.from('reservations').update({
-          status: 'checked_out',
-          actual_check_out: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        }).eq('id', res.id)
-        if (res.house_id) {
-          await supabase.from('houses').update({ status: 'available', updated_at: new Date().toISOString() }).eq('id', res.house_id)
-          const { data: houseRooms } = await supabase.from('rooms').select('id').eq('house_id', res.house_id)
-          if (houseRooms && houseRooms.length > 0) {
-            await supabase.from('rooms').update({ status: 'cleaning', updated_at: new Date().toISOString() }).eq('house_id', res.house_id)
-            await supabase.from('housekeeping_tasks').insert(
-              houseRooms.map(room => ({
-                room_id: room.id,
-                task_type: 'cleaning',
-                status: 'pending',
-                priority: 'high',
-                branch_id: activeBranch?.id ?? null,
-                due_date: new Date().toISOString().split('T')[0],
-                notes: `Post-checkout cleaning for reservation ${res.reservation_number}`,
-              }))
-            )
-          } else {
-            await supabase.from('housekeeping_tasks').insert({
-              room_id: null,
-              task_type: 'cleaning',
-              status: 'pending',
-              priority: 'high',
-              branch_id: activeBranch?.id ?? null,
-              due_date: new Date().toISOString().split('T')[0],
-              notes: `Post-checkout cleaning — ${(res.house as any)?.name ?? 'house'} — reservation ${res.reservation_number}`,
-            })
-          }
-        }
-        fetch('/api/telegram/notify', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ event: 'checkout', branch_id: activeBranch?.id, data: {
-            guest_name: (res.guest as any)?.full_name,
-            house_name: (res.house as any)?.name,
-            time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
-            reservation_number: res.reservation_number,
-          }})
-        }).catch(() => {})
-        toast(`${(res.guest as any)?.full_name} checked out`)
-        setCalDetailRes(null)
-        loadData()
-      },
-    })
+    setCheckOutTarget(res)
+    setCalDetailRes(null)
   }
 
-  async function handleWalkIn() {
-    if (!walkIn.guest_name || !walkIn.house_id || !walkIn.check_out_date) {
-      toast('Please fill required fields', 'error'); return
+  async function confirmCheckOut(form: CheckOutForm) {
+    const res = checkOutTarget
+    if (!res) return
+
+    const now = new Date().toISOString()
+    const today = now.split('T')[0]
+    const guestName = (res.guest as any)?.full_name ?? 'Guest'
+    const houseName = (res.house as any)?.name ?? 'house'
+
+    // 1. Update reservation status
+    await supabase.from('reservations').update({
+      status: 'checked_out',
+      actual_check_out: now,
+      updated_at: now,
+    }).eq('id', res.id)
+
+    // 2. Mark house available, rooms cleaning
+    if (res.house_id) {
+      await supabase.from('houses').update({ status: 'available', updated_at: now }).eq('id', res.house_id)
+      const { data: houseRooms } = await supabase.from('rooms').select('id').eq('house_id', res.house_id)
+      const taskType = form.condition !== 'good' ? 'inspection' : 'cleaning'
+      const taskPriority = form.condition === 'major_damage' ? 'urgent' : form.condition === 'minor_damage' ? 'high' : 'high'
+      if (houseRooms && houseRooms.length > 0) {
+        await supabase.from('rooms').update({ status: 'cleaning', updated_at: now }).eq('house_id', res.house_id)
+        await supabase.from('housekeeping_tasks').insert(
+          houseRooms.map(room => ({
+            room_id: room.id,
+            task_type: taskType,
+            status: 'pending',
+            priority: taskPriority,
+            branch_id: activeBranch?.id ?? null,
+            due_date: today,
+            notes: form.condition !== 'good'
+              ? `Post-checkout ${taskType} — ${form.inspection_notes || 'Damage reported'} — ${res.reservation_number}`
+              : `Post-checkout cleaning — ${res.reservation_number}`,
+          }))
+        )
+      } else {
+        await supabase.from('housekeeping_tasks').insert({
+          room_id: null,
+          house_id: res.house_id,
+          task_type: taskType,
+          status: 'pending',
+          priority: taskPriority,
+          branch_id: activeBranch?.id ?? null,
+          due_date: today,
+          notes: form.condition !== 'good'
+            ? `Post-checkout ${taskType} — ${form.inspection_notes || 'Damage reported'} — ${res.reservation_number}`
+            : `Post-checkout cleaning — ${houseName} — ${res.reservation_number}`,
+        })
+      }
     }
-    setSaving(true)
-    const today = new Date().toISOString().split('T')[0]
-    const selectedHouse = houses.find(h => h.id === walkIn.house_id)
-    const nights = calculateNights(today, walkIn.check_out_date)
-    const total = selectedHouse ? selectedHouse.base_rate_per_night * nights : 0
 
-    const { data: guest } = await supabase.from('guests').insert({
-      full_name: walkIn.guest_name,
-      phone: walkIn.guest_phone || null,
-      email: walkIn.guest_email || null,
-      visit_count: 1,
-    }).select().single()
-
-    const { error } = await supabase.from('reservations').insert({
-      reservation_number: generateReservationNumber(),
-      guest_id: guest?.id,
-      house_id: walkIn.house_id,
+    // 3. Save inspection record
+    const validCharges = form.extra_charges.filter(c => c.description && Number(c.amount) > 0)
+    const totalExtra = validCharges.reduce((s, c) => s + Number(c.amount), 0)
+    await supabase.from('checkout_inspections').insert({
+      reservation_id: res.id,
       branch_id: activeBranch?.id ?? null,
-      check_in_date: today,
-      check_out_date: walkIn.check_out_date,
-      adults: walkIn.adults,
-      children: walkIn.children,
-      source: 'walk_in',
-      status: 'checked_in',
-      actual_check_in: new Date().toISOString(),
-      total_amount: total,
+      condition: form.condition,
+      inspection_notes: form.inspection_notes || null,
+      extra_charges: validCharges,
+      total_extra: totalExtra,
+      inspected_at: now,
     })
 
-    if (!error) {
-      await supabase.from('houses').update({ status: 'occupied', updated_at: new Date().toISOString() }).eq('id', walkIn.house_id)
-      toast('Walk-in guest checked in')
-      setWalkInOpen(false)
-      setWalkIn({ guest_name: '', guest_phone: '', guest_email: '', house_id: '', check_out_date: '', adults: 1, children: 0 })
-      loadData()
-    } else {
-      toast(error.message, 'error')
+    // 4. Telegram notify
+    fetch('/api/telegram/notify', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ event: 'checkout', branch_id: activeBranch?.id, data: {
+        guest_name: guestName,
+        house_name: houseName,
+        time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+        reservation_number: res.reservation_number,
+      }}),
+    }).catch(() => {})
+
+    const msg = totalExtra > 0
+      ? `${guestName} checked out — $${totalExtra.toFixed(2)} extra charges saved`
+      : `${guestName} checked out`
+    toast(msg)
+    setCheckOutTarget(null)
+    loadData()
+  }
+
+  async function confirmWalkIn(form: CheckInForm) {
+    const now = new Date().toISOString()
+    const today = now.split('T')[0]
+    const selectedHouse = houses.find(h => h.id === form.house_id)
+    const nights = calculateNights(today, form.check_out_date ?? '')
+    const total = selectedHouse ? selectedHouse.base_rate_per_night * nights : 0
+
+    // 1. Create guest record with ID info
+    const { data: guest, error: guestErr } = await supabase.from('guests').insert({
+      full_name: form.guest_name ?? '',
+      phone: form.guest_phone || null,
+      email: form.guest_email || null,
+      id_type: form.id_type || null,
+      id_number: form.id_number || null,
+      id_expiry: form.id_expiry || null,
+      nationality: form.nationality || null,
+      visit_count: 1,
+    }).select().single()
+    if (guestErr) { toast(guestErr.message, 'error'); return }
+
+    // 2. Create reservation
+    const resNumber = generateReservationNumber()
+    const { data: reservation, error: resErr } = await supabase.from('reservations').insert({
+      reservation_number: resNumber,
+      guest_id: guest?.id,
+      house_id: form.house_id ?? null,
+      branch_id: activeBranch?.id ?? null,
+      check_in_date: today,
+      check_out_date: form.check_out_date ?? today,
+      adults: form.adults ?? 1,
+      children: form.children ?? 0,
+      source: 'walk_in',
+      status: 'checked_in',
+      actual_check_in: now,
+      total_amount: total,
+    }).select().single()
+    if (resErr) { toast(resErr.message, 'error'); return }
+
+    // 3. Mark house occupied
+    if (form.house_id) {
+      await supabase.from('houses').update({ status: 'occupied', updated_at: now }).eq('id', form.house_id)
     }
-    setSaving(false)
+
+    // 4. Post revenue JE (DR AR 1100 / CR House Rental Revenue 4000)
+    let jeId: string | null = null
+    if (total > 0 && activeBranch) {
+      const [{ data: arAcct }, { data: revAcct }] = await Promise.all([
+        supabase.from('chart_of_accounts').select('id').eq('branch_id', activeBranch.id).eq('code', '1100').maybeSingle(),
+        supabase.from('chart_of_accounts').select('id').eq('branch_id', activeBranch.id).eq('code', '4000').maybeSingle(),
+      ])
+      if (arAcct && revAcct) {
+        const { data: je } = await supabase.from('journal_entries').insert({
+          entry_number: generateJournalEntryNumber(),
+          entry_date: today,
+          reference: resNumber,
+          reference_type: 'check_in',
+          description: `Check-in (walk-in) — ${form.guest_name ?? 'Guest'} · ${selectedHouse?.name ?? ''}`,
+          branch_id: activeBranch.id,
+        }).select().single()
+        if (je) {
+          jeId = je.id
+          await supabase.from('journal_entry_lines').insert([
+            { entry_id: je.id, account_id: arAcct.id,  description: `AR — ${resNumber}`, debit: total, credit: 0 },
+            { entry_id: je.id, account_id: revAcct.id, description: `Revenue — ${resNumber}`, debit: 0, credit: total },
+          ])
+        }
+      }
+    }
+
+    // 5. Save check-in record
+    if (reservation) {
+      await supabase.from('check_in_records').insert({
+        reservation_id: reservation.id,
+        branch_id: activeBranch?.id ?? null,
+        id_type: form.id_type || null,
+        id_number: form.id_number || null,
+        id_expiry: form.id_expiry || null,
+        nationality: form.nationality || null,
+        vehicle_plate: form.vehicle_plate || null,
+        notes: form.notes || null,
+        checked_in_at: now,
+        journal_entry_id: jeId,
+      })
+    }
+
+    toast(`${form.guest_name ?? 'Guest'} checked in — revenue recognized`)
+    setWalkInOpen(false)
+    loadData()
   }
 
   // ── Calendar rendering ──────────────────────────────────────────────────────
@@ -487,101 +630,14 @@ export default function FrontDeskPage() {
         <div className="mt-6">{renderCalendar()}</div>
       </div>
 
-      {/* Walk-in Modal */}
-      <Modal open={walkInOpen} onClose={() => setWalkInOpen(false)} title="Walk-in Check-in" subtitle="Register and check in a guest immediately">
-        <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <div className="col-span-2">
-              <label className="block text-xs text-hmuted mb-1">Guest Full Name *</label>
-              <input
-                value={walkIn.guest_name}
-                onChange={e => setWalkIn(f => ({ ...f, guest_name: e.target.value }))}
-                placeholder="Full name"
-                className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg"
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-hmuted mb-1">Phone</label>
-              <input
-                value={walkIn.guest_phone}
-                onChange={e => setWalkIn(f => ({ ...f, guest_phone: e.target.value }))}
-                placeholder="+855 12 345 678"
-                className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg"
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-hmuted mb-1">Email</label>
-              <input
-                type="email"
-                value={walkIn.guest_email}
-                onChange={e => setWalkIn(f => ({ ...f, guest_email: e.target.value }))}
-                placeholder="email@example.com"
-                className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg"
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-hmuted mb-1">House *</label>
-              <select
-                value={walkIn.house_id}
-                onChange={e => setWalkIn(f => ({ ...f, house_id: e.target.value }))}
-                className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg"
-              >
-                <option value="">Select available house…</option>
-                {houses.map(h => (
-                  <option key={h.id} value={h.id}>
-                    {h.name} — {capitalize(h.house_type)} · {h.capacity} pax ({formatCurrency(h.base_rate_per_night)}/night)
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs text-hmuted mb-1">Check-out Date *</label>
-              <input
-                type="date"
-                value={walkIn.check_out_date}
-                min={new Date().toISOString().split('T')[0]}
-                onChange={e => setWalkIn(f => ({ ...f, check_out_date: e.target.value }))}
-                className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg"
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-hmuted mb-1">Adults</label>
-              <input
-                type="number" min={1} max={30}
-                value={walkIn.adults}
-                onChange={e => setWalkIn(f => ({ ...f, adults: Number(e.target.value) }))}
-                className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg"
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-hmuted mb-1">Children</label>
-              <input
-                type="number" min={0} max={20}
-                value={walkIn.children}
-                onChange={e => setWalkIn(f => ({ ...f, children: Number(e.target.value) }))}
-                className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg"
-              />
-            </div>
-          </div>
-          {walkIn.house_id && walkIn.check_out_date && (() => {
-            const h = houses.find(x => x.id === walkIn.house_id)
-            const nights = calculateNights(new Date().toISOString().split('T')[0], walkIn.check_out_date)
-            if (!h || nights <= 0) return null
-            return (
-              <div className="bg-hsurface2 rounded-xl px-4 py-3 text-sm">
-                <div className="flex justify-between text-hmuted">
-                  <span>{h.name} — {nights} night{nights !== 1 ? 's' : ''} × {formatCurrency(h.base_rate_per_night)}</span>
-                  <span className="font-semibold text-dark-navy">{formatCurrency(h.base_rate_per_night * nights)}</span>
-                </div>
-              </div>
-            )
-          })()}
-          <div className="flex justify-end gap-3 pt-2">
-            <Button variant="ghost" onClick={() => setWalkInOpen(false)}>Cancel</Button>
-            <Button onClick={handleWalkIn} disabled={saving}>{saving ? 'Checking in…' : 'Check In Now'}</Button>
-          </div>
-        </div>
-      </Modal>
+      {/* Walk-in Check-in — unified modal */}
+      <CheckInModal
+        mode="walkin"
+        open={walkInOpen}
+        availableHouses={houses}
+        onConfirm={confirmWalkIn}
+        onClose={() => setWalkInOpen(false)}
+      />
 
       <ConfirmDialog
         open={!!confirmDialog}
@@ -592,6 +648,39 @@ export default function FrontDeskPage() {
         onConfirm={() => confirmDialog?.onConfirm()}
         onCancel={() => setConfirmDialog(null)}
       />
+
+      {/* Check-In Modal */}
+      {checkInTarget && (
+        <CheckInModal
+          mode="reservation"
+          open={!!checkInTarget}
+          guestName={(checkInTarget.guest as any)?.full_name ?? 'Guest'}
+          reservationNumber={checkInTarget.reservation_number}
+          houseName={(checkInTarget.house as any)?.name ?? ''}
+          checkInDate={checkInTarget.check_in_date}
+          checkOutDate={checkInTarget.check_out_date}
+          nights={calculateNights(checkInTarget.check_in_date, checkInTarget.check_out_date)}
+          totalAmount={Number((checkInTarget as any).total_amount ?? 0)}
+          defaultIdType={(checkInTarget.guest as any)?.id_type ?? ''}
+          defaultIdNumber={(checkInTarget.guest as any)?.id_number ?? ''}
+          defaultNationality={(checkInTarget.guest as any)?.nationality ?? ''}
+          onConfirm={confirmCheckIn}
+          onClose={() => setCheckInTarget(null)}
+        />
+      )}
+
+      {/* Check-Out Inspection Modal */}
+      {checkOutTarget && (
+        <CheckOutModal
+          open={!!checkOutTarget}
+          guestName={(checkOutTarget.guest as any)?.full_name ?? 'Guest'}
+          reservationNumber={checkOutTarget.reservation_number}
+          houseName={(checkOutTarget.house as any)?.name ?? ''}
+          checkOutDate={checkOutTarget.check_out_date}
+          onConfirm={confirmCheckOut}
+          onClose={() => setCheckOutTarget(null)}
+        />
+      )}
 
       {/* Calendar Reservation Detail Modal */}
       {calDetailRes && (

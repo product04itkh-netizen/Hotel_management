@@ -50,7 +50,6 @@ export default function BillingPage() {
   const [settings, setSettings] = useState<any>(null)
   const [receiptInvoice, setReceiptInvoice] = useState<Invoice | null>(null)
   const [reservationReceipt, setReservationReceipt] = useState<any>(null)
-  const [showAllReservations, setShowAllReservations] = useState(false)
   const [form, setForm] = useState({
     reservation_id: '',
     items: [{ description: 'House charge', quantity: 1, unit_price: 0, total: 0 }] as InvoiceItem[],
@@ -78,7 +77,7 @@ export default function BillingPage() {
         .eq('branch_id', activeBranch.id)
         .order('created_at', { ascending: false }),
       supabase.from('reservations')
-        .select('*, guest:guests(full_name), house:houses(name, base_rate_per_night), line_items:reservation_line_items(id, label, amount, sort_order)')
+        .select('*, guest:guests(full_name), house:houses(name, base_rate_per_night), line_items:reservation_line_items(id, label, amount, discount, sort_order)')
         .eq('branch_id', activeBranch.id)
         .in('status', ['confirmed', 'checked_in', 'checked_out'])
         .order('created_at', { ascending: false }),
@@ -96,13 +95,15 @@ export default function BillingPage() {
     setForm(f => {
       const items = [...f.items]
       items[idx] = { ...items[idx], [field]: value }
-      items[idx].total = Number(items[idx].quantity) * Number(items[idx].unit_price)
+      const gross = Number(items[idx].quantity) * Number(items[idx].unit_price)
+      const disc  = Number(items[idx].discount ?? 0)
+      items[idx].total = Math.max(0, gross - disc)
       return { ...f, items }
     })
   }
 
   function addItem() {
-    setForm(f => ({ ...f, items: [...f.items, { description: '', quantity: 1, unit_price: 0, total: 0 }] }))
+    setForm(f => ({ ...f, items: [...f.items, { description: '', quantity: 1, unit_price: 0, discount: 0, total: 0 }] }))
   }
 
   function removeItem(idx: number) {
@@ -118,7 +119,6 @@ export default function BillingPage() {
 
   async function openCreateInvoice(reservation?: Reservation) {
     setReservationReceipt(null)
-    setShowAllReservations(false)
     if (reservation) {
       // Load the held deposit receipt for this reservation (if any)
       const { data: receipt } = await supabase
@@ -134,13 +134,15 @@ export default function BillingPage() {
 
       const items: InvoiceItem[] = []
 
+      const houseDisc = Math.max(0, Number((reservation as any).house_discount ?? 0))
       if (house && nights > 0) {
-        // Best case: house rate × nights
+        const houseGross = nights * Number(house.base_rate_per_night)
         items.push({
           description: `House rental — ${house.name} (${nights} night${nights !== 1 ? 's' : ''})`,
           quantity: nights,
           unit_price: Number(house.base_rate_per_night),
-          total: nights * Number(house.base_rate_per_night),
+          discount: houseDisc || undefined,
+          total: Math.max(0, houseGross - houseDisc),
           account_code: '4000',
         })
       } else if (nights > 0 && totalAmount > 0) {
@@ -174,7 +176,8 @@ export default function BillingPage() {
           else if (l.includes('food') || l.includes('drink') || l.includes('breakfast') || l.includes('lunch') || l.includes('dinner') || l.includes('meal') || l.includes('restaurant') || l.includes('bar')) code = '4100'
           else if (l.includes('tour') || l.includes('activity') || l.includes('rental') || l.includes('bike') || l.includes('car') || l.includes('guide') || l.includes('transfer') || l.includes('boat')) code = '4200'
           
-          items.push({ description: item.label, quantity: 1, unit_price: Number(item.amount), total: Number(item.amount), account_code: code })
+          const itemDisc = Math.max(0, Number(item.discount ?? 0))
+          items.push({ description: item.label, quantity: 1, unit_price: Number(item.amount), discount: itemDisc || undefined, total: Math.max(0, Number(item.amount) - itemDisc), account_code: code })
         }
       })
 
@@ -182,8 +185,31 @@ export default function BillingPage() {
         items.push({ description: 'House charge', quantity: 1, unit_price: 0, total: 0, account_code: '4000' })
       }
 
+      // Append extra charges from checkout inspection (damage fees etc.)
+      const { data: inspection } = await supabase
+        .from('checkout_inspections')
+        .select('extra_charges, condition')
+        .eq('reservation_id', reservation.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      if (inspection && Array.isArray(inspection.extra_charges)) {
+        inspection.extra_charges.forEach((charge: any) => {
+          if (charge.description && Number(charge.amount) > 0) {
+            items.push({
+              description: `Extra charge — ${charge.description}`,
+              quantity: 1,
+              unit_price: Number(charge.amount),
+              total: Number(charge.amount),
+              account_code: charge.revenue_code ?? '4300',
+            })
+          }
+        })
+      }
+
       const noteParts: string[] = []
       if (deposit > 0) noteParts.push(`Deposit received: ${formatCurrency(deposit)}`)
+      if (inspection?.condition && inspection.condition !== 'good') noteParts.push(`Property condition: ${inspection.condition.replace('_', ' ')}`)
       if ((reservation as any).arrival_time) noteParts.push(`Arrival: ${(reservation as any).arrival_time}`)
       if ((reservation as any).pax_count) noteParts.push(`Pax: ${(reservation as any).pax_count}`)
 
@@ -648,30 +674,15 @@ export default function BillingPage() {
       <Modal open={invoiceOpen} onClose={() => setInvoiceOpen(false)} title="Create Invoice" size="lg">
         <div className="space-y-4">
           <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="text-xs text-hmuted">Link to Reservation</label>
-              <label className="flex items-center gap-1.5 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={showAllReservations}
-                  onChange={e => setShowAllReservations(e.target.checked)}
-                  className="w-3.5 h-3.5 rounded"
-                />
-                <span className="text-xs text-hmuted">Include pre-checkout</span>
-              </label>
-            </div>
+            <label className="text-xs text-hmuted">Link to Reservation</label>
             {(() => {
               const today = new Date().toISOString().split('T')[0]
-              // Exclude reservations that already have a non-void invoice
               const invoicedIds = new Set(
                 invoices
                   .filter(i => i.reservation_id && i.status !== 'void')
                   .map(i => i.reservation_id!)
               )
-              const eligible = (showAllReservations
-                ? reservations
-                : reservations.filter(r => r.check_out_date <= today)
-              ).filter(r => !invoicedIds.has(r.id))
+              const eligible = reservations.filter(r => r.check_out_date === today)
               return (
                 <>
                   <select
@@ -687,23 +698,12 @@ export default function BillingPage() {
                     {eligible.map(r => (
                       <option key={r.id} value={r.id}>
                         {(r.guest as any)?.full_name ?? 'Guest'} — {(r as any).reservation_number} · {(r as any).house?.name ?? 'No house linked'}
-                        {r.check_out_date > today ? ` ⚠ checks out ${r.check_out_date}` : ''}
+                        {invoicedIds.has(r.id) ? ' · already invoiced' : ''}
                       </option>
                     ))}
                   </select>
-                  {form.reservation_id && (() => {
-                    const selectedR = reservations.find(r => r.id === form.reservation_id)
-                    return selectedR && selectedR.check_out_date > today ? (
-                      <div className="mt-1.5 rounded-lg bg-red-50 border border-red-200 px-3 py-2.5">
-                        <p className="text-xs font-semibold text-red-700">Guest has not checked out yet</p>
-                        <p className="text-xs text-red-600 mt-0.5">
-                          Go to <strong>Reservations</strong> and update the check-out date to today first, then return here to create the invoice.
-                        </p>
-                      </div>
-                    ) : null
-                  })()}
-                  {eligible.length === 0 && !showAllReservations && (
-                    <p className="text-xs text-hmuted mt-1">No reservations ready for checkout today. Check "Include pre-checkout" to see all.</p>
+                  {eligible.length === 0 && (
+                    <p className="text-xs text-hmuted mt-1">No reservations checking out today.</p>
                   )}
                 </>
               )
@@ -774,10 +774,11 @@ export default function BillingPage() {
             </div>
             <div className="space-y-2">
               <div className="grid grid-cols-12 gap-2 px-0.5">
-                <span className="col-span-4 text-[10px] text-hmuted uppercase tracking-wide">Description</span>
-                <span className="col-span-3 text-[10px] text-hmuted uppercase tracking-wide">Account</span>
+                <span className="col-span-3 text-[10px] text-hmuted uppercase tracking-wide">Description</span>
+                <span className="col-span-2 text-[10px] text-hmuted uppercase tracking-wide">Account</span>
                 <span className="col-span-1 text-[10px] text-hmuted uppercase tracking-wide text-center">Qty</span>
                 <span className="col-span-2 text-[10px] text-hmuted uppercase tracking-wide">Unit Price</span>
+                <span className="col-span-2 text-[10px] text-hmuted uppercase tracking-wide text-orange-500">Discount ($)</span>
                 <span className="col-span-1 text-[10px] text-hmuted uppercase tracking-wide text-right">Total</span>
               </div>
               {form.items.map((item, idx) => (
@@ -786,12 +787,12 @@ export default function BillingPage() {
                     value={item.description}
                     onChange={e => updateItem(idx, 'description', e.target.value)}
                     placeholder="Description"
-                    className="col-span-4 border border-hborder rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-navy bg-hbg"
+                    className="col-span-3 border border-hborder rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-navy bg-hbg"
                   />
                   <select
                     value={item.account_code || '4400'}
                     onChange={e => updateItem(idx, 'account_code', e.target.value)}
-                    className="col-span-3 border border-hborder rounded-lg px-1.5 py-1.5 text-xs focus:outline-none focus:border-navy bg-hbg text-hmuted"
+                    className="col-span-2 border border-hborder rounded-lg px-1.5 py-1.5 text-xs focus:outline-none focus:border-navy bg-hbg text-hmuted"
                   >
                     {revenueAccounts.map(a => (
                       <option key={a.code} value={a.code}>{a.code} - {a.name}</option>
@@ -810,6 +811,13 @@ export default function BillingPage() {
                     className="col-span-2 border border-hborder rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-navy bg-hbg"
                     placeholder="0.00"
                   />
+                  <input
+                    type="number" min={0} step={0.01}
+                    value={item.discount ?? 0}
+                    onChange={e => updateItem(idx, 'discount', Number(e.target.value))}
+                    className="col-span-2 border border-orange-200 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-orange-400 bg-orange-50 text-orange-700"
+                    placeholder="0.00"
+                  />
                   <span className="col-span-1 text-sm font-medium text-right text-dark-navy">{formatCurrency(item.total)}</span>
                   <button onClick={() => removeItem(idx)} className="col-span-1 text-red-400 hover:text-red-600 text-center text-lg leading-none">×</button>
                 </div>
@@ -824,6 +832,16 @@ export default function BillingPage() {
             </div>
             <div className="px-4 py-3 space-y-2 text-sm">
               <div className="flex justify-between">
+                <span className="text-hmuted">Subtotal (before item discounts)</span>
+                <span className="font-medium">{formatCurrency(form.items.reduce((s, i) => s + Number(i.quantity) * Number(i.unit_price), 0))}</span>
+              </div>
+              {form.items.some(i => Number(i.discount ?? 0) > 0) && (
+                <div className="flex justify-between text-orange-600">
+                  <span>Item Discounts</span>
+                  <span className="font-medium">− {formatCurrency(form.items.reduce((s, i) => s + Number(i.discount ?? 0), 0))}</span>
+                </div>
+              )}
+              <div className="flex justify-between border-t border-hborder pt-1.5">
                 <span className="text-hmuted">Subtotal</span>
                 <span className="font-medium">{formatCurrency(subtotal)}</span>
               </div>

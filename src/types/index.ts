@@ -220,6 +220,7 @@ export interface ReservationLineItem {
   reservation_id?: string
   label: string
   amount: number
+  discount?: number
   sort_order?: number
   created_at?: string
 }
@@ -337,6 +338,7 @@ export interface InvoiceItem {
   description: string
   quantity: number
   unit_price: number
+  discount?: number
   total: number
   account_code?: string
 }
