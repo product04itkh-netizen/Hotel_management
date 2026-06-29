@@ -682,7 +682,7 @@ export default function BillingPage() {
                   .filter(i => i.reservation_id && i.status !== 'void')
                   .map(i => i.reservation_id!)
               )
-              const eligible = reservations.filter(r => r.check_out_date === today)
+              const eligible = reservations.filter(r => r.check_out_date <= today)
               return (
                 <>
                   <select
