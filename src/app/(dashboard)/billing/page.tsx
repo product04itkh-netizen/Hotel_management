@@ -682,7 +682,8 @@ export default function BillingPage() {
                   .filter(i => i.reservation_id && i.status !== 'void')
                   .map(i => i.reservation_id!)
               )
-              const eligible = reservations.filter(r => r.check_out_date <= today)
+              const eligible = reservations
+                .filter(r => r.check_out_date <= today && !invoicedIds.has(r.id))
               return (
                 <>
                   <select
@@ -698,7 +699,6 @@ export default function BillingPage() {
                     {eligible.map(r => (
                       <option key={r.id} value={r.id}>
                         {(r.guest as any)?.full_name ?? 'Guest'} — {(r as any).reservation_number} · {(r as any).house?.name ?? 'No house linked'}
-                        {invoicedIds.has(r.id) ? ' · already invoiced' : ''}
                       </option>
                     ))}
                   </select>
