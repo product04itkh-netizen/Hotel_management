@@ -85,6 +85,7 @@ export default function AccountingPage() {
   // Journal Entries
   const [entries, setEntries] = useState<JournalEntry[]>([])
   const [jeFormOpen, setJeFormOpen] = useState(false)
+  const [editJeId, setEditJeId] = useState<string | null>(null)
   const [jeForm, setJeForm] = useState({ date: '', description: '', reference: '', reference_type: 'manual' })
   const [jeLines, setJeLines] = useState([emptyJeLine(), emptyJeLine()])
   const [jeSaving, setJeSaving] = useState(false)
@@ -273,7 +274,7 @@ export default function AccountingPage() {
     setLedgerLoading(true)
     // Step 1: get entry IDs filtered by date — PostgREST cannot filter on nested FK columns
     let jeQ = supabase.from('journal_entries')
-      .select('id').eq('branch_id', activeBranch.id)
+      .select('id').eq('branch_id', activeBranch.id).eq('status', 'posted')
     if (ledgerFrom) jeQ = jeQ.gte('entry_date', ledgerFrom)
     if (ledgerTo)   jeQ = jeQ.lte('entry_date', ledgerTo)
     const { data: jeData } = await jeQ
@@ -309,7 +310,7 @@ export default function AccountingPage() {
     ])
     // 2-step: get this branch's JE IDs for current month, then fetch their lines
     const { data: monthJeData } = await supabase.from('journal_entries')
-      .select('id').eq('branch_id', activeBranch.id).eq('is_void', false).gte('entry_date', monthStart)
+      .select('id').eq('branch_id', activeBranch.id).eq('status', 'posted').gte('entry_date', monthStart)
     const monthJeIds = (monthJeData ?? []).map((e: any) => e.id)
     const linesRes = monthJeIds.length > 0
       ? await supabase.from('journal_entry_lines')
@@ -357,12 +358,16 @@ export default function AccountingPage() {
     
     let savedAccountId = editAccountId
     if (editAccountId) {
-      const { error } = await supabase.from('chart_of_accounts').update(payload).eq('id', editAccountId)
+      const { error } = await supabase.from('chart_of_accounts').update(payload)
+        .eq('id', editAccountId).eq('branch_id', activeBranch!.id)
       if (error) { toast(error.message, 'error'); setCoaSaving(false); return }
+      // Update local state directly to avoid race condition with branch switching
+      setAccounts(prev => prev.map(a => a.id === editAccountId ? { ...a, ...payload } : a))
     } else {
       const { data, error } = await supabase.from('chart_of_accounts').insert({ ...payload, branch_id: activeBranch?.id ?? null }).select().single()
       if (error || !data) { toast(error?.message ?? 'Error', 'error'); setCoaSaving(false); return }
       savedAccountId = data.id
+      setAccounts(prev => [...prev, data as ChartOfAccount])
     }
       
     if (coaForm.opening_balance && Number(coaForm.opening_balance) > 0 && coaForm.offset_account_id) {
@@ -394,26 +399,45 @@ export default function AccountingPage() {
     }
     
     toast(editAccountId ? 'Account updated' : 'Account added')
-    setCoaSaving(false); setCoaFormOpen(false); loadAccounts()
+    setCoaSaving(false); setCoaFormOpen(false)
   }
   async function toggleAccountActive(a: ChartOfAccount) {
-    await supabase.from('chart_of_accounts').update({ is_active: !a.is_active }).eq('id', a.id)
-    loadAccounts()
+    await supabase.from('chart_of_accounts').update({ is_active: !a.is_active })
+      .eq('id', a.id).eq('branch_id', activeBranch!.id)
+    setAccounts(prev => prev.map(ac => ac.id === a.id ? { ...ac, is_active: !a.is_active } : ac))
   }
 
   // ── Journal Entry ──────────────────────────────────────────────
 
-  function openAddEntry() {
-    setJeForm({ date: todayStr(), description: '', reference: '', reference_type: 'manual' })
-    setJeLines([emptyJeLine(), emptyJeLine()])
-    setJeFormOpen(true)
-  }
+  function openAddEntry() { openNewJe() }
   function updateJeLine(idx: number, field: string, value: string | number) {
     setJeLines(prev => prev.map((l, i) => i === idx ? { ...l, [field]: value } : l))
   }
   const jeTotalDebit  = jeLines.reduce((s, l) => s + Number(l.debit  || 0), 0)
   const jeTotalCredit = jeLines.reduce((s, l) => s + Number(l.credit || 0), 0)
   const jeBalanced    = Math.abs(jeTotalDebit - jeTotalCredit) < 0.001
+
+  function openNewJe() {
+    setEditJeId(null)
+    setJeForm({ date: todayStr(), description: '', reference: '', reference_type: 'manual' })
+    setJeLines([emptyJeLine(), emptyJeLine()])
+    setJeFormOpen(true)
+  }
+
+  async function openEditJe(entry: JournalEntry) {
+    setEditJeId(entry.id)
+    setJeForm({ date: entry.entry_date, description: entry.description, reference: entry.reference ?? '', reference_type: entry.reference_type ?? 'manual' })
+    let lines: any[] = entryLines[entry.id] ?? []
+    if (lines.length === 0) {
+      const { data } = await supabase.from('journal_entry_lines').select('*').eq('entry_id', entry.id)
+      lines = data ?? []
+    }
+    setJeLines(lines.length >= 2
+      ? lines.map(l => ({ account_id: l.account_id, description: l.description ?? '', debit: l.debit > 0 ? l.debit : '' as number | string, credit: l.credit > 0 ? l.credit : '' as number | string }))
+      : [...lines.map(l => ({ account_id: l.account_id, description: l.description ?? '', debit: l.debit > 0 ? l.debit : '' as number | string, credit: l.credit > 0 ? l.credit : '' as number | string })), emptyJeLine()]
+    )
+    setJeFormOpen(true)
+  }
 
   async function saveJournalEntry() {
     if (!jeForm.description) { toast('Description required', 'error'); return }
@@ -427,105 +451,70 @@ export default function AccountingPage() {
       if (closed) { toast(`${MONTH_NAMES[em - 1]} ${ey} is a closed period. Reopen it first.`, 'error'); return }
     }
     setJeSaving(true)
-    const { data: je, error: jeErr } = await supabase.from('journal_entries').insert({
-      entry_number: generateJournalEntryNumber(), entry_date: jeForm.date,
-      reference: jeForm.reference || null, reference_type: jeForm.reference_type || null,
-      description: jeForm.description, branch_id: activeBranch?.id ?? null,
-    }).select().single()
-    if (jeErr || !je) { toast(jeErr?.message ?? 'Error', 'error'); setJeSaving(false); return }
-    const { error: lineErr } = await supabase.from('journal_entry_lines').insert(
-      validLines.map(l => ({
-        entry_id: je.id, account_id: l.account_id,
-        description: l.description || null,
-        debit: Number(l.debit || 0), credit: Number(l.credit || 0),
-      }))
-    )
-    if (lineErr) {
-      await supabase.from('journal_entries').delete().eq('id', je.id)
-      toast('Failed to save lines, entry cancelled', 'error')
-      setJeSaving(false); return
+
+    if (editJeId) {
+      // Edit existing draft entry
+      const { error: updErr } = await supabase.from('journal_entries').update({
+        entry_date: jeForm.date,
+        reference: jeForm.reference || null,
+        reference_type: jeForm.reference_type || null,
+        description: jeForm.description,
+        updated_at: new Date().toISOString(),
+      }).eq('id', editJeId).eq('status', 'draft')
+      if (updErr) { toast(updErr.message, 'error'); setJeSaving(false); return }
+      await supabase.from('journal_entry_lines').delete().eq('entry_id', editJeId)
+      const { error: lineErr } = await supabase.from('journal_entry_lines').insert(
+        validLines.map(l => ({
+          entry_id: editJeId, account_id: l.account_id,
+          description: l.description || null,
+          debit: Number(l.debit || 0), credit: Number(l.credit || 0),
+        }))
+      )
+      if (lineErr) { toast('Failed to save lines', 'error'); setJeSaving(false); return }
+      setEntryLines(prev => ({ ...prev, [editJeId]: [] }))
+      toast('Entry updated'); setJeSaving(false); setJeFormOpen(false); loadEntries()
+    } else {
+      // Create new entry as draft
+      const { data: je, error: jeErr } = await supabase.from('journal_entries').insert({
+        entry_number: generateJournalEntryNumber(), entry_date: jeForm.date,
+        reference: jeForm.reference || null, reference_type: jeForm.reference_type || null,
+        description: jeForm.description, branch_id: activeBranch?.id ?? null,
+        status: 'draft',
+      }).select().single()
+      if (jeErr || !je) { toast(jeErr?.message ?? 'Error', 'error'); setJeSaving(false); return }
+      const { error: lineErr } = await supabase.from('journal_entry_lines').insert(
+        validLines.map(l => ({
+          entry_id: je.id, account_id: l.account_id,
+          description: l.description || null,
+          debit: Number(l.debit || 0), credit: Number(l.credit || 0),
+        }))
+      )
+      if (lineErr) {
+        await supabase.from('journal_entries').delete().eq('id', je.id)
+        toast('Failed to save lines, entry cancelled', 'error')
+        setJeSaving(false); return
+      }
+      toast('Draft saved — Post it when ready'); setJeSaving(false); setJeFormOpen(false); loadEntries()
     }
-    toast('Journal entry posted'); setJeSaving(false); setJeFormOpen(false); loadEntries()
   }
 
-  async function voidJournalEntry(entry: JournalEntry) {
-    if (entry.reference_type === 'void') {
-      toast('Cannot void a reversing entry — the original is already cancelled.', 'error')
-      return
-    }
+  async function postJournalEntry(entry: JournalEntry) {
+    await supabase.from('journal_entries').update({ status: 'posted', updated_at: new Date().toISOString() }).eq('id', entry.id)
+    setEntries(prev => prev.map(e => e.id === entry.id ? { ...e, status: 'posted' } : e))
+    toast(`${entry.entry_number} posted`)
+  }
+
+  async function unpostJournalEntry(entry: JournalEntry) {
     setConfirmDialog({
-      title: `Void ${entry.entry_number}?`,
-      message: 'A reversing journal entry will be posted to cancel this entry. This cannot be undone.',
-      confirmLabel: 'Void Entry',
-      variant: 'danger',
+      title: `Unpost ${entry.entry_number}?`,
+      message: 'Entry will return to draft and can be edited. It will be excluded from reports until re-posted.',
+      confirmLabel: 'Unpost',
+      variant: 'default',
       onConfirm: async () => {
         setConfirmDialog(null)
-        let lines: any[] = entryLines[entry.id] ?? []
-        if (lines.length === 0) {
-          const { data } = await supabase.from('journal_entry_lines').select('*').eq('entry_id', entry.id)
-          lines = data ?? []
-        }
-        if (lines.length === 0) { toast('No lines found for this entry', 'error'); return }
-        const { data: reversal, error } = await supabase.from('journal_entries').insert({
-          entry_number: generateJournalEntryNumber(),
-          entry_date: todayStr(),
-          reference: entry.entry_number,
-          reference_type: 'void',
-          description: `VOID: ${entry.description}`,
-          branch_id: activeBranch?.id ?? null,
-        }).select().single()
-        if (error || !reversal) { toast(error?.message ?? 'Failed to create reversal', 'error'); return }
-        const { error: lineErr } = await supabase.from('journal_entry_lines').insert(
-          lines.map((l: any) => ({
-            entry_id: reversal.id,
-            account_id: l.account_id,
-            description: l.description ?? null,
-            debit: Number(l.credit),
-            credit: Number(l.debit),
-          }))
-        )
-        if (lineErr) {
-          await supabase.from('journal_entries').delete().eq('id', reversal.id)
-          toast('Failed to post reversal lines', 'error'); return
-        }
-        await supabase.from('journal_entries').update({
-          is_void: true,
-          voided_at: new Date().toISOString(),
-          void_entry_id: reversal.id,
-        }).eq('id', entry.id)
-
-        // If this was a petty_cash entry, delete the linked petty_cash_transaction so the balance stays correct
-        if (entry.reference_type === 'petty_cash') {
-          await supabase.from('petty_cash_transactions').delete().eq('journal_entry_id', entry.id)
-        }
-
-        if (entry.reference_type === 'invoice' && entry.reference && activeBranch) {
-          const paymentAmount = lines.reduce((s: number, l: any) => s + Number(l.debit || 0), 0)
-          const { data: inv } = await supabase.from('invoices')
-            .select('id, total, amount_paid, reservation_id')
-            .eq('invoice_number', entry.reference)
-            .eq('branch_id', activeBranch.id)
-            .maybeSingle()
-          if (inv) {
-            const newPaid = Math.max(0, Number(inv.amount_paid) - paymentAmount)
-            const newStatus = newPaid <= 0 ? 'unpaid' : newPaid >= Number(inv.total) ? 'paid' : 'partial'
-            await supabase.from('invoices').update({
-              amount_paid: newPaid,
-              status: newStatus,
-              paid_at: newStatus === 'paid' ? new Date().toISOString() : null,
-              updated_at: new Date().toISOString(),
-            }).eq('id', inv.id)
-            if (inv.reservation_id) {
-              await supabase.from('reservations').update({
-                deposit: newPaid,
-                updated_at: new Date().toISOString(),
-              }).eq('id', inv.reservation_id)
-            }
-          }
-        }
-        toast(`${entry.entry_number} voided — ${reversal.entry_number} posted`)
-        setEntryLines({})
-        loadEntries(); loadPetty()
+        await supabase.from('journal_entries').update({ status: 'draft', updated_at: new Date().toISOString() }).eq('id', entry.id)
+        setEntries(prev => prev.map(e => e.id === entry.id ? { ...e, status: 'draft' } : e))
+        toast(`${entry.entry_number} unposted — now editable`)
       },
     })
   }
@@ -844,7 +833,7 @@ export default function AccountingPage() {
   async function loadTrialBalance() {
     if (!activeBranch) return
     setTbLoading(true)
-    let q = supabase.from('journal_entries').select('id').eq('branch_id', activeBranch.id).eq('is_void', false)
+    let q = supabase.from('journal_entries').select('id').eq('branch_id', activeBranch.id).eq('status', 'posted')
     if (tbFrom) q = q.gte('entry_date', tbFrom)
     if (tbTo)   q = q.lte('entry_date', tbTo)
     const { data: jeData } = await q
@@ -875,7 +864,7 @@ export default function AccountingPage() {
   async function loadReport() {
     if (!activeBranch) return
     setReportLoading(true)
-    let q = supabase.from('journal_entries').select('id').eq('branch_id', activeBranch.id).eq('is_void', false)
+    let q = supabase.from('journal_entries').select('id').eq('branch_id', activeBranch.id).eq('status', 'posted')
     if (reportType === 'pl' && reportFrom) q = q.gte('entry_date', reportFrom)
     if (reportTo) q = q.lte('entry_date', reportTo)
     const { data: jeData } = await q
@@ -924,7 +913,7 @@ export default function AccountingPage() {
     const cashAcct = accounts.find(a => a.code === '1020')
     if (!cashAcct) { toast('Account 1020 (Cash at Bank) not found in COA', 'error'); setReconLoading(false); return }
     const { data: jeData } = await supabase.from('journal_entries')
-      .select('id').eq('branch_id', activeBranch.id).eq('is_void', false)
+      .select('id').eq('branch_id', activeBranch.id).eq('status', 'posted')
     const ids = (jeData ?? []).map((e: any) => e.id)
     if (ids.length === 0) { setReconLines([]); setReconLoading(false); return }
     const { data } = await supabase.from('journal_entry_lines')
@@ -1008,7 +997,7 @@ export default function AccountingPage() {
       'Description': e.description,
       'Reference': e.reference ?? '',
       'Type': e.reference_type ?? '',
-      'Void': e.is_void ? 'Yes' : 'No',
+      'Status': e.is_void ? 'Void' : (e.status ?? 'posted'),
     })) }])
   }
 
@@ -1394,7 +1383,7 @@ export default function AccountingPage() {
             <div className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
               <table className="w-full text-sm">
                 <thead><tr className="bg-hsurface2">
-                  {['', 'Entry #', 'Date', 'Description', 'Reference', 'Type', 'Posted', ''].map(h => (
+                  {['', 'Entry #', 'Date', 'Description', 'Reference', 'Type', 'Status', ''].map(h => (
                     <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide">{h}</th>
                   ))}
                 </tr></thead>
@@ -1403,7 +1392,7 @@ export default function AccountingPage() {
                     <tr><td colSpan={8} className="px-5 py-10 text-center text-hmuted">No journal entries. Entries auto-post when transactions are recorded.</td></tr>
                   ) : entries.map(e => (
                     <>
-                      <tr key={e.id} className={cn('border-t border-hborder hover:bg-hbg/40 cursor-pointer', e.is_void && 'opacity-50 bg-gray-50/60')}
+                      <tr key={e.id} className={cn('border-t border-hborder hover:bg-hbg/40 cursor-pointer', e.is_void && 'opacity-50 bg-gray-50/60', e.status === 'draft' && !e.is_void && 'bg-amber-50/40')}
                         onClick={async () => {
                           if (expandedEntryId === e.id) { setExpandedEntryId(null); return }
                           setExpandedEntryId(e.id); await loadEntryLines(e.id)
@@ -1422,16 +1411,36 @@ export default function AccountingPage() {
                             {(e.reference_type ?? 'manual').replace(/_/g, ' ')}
                           </span>
                         </td>
-                        <td className="px-4 py-2.5 text-xs text-hmuted">{formatDate(e.created_at)}</td>
+                        <td className="px-4 py-2.5">
+                          {e.is_void
+                            ? <span className="text-[10px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full font-bold uppercase">Void</span>
+                            : e.status === 'draft'
+                              ? <span className="text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-bold uppercase">Draft</span>
+                              : <span className="text-[10px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-bold uppercase">Posted</span>
+                          }
+                        </td>
                         <td className="px-4 py-2.5" onClick={ev => ev.stopPropagation()}>
                           {!e.is_void && (
-                            <button
-                              onClick={() => voidJournalEntry(e)}
-                              className="text-[11px] font-medium text-red-600 border border-red-200 bg-red-50 hover:bg-red-100 px-2 py-1 rounded transition-colors flex items-center gap-1"
-                            >
-                              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
-                              Void
-                            </button>
+                            <div className="flex items-center gap-1.5">
+                              {e.status === 'draft' && (
+                                <>
+                                  <button
+                                    onClick={() => openEditJe(e)}
+                                    className="text-[11px] font-medium text-blue-600 border border-blue-200 bg-blue-50 hover:bg-blue-100 px-2 py-1 rounded transition-colors"
+                                  >Edit</button>
+                                  <button
+                                    onClick={() => postJournalEntry(e)}
+                                    className="text-[11px] font-medium text-green-700 border border-green-200 bg-green-50 hover:bg-green-100 px-2 py-1 rounded transition-colors"
+                                  >Post</button>
+                                </>
+                              )}
+                              {e.status === 'posted' && (
+                                <button
+                                  onClick={() => unpostJournalEntry(e)}
+                                  className="text-[11px] font-medium text-amber-700 border border-amber-200 bg-amber-50 hover:bg-amber-100 px-2 py-1 rounded transition-colors"
+                                >Unpost</button>
+                              )}
+                            </div>
                           )}
                         </td>
                       </tr>
@@ -2107,7 +2116,7 @@ export default function AccountingPage() {
       />
 
       {/* ── Journal Entry Modal ── */}
-      <Modal open={jeFormOpen} onClose={() => setJeFormOpen(false)} title="New Journal Entry" size="lg">
+      <Modal open={jeFormOpen} onClose={() => setJeFormOpen(false)} title={editJeId ? 'Edit Journal Entry' : 'New Journal Entry'} size="lg">
         <div className="space-y-4">
           <div className="grid grid-cols-3 gap-3">
             <div>
@@ -2174,7 +2183,7 @@ export default function AccountingPage() {
           </div>
           <div className="flex justify-end gap-3 pt-1">
             <Button variant="ghost" onClick={() => setJeFormOpen(false)}>Cancel</Button>
-            <Button onClick={saveJournalEntry} disabled={jeSaving || !jeBalanced}>{jeSaving ? 'Posting…' : 'Post Entry'}</Button>
+            <Button onClick={saveJournalEntry} disabled={jeSaving || !jeBalanced}>{jeSaving ? 'Saving…' : editJeId ? 'Save Changes' : 'Save as Draft'}</Button>
           </div>
         </div>
       </Modal>

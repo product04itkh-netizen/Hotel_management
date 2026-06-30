@@ -77,7 +77,7 @@ export default function BillingPage() {
         .eq('branch_id', activeBranch.id)
         .order('created_at', { ascending: false }),
       supabase.from('reservations')
-        .select('*, guest:guests(full_name), house:houses(name, base_rate_per_night), line_items:reservation_line_items(id, label, amount, discount, sort_order)')
+        .select('*, guest:guests(full_name), house:houses(name, base_rate_per_night), line_items:reservation_line_items(id, label, amount, discount, revenue_account_code, sort_order)')
         .eq('branch_id', activeBranch.id)
         .in('status', ['confirmed', 'checked_in', 'checked_out'])
         .order('created_at', { ascending: false }),
@@ -166,16 +166,11 @@ export default function BillingPage() {
         })
       }
 
-      // Add each reservation add-on line item
+      // Add each reservation add-on line item — use explicit revenue_account_code set at reservation time
       const sorted = [...lineItems].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
       sorted.forEach(item => {
         if (item.label) {
-          const l = item.label.toLowerCase()
-          let code = '4400' // Default to Other Revenue
-          if (l.includes('house') || l.includes('room') || l.includes('bed')) code = '4000'
-          else if (l.includes('food') || l.includes('drink') || l.includes('breakfast') || l.includes('lunch') || l.includes('dinner') || l.includes('meal') || l.includes('restaurant') || l.includes('bar')) code = '4100'
-          else if (l.includes('tour') || l.includes('activity') || l.includes('rental') || l.includes('bike') || l.includes('car') || l.includes('guide') || l.includes('transfer') || l.includes('boat')) code = '4200'
-          
+          const code = (item as any).revenue_account_code || '4300'
           const itemDisc = Math.max(0, Number(item.discount ?? 0))
           items.push({ description: item.label, quantity: 1, unit_price: Number(item.amount), discount: itemDisc || undefined, total: Math.max(0, Number(item.amount) - itemDisc), account_code: code })
         }
@@ -321,7 +316,7 @@ export default function BillingPage() {
     // Auto journal entry: clear deposit liability → credit revenue
     if (inv && initialPaid > 0 && selectedRes) {
       try {
-        const itemCodes = new Set(form.items.map(i => i.account_code || '4400'))
+        const itemCodes = new Set(form.items.map(i => i.account_code || '4300'))
         const { data: accounts } = await supabase.from('chart_of_accounts')
           .select('id, code')
           .eq('branch_id', activeBranch!.id)
@@ -345,7 +340,7 @@ export default function BillingPage() {
             
             const accountTotals: Record<string, number> = {}
             form.items.forEach(item => {
-              const code = item.account_code || '4400'
+              const code = item.account_code || '4300'
               accountTotals[code] = (accountTotals[code] || 0) + Number(item.total)
             })
             const invoiceSubtotal = Object.values(accountTotals).reduce((a,b) => a+b, 0)
@@ -415,7 +410,7 @@ export default function BillingPage() {
       const selectedPm = paymentMethods.find(m => m.value === payForm.payment_method)
       const cashCode = (selectedPm as any)?.account_code || (selectedPm?.is_cash ? '1010' : '1020')
 
-      const itemCodes = new Set(selectedInvoice.items.map(i => (i as any).account_code || '4400'))
+      const itemCodes = new Set(selectedInvoice.items.map(i => (i as any).account_code || '4300'))
 
       // Find cash account and revenue account for this branch
       const { data: accounts, error: acctErr } = await supabase.from('chart_of_accounts')
@@ -443,7 +438,7 @@ export default function BillingPage() {
           
           const accountTotals: Record<string, number> = {}
           selectedInvoice.items.forEach(item => {
-            const code = (item as any).account_code || '4400'
+            const code = (item as any).account_code || '4300'
             accountTotals[code] = (accountTotals[code] || 0) + Number(item.total)
           })
           const invoiceSubtotal = Object.values(accountTotals).reduce((a,b) => a+b, 0)
@@ -493,7 +488,7 @@ export default function BillingPage() {
                 
                 const accountTotals: Record<string, number> = {}
                 selectedInvoice.items.forEach(item => {
-                  const code = (item as any).account_code || '4400'
+                  const code = (item as any).account_code || '4300'
                   accountTotals[code] = (accountTotals[code] || 0) + Number(item.total)
                 })
                 const invoiceSubtotal = Object.values(accountTotals).reduce((a,b) => a+b, 0)
@@ -790,7 +785,7 @@ export default function BillingPage() {
                     className="col-span-3 border border-hborder rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-navy bg-hbg"
                   />
                   <select
-                    value={item.account_code || '4400'}
+                    value={item.account_code || '4300'}
                     onChange={e => updateItem(idx, 'account_code', e.target.value)}
                     className="col-span-2 border border-hborder rounded-lg px-1.5 py-1.5 text-xs focus:outline-none focus:border-navy bg-hbg text-hmuted"
                   >

@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState, useMemo } from 'react'
+import React, { useEffect, useState, useMemo } from 'react'
 import { TopBar } from '@/components/layout/TopBar'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
@@ -111,14 +111,14 @@ export default function AssetsPage() {
 
     // Map category → accumulated depreciation account code
     const accumMap: Record<string, string> = {
-      building: '1501', computer_office: '1502', furniture: '1503', machinery: '1504', vehicle: '1505',
+      building: '1501', computer_office: '1511', furniture: '1521', machinery: '1531', vehicle: '1541',
     }
     const { data: coaData } = await supabase.from('chart_of_accounts')
       .select('id, code').eq('branch_id', activeBranch.id)
     const coa = coaData ?? []
     const findAcct = (code: string) => coa.find((a: any) => a.code === code)
-    const depExpAcct = findAcct('5700')
-    if (!depExpAcct) { toast('Account 5700 Depreciation Expense not found in COA', 'error'); return }
+    const depExpAcct = findAcct('5750')
+    if (!depExpAcct) { toast('Account 5750 Depreciation Expense not found in COA', 'error'); return }
 
     setDepRunSaving(true)
     const entryDate = `${depRunYear}-${String(depRunMonth).padStart(2, '0')}-01`
@@ -150,7 +150,7 @@ export default function AssetsPage() {
         { entry_id: je.id, account_id: accumAcct.id,  description: asset.description, debit: 0, credit: monthly },
       )
     }
-    if (lines.length === 0) { toast('No valid depreciation lines — check COA accounts 1501–1505 and 5700', 'error'); setDepRunSaving(false); return }
+    if (lines.length === 0) { toast('No valid depreciation lines — check COA accounts 1501/1511/1521/1531/1541 and 5750', 'error'); setDepRunSaving(false); return }
     await supabase.from('journal_entry_lines').insert(lines)
     await supabase.from('depreciation_runs').insert({
       run_year: depRunYear, run_month: depRunMonth,
@@ -539,7 +539,7 @@ export default function AssetsPage() {
               <div className="flex items-center justify-between mb-4">
                 <div>
                   <h3 className="font-semibold text-dark-navy text-[15px]">Post Monthly Depreciation</h3>
-                  <p className="text-xs text-hmuted mt-0.5">Creates DR 5700 / CR Accum. Dep. journal entries for all active depreciable assets.</p>
+                  <p className="text-xs text-hmuted mt-0.5">Creates DR 5750 / CR Accum. Dep. journal entries for all active depreciable assets.</p>
                 </div>
               </div>
               <div className="flex items-end gap-3 flex-wrap">
@@ -597,17 +597,17 @@ export default function AssetsPage() {
             </div>
 
             <div className="bg-white rounded-2xl border border-hborder shadow-sm overflow-x-auto">
-              <table className="w-full text-xs whitespace-nowrap">
+              <table className="text-xs whitespace-nowrap">
                 <thead>
                   <tr className="border-b border-hborder bg-hsurface2">
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-hmuted uppercase tracking-wide sticky left-0 bg-hsurface2 min-w-[200px]">Description</th>
-                    <th className="text-left px-3 py-3 text-xs font-semibold text-hmuted uppercase tracking-wide">Cat.</th>
-                    <th className="text-right px-3 py-3 text-xs font-semibold text-hmuted uppercase tracking-wide">Total</th>
-                    <th className="text-right px-3 py-3 text-xs font-semibold text-hmuted uppercase tracking-wide">Rate</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-hmuted uppercase tracking-wide sticky left-0 bg-hsurface2 min-w-[220px]">Description</th>
+                    <th className="text-left px-3 py-3 text-xs font-semibold text-hmuted uppercase tracking-wide min-w-[60px]">Cat.</th>
+                    <th className="text-right px-3 py-3 text-xs font-semibold text-hmuted uppercase tracking-wide min-w-[80px]">Total</th>
+                    <th className="text-right px-3 py-3 text-xs font-semibold text-hmuted uppercase tracking-wide min-w-[60px]">Rate</th>
                     {MONTHS.map(m => (
-                      <th key={m} className="text-right px-3 py-3 text-xs font-semibold text-hmuted uppercase tracking-wide">{m}</th>
+                      <th key={m} className="text-right px-3 py-3 text-xs font-semibold text-hmuted uppercase tracking-wide min-w-[80px]">{m}</th>
                     ))}
-                    <th className="text-right px-4 py-3 text-xs font-semibold text-hmuted uppercase tracking-wide">Annual</th>
+                    <th className="text-right px-4 py-3 text-xs font-semibold text-hmuted uppercase tracking-wide min-w-[90px]">Annual</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -621,7 +621,7 @@ export default function AssetsPage() {
                     }))
                     const subtotal = rows.reduce((s, r) => s + r.annual, 0)
                     return (
-                      <tbody key={cat.value}>
+                      <React.Fragment key={cat.value}>
                         {/* Category header */}
                         <tr className="bg-dark-navy/5 border-b border-hborder">
                           <td className="px-4 py-2 font-semibold text-dark-navy sticky left-0 bg-dark-navy/5" colSpan={4}>
@@ -644,7 +644,7 @@ export default function AssetsPage() {
                         {rows.map(({ a, months, annual }, i) => (
                           <tr key={a.id} className={cn('border-b border-hborder/50 hover:bg-hsurface2', i % 2 === 0 ? '' : 'bg-gray-50/30')}>
                             <td className="px-4 py-2.5 sticky left-0 bg-inherit">
-                              <p className="font-medium text-htext max-w-[190px] truncate">{a.description}</p>
+                              <p className="font-medium text-htext max-w-[210px] truncate">{a.description}</p>
                             </td>
                             <td className="px-3 py-2.5 text-hmuted">{(Number(a.depreciation_rate) * 100).toFixed(0)}%</td>
                             <td className="text-right px-3 py-2.5 text-hmuted">{formatCurrency(a.total_cost)}</td>
@@ -657,7 +657,7 @@ export default function AssetsPage() {
                             <td className="text-right px-4 py-2.5 font-semibold text-dark-navy">{annual > 0 ? formatCurrency(annual) : '—'}</td>
                           </tr>
                         ))}
-                      </tbody>
+                      </React.Fragment>
                     )
                   })}
                 </tbody>

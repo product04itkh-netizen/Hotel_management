@@ -128,6 +128,7 @@ export interface JournalEntry {
   reference_type?: string
   description: string
   is_void: boolean
+  status: 'draft' | 'posted'
   voided_at?: string
   void_entry_id?: string
   branch_id?: string
@@ -221,6 +222,7 @@ export interface ReservationLineItem {
   label: string
   amount: number
   discount?: number
+  revenue_account_code?: string
   sort_order?: number
   created_at?: string
 }

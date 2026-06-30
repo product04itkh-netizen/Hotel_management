@@ -25,16 +25,23 @@ const SOURCES = ['walk_in', 'phone', 'online', 'ota', 'referral']
 
 
 const PRESET_ADDONS = [
-  { label: 'Car Rental (4WD)', icon: '🚙' },
-  { label: 'Food & Cooking', icon: '🍳' },
-  { label: 'BBQ / Grilling', icon: '🔥' },
-  { label: 'Ice', icon: '🧊' },
-  { label: 'Tent Rental', icon: '⛺' },
-  { label: 'Bedding Set', icon: '🛏' },
-  { label: 'Extra Cleaning', icon: '🧹' },
-  { label: 'Transport', icon: '🚌' },
-  { label: 'Kayak Rental', icon: '🚣' },
-  { label: 'Bike Rental', icon: '🚲' },
+  { label: 'Car Rental (4WD)', icon: '🚙', code: '4200' },
+  { label: 'Food & Cooking',   icon: '🍳', code: '4100' },
+  { label: 'BBQ / Grilling',  icon: '🔥', code: '4100' },
+  { label: 'Ice',              icon: '🧊', code: '4100' },
+  { label: 'Tent Rental',      icon: '⛺', code: '4200' },
+  { label: 'Bedding Set',      icon: '🛏', code: '4300' },
+  { label: 'Extra Cleaning',   icon: '🧹', code: '4300' },
+  { label: 'Transport',        icon: '🚌', code: '4200' },
+  { label: 'Kayak Rental',     icon: '🚣', code: '4200' },
+  { label: 'Bike Rental',      icon: '🚲', code: '4200' },
+]
+
+const REVENUE_CODES = [
+  { code: '4000', label: '4000 House Rental' },
+  { code: '4100', label: '4100 Food & Beverage' },
+  { code: '4200', label: '4200 Activity & Rental' },
+  { code: '4300', label: '4300 Other Revenue' },
 ]
 
 interface LineItemForm {
@@ -42,6 +49,7 @@ interface LineItemForm {
   label: string
   amount: number | string
   discount: number | string
+  revenue_account_code: string
 }
 
 const emptyForm = {
@@ -120,7 +128,7 @@ export default function ReservationsPage() {
     if (!activeBranch) return
     const [resRes, houseRes] = await Promise.all([
       supabase.from('reservations')
-        .select('*, guest:guests(full_name, email, phone), house:houses(name, house_type, base_rate_per_night), line_items:reservation_line_items(id, label, amount, sort_order), deposit_receipts(id, receipt_number, amount, payment_method, receipt_date, status)')
+        .select('*, guest:guests(full_name, email, phone), house:houses(name, house_type, base_rate_per_night), line_items:reservation_line_items(id, label, amount, discount, revenue_account_code, sort_order), deposit_receipts(id, receipt_number, amount, payment_method, receipt_date, status)')
         .eq('branch_id', activeBranch.id)
         .order('check_in_date', { ascending: false }),
       supabase.from('houses')
@@ -180,7 +188,7 @@ export default function ReservationsPage() {
     setLineItems(
       [...existing]
         .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
-        .map(i => ({ id: i.id, label: i.label, amount: i.amount, discount: i.discount ?? 0 }))
+        .map(i => ({ id: i.id, label: i.label, amount: i.amount, discount: i.discount ?? 0, revenue_account_code: i.revenue_account_code ?? '4300' }))
     )
     setDeposit(res.deposit ?? 0)
     setDepositMethod((res as any).deposit_method ?? 'cash')
@@ -192,18 +200,18 @@ export default function ReservationsPage() {
     setModalOpen(true)
   }
 
-  function addPreset(preset: { label: string; icon: string }) {
+  function addPreset(preset: { label: string; icon: string; code: string }) {
     if (lineItems.some(i => i.label === preset.label)) {
       toast(`${preset.label} already added`, 'info'); return
     }
-    setLineItems(prev => [...prev, { label: preset.label, amount: '', discount: 0 }])
+    setLineItems(prev => [...prev, { label: preset.label, amount: '', discount: 0, revenue_account_code: preset.code }])
   }
 
   function addCustom() {
-    setLineItems(prev => [...prev, { label: '', amount: '', discount: 0 }])
+    setLineItems(prev => [...prev, { label: '', amount: '', discount: 0, revenue_account_code: '4300' }])
   }
 
-  function updateItem(idx: number, field: 'label' | 'amount' | 'discount', value: string | number) {
+  function updateItem(idx: number, field: 'label' | 'amount' | 'discount' | 'revenue_account_code', value: string | number) {
     setLineItems(prev => prev.map((item, i) => i === idx ? { ...item, [field]: value } : item))
   }
 
@@ -488,6 +496,7 @@ export default function ReservationsPage() {
             label: item.label.trim(),
             amount: Number(item.amount) || 0,
             discount: Math.max(0, Number(item.discount) || 0),
+            revenue_account_code: item.revenue_account_code || '4300',
             sort_order: i,
           }))
         )
@@ -1200,6 +1209,7 @@ export default function ReservationsPage() {
               <div className="space-y-2 pt-1 border-t border-hborder">
                 <div className="flex items-center gap-2 px-1">
                   <span className="flex-1 text-[10px] font-semibold text-hmuted uppercase tracking-wide">Description</span>
+                  <span className="w-32 text-[10px] font-semibold text-hmuted uppercase tracking-wide">Revenue Type</span>
                   <span className="w-28 text-[10px] font-semibold text-hmuted uppercase tracking-wide text-right">Amount ($)</span>
                   <span className="w-24 text-[10px] font-semibold text-orange-500 uppercase tracking-wide text-right">Discount ($)</span>
                   <span className="w-6" />
@@ -1212,6 +1222,15 @@ export default function ReservationsPage() {
                       placeholder="Service description…"
                       className="flex-1 border border-hborder rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-navy bg-hbg"
                     />
+                    <select
+                      value={item.revenue_account_code || '4300'}
+                      onChange={e => updateItem(idx, 'revenue_account_code', e.target.value)}
+                      className="w-32 border border-hborder rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-navy bg-hbg text-hmuted"
+                    >
+                      {REVENUE_CODES.map(r => (
+                        <option key={r.code} value={r.code}>{r.label}</option>
+                      ))}
+                    </select>
                     <div className="relative w-28 flex-shrink-0">
                       <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-hmuted text-sm pointer-events-none">$</span>
                       <input
