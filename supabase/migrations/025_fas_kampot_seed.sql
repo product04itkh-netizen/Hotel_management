@@ -5,7 +5,7 @@
 DO $$
 DECLARE _bid UUID;
 BEGIN
-  SELECT id INTO _bid FROM branches WHERE LOWER(name) LIKE '%kampot%' LIMIT 1;
+  SELECT id INTO _bid FROM branches WHERE LOWER(location) LIKE '%kampot%' LIMIT 1;
   IF _bid IS NULL THEN
     RAISE EXCEPTION 'Kampot branch not found';
   END IF;
