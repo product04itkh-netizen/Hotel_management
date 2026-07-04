@@ -340,6 +340,9 @@ export default function ReservationsPage() {
     if (!form.guest_name || !form.check_in_date || !form.check_out_date || !form.house_id) {
       toast('Guest name, house, and dates are required', 'error'); return
     }
+    if (form.check_out_date <= form.check_in_date) {
+      toast('Check-out date must be after check-in date', 'error'); return
+    }
     if (!activeBranch) { toast('No branch selected', 'error'); return }
     setSaving(true)
 
