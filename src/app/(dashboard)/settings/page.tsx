@@ -94,6 +94,11 @@ export default function SettingsPage() {
     if (!pmForm.name.trim()) { toast('Name is required', 'error'); return }
     if (!pmForm.value.trim()) { toast('Slug/value is required', 'error'); return }
     if (!activeBranch) return
+    const normalizedSlug = pmForm.value.trim().toLowerCase().replace(/\s+/g, '_')
+    const slugConflict = paymentMethods.find(
+      m => m.value === normalizedSlug && m.id !== editingPm?.id
+    )
+    if (slugConflict) { toast(`Slug "${normalizedSlug}" is already used by "${slugConflict.name}"`, 'error'); return }
     setPmSaving(true)
     const isCash = pmForm.account_code === '1010'
     if (editingPm) {

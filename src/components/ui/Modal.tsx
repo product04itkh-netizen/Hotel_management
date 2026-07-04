@@ -12,18 +12,11 @@ interface ModalProps {
 }
 
 export function Modal({ open, onClose, title, subtitle, children, size = 'md' }: ModalProps) {
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    if (open) document.addEventListener('keydown', handler)
-    return () => document.removeEventListener('keydown', handler)
-  }, [open, onClose])
-
   if (!open) return null
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
-      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
     >
       <div
         className={cn(

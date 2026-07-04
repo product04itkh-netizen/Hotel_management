@@ -16,6 +16,30 @@ import type { ChartOfAccount, AccountType, JournalEntry, PettyCashTransaction, V
 type Tab = 'overview' | 'ar' | 'bills' | 'vendors' | 'journal' | 'ledger' | 'trial_balance' | 'reports' | 'reconciliation' | 'recurring' | 'periods' | 'coa' | 'petty'
 
 const ACCOUNT_TYPES: AccountType[] = ['asset', 'liability', 'equity', 'revenue', 'expense']
+const COA_CATEGORIES: Record<AccountType, { value: string; label: string }[]> = {
+  asset: [
+    { value: 'Bank',             label: 'Bank / Cash' },
+    { value: 'current_asset',    label: 'Current Asset' },
+    { value: 'fixed_asset',      label: 'Fixed Asset' },
+    { value: 'other_asset',      label: 'Other Asset' },
+  ],
+  liability: [
+    { value: 'current_liability',   label: 'Current Liability' },
+    { value: 'long_term_liability', label: 'Long-Term Liability' },
+    { value: 'other_liability',     label: 'Other Liability' },
+  ],
+  equity: [
+    { value: 'equity', label: 'Equity' },
+  ],
+  revenue: [
+    { value: 'operating_revenue', label: 'Operating Revenue' },
+    { value: 'other_revenue',     label: 'Other Revenue' },
+  ],
+  expense: [
+    { value: 'operating_expense', label: 'Operating Expense' },
+    { value: 'other_expense',     label: 'Other Expense' },
+  ],
+}
 const PETTY_CATEGORIES = [
   'Cleaning Supplies', 'Maintenance Materials', 'Staff Refreshments',
   'Office Supplies', 'Utilities', 'Transportation', 'Food & Beverages',
@@ -159,9 +183,10 @@ export default function AccountingPage() {
   const [reportLoading, setReportLoading] = useState(false)
 
   // Bank Reconciliation
-  const [reconLines,   setReconLines]   = useState<any[]>([])
-  const [reconStmtBal, setReconStmtBal] = useState('')
-  const [reconLoading, setReconLoading] = useState(false)
+  const [reconLines,     setReconLines]     = useState<any[]>([])
+  const [reconStmtBal,   setReconStmtBal]   = useState('')
+  const [reconLoading,   setReconLoading]   = useState(false)
+  const [reconAccountId, setReconAccountId] = useState('')
 
   // Recurring Entries
   const [recurring,      setRecurring]      = useState<any[]>([])
@@ -909,16 +934,15 @@ export default function AccountingPage() {
 
   async function loadReconciliation() {
     if (!activeBranch) return
+    if (!reconAccountId) { toast('Select an account to reconcile', 'error'); return }
     setReconLoading(true)
-    const cashAcct = accounts.find(a => a.code === '1020')
-    if (!cashAcct) { toast('Account 1020 (Cash at Bank) not found in COA', 'error'); setReconLoading(false); return }
     const { data: jeData } = await supabase.from('journal_entries')
       .select('id').eq('branch_id', activeBranch.id).eq('status', 'posted')
     const ids = (jeData ?? []).map((e: any) => e.id)
     if (ids.length === 0) { setReconLines([]); setReconLoading(false); return }
     const { data } = await supabase.from('journal_entry_lines')
       .select('*, entry:journal_entries(entry_number, entry_date, description)')
-      .eq('account_id', cashAcct.id).in('entry_id', ids)
+      .eq('account_id', reconAccountId).in('entry_id', ids)
     setReconLines(
       (data ?? [])
         .filter((r: any) => r.entry)
@@ -1760,11 +1784,25 @@ export default function AccountingPage() {
           <div>
             <div className="flex items-end gap-4 mb-5 bg-white border border-hborder rounded-2xl p-4 shadow-card flex-wrap">
               <div>
+                <label className="block text-xs text-hmuted mb-1">Account</label>
+                <select
+                  value={reconAccountId}
+                  onChange={e => { setReconAccountId(e.target.value); setReconLines([]) }}
+                  className={input}
+                  style={{ width: 240 }}
+                >
+                  <option value="">Select account…</option>
+                  {accounts.filter(a => a.is_active && a.type === 'asset').map(a => (
+                    <option key={a.id} value={a.id}>{a.code} — {a.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
                 <label className="block text-xs text-hmuted mb-1">Statement Balance ($)</label>
                 <input type="number" step="0.01" value={reconStmtBal} onChange={e => setReconStmtBal(e.target.value)} placeholder="0.00" className={input} style={{ width: 160 }} />
               </div>
-              <Button onClick={loadReconciliation} disabled={reconLoading}>{reconLoading ? 'Loading…' : 'Load Transactions'}</Button>
-              <p className="text-xs text-hmuted self-end pb-2">Loads all 1020 Cash at Bank transactions. Check off items that appear on the bank statement.</p>
+              <Button onClick={loadReconciliation} disabled={reconLoading || !reconAccountId}>{reconLoading ? 'Loading…' : 'Load Transactions'}</Button>
+              <p className="text-xs text-hmuted self-end pb-2">Check off items that appear on the bank statement.</p>
             </div>
 
             {reconLines.length > 0 && (() => {
@@ -1818,7 +1856,7 @@ export default function AccountingPage() {
               )
             })()}
             {reconLines.length === 0 && !reconLoading && (
-              <p className="text-center text-hmuted py-16">Click Load Transactions to begin reconciliation of account 1020 Cash at Bank.</p>
+              <p className="text-center text-hmuted py-16">{reconAccountId ? 'Click Load Transactions to begin reconciliation.' : 'Select an account above, then click Load Transactions.'}</p>
             )}
           </div>
         )}
@@ -2057,7 +2095,7 @@ export default function AccountingPage() {
             </div>
             <div>
               <label className="block text-xs text-hmuted mb-1">Type</label>
-              <select value={coaForm.type} onChange={e => setCoaForm(f => ({ ...f, type: e.target.value as AccountType }))} className={input}>
+              <select value={coaForm.type} onChange={e => { const t = e.target.value as AccountType; setCoaForm(f => ({ ...f, type: t, category: COA_CATEGORIES[t][0].value })) }} className={input}>
                 {ACCOUNT_TYPES.map(t => <option key={t} value={t}>{capitalize(t)}</option>)}
               </select>
             </div>
@@ -2068,7 +2106,9 @@ export default function AccountingPage() {
           </div>
           <div>
             <label className="block text-xs text-hmuted mb-1">Category</label>
-            <input value={coaForm.category} onChange={e => setCoaForm(f => ({ ...f, category: e.target.value }))} placeholder="e.g. operating_expense" className={input} />
+            <select value={coaForm.category} onChange={e => setCoaForm(f => ({ ...f, category: e.target.value }))} className={input}>
+              {COA_CATEGORIES[coaForm.type].map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+            </select>
           </div>
           <div className="flex items-center gap-2 pt-1">
             <input type="checkbox" checked={coaForm.is_active} onChange={e => setCoaForm(f => ({ ...f, is_active: e.target.checked }))} className="w-4 h-4 accent-navy cursor-pointer" />

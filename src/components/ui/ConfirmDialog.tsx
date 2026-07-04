@@ -29,7 +29,6 @@ export function ConfirmDialog({
   return (
     <div
       className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
-      onClick={e => { if (e.target === e.currentTarget) onCancel() }}
     >
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-4">
         {/* Icon + Title */}
