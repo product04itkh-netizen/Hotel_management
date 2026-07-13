@@ -25,16 +25,16 @@ const SOURCES = ['walk_in', 'phone', 'online', 'ota', 'referral']
 
 
 const PRESET_ADDONS = [
-  { label: 'Car Rental (4WD)', icon: '🚙', code: '4200' },
-  { label: 'Food & Cooking',   icon: '🍳', code: '4100' },
-  { label: 'BBQ / Grilling',  icon: '🔥', code: '4100' },
-  { label: 'Ice',              icon: '🧊', code: '4100' },
-  { label: 'Tent Rental',      icon: '⛺', code: '4200' },
-  { label: 'Bedding Set',      icon: '🛏', code: '4300' },
-  { label: 'Extra Cleaning',   icon: '🧹', code: '4300' },
-  { label: 'Transport',        icon: '🚌', code: '4200' },
-  { label: 'Kayak Rental',     icon: '🚣', code: '4200' },
-  { label: 'Bike Rental',      icon: '🚲', code: '4200' },
+  { label: 'Car Rental (4WD)', icon: '🚙', code: '4200', costCode: '5500' },
+  { label: 'Food & Cooking',   icon: '🍳', code: '4100', costCode: '5300' },
+  { label: 'BBQ / Grilling',  icon: '🔥', code: '4100', costCode: '5600' },
+  { label: 'Ice',              icon: '🧊', code: '4100', costCode: '5300' },
+  { label: 'Tent Rental',      icon: '⛺', code: '4200', costCode: '6000' },
+  { label: 'Bedding Set',      icon: '🛏', code: '4300', costCode: '6000' },
+  { label: 'Extra Cleaning',   icon: '🧹', code: '4300', costCode: '6000' },
+  { label: 'Transport',        icon: '🚌', code: '4200', costCode: '5500' },
+  { label: 'Kayak Rental',     icon: '🚣', code: '4200', costCode: '5400' },
+  { label: 'Bike Rental',      icon: '🚲', code: '4200', costCode: '5400' },
 ]
 
 const REVENUE_CODES = [
@@ -44,12 +44,23 @@ const REVENUE_CODES = [
   { code: '4300', label: '4300 Other Revenue' },
 ]
 
+const COST_CODES = [
+  { code: '5300', label: '5300 Food & Grocery' },
+  { code: '5400', label: '5400 Repairs & Maint.' },
+  { code: '5500', label: '5500 Petroleum' },
+  { code: '5600', label: '5600 Gas & Charcoal' },
+  { code: '5800', label: '5800 Delivery' },
+  { code: '6000', label: '6000 Other Expense' },
+]
+
 interface LineItemForm {
   id?: string
   label: string
   amount: number | string
   discount: number | string
   revenue_account_code: string
+  cost_amount: number | string
+  cost_account_code: string
 }
 
 const emptyForm = {
@@ -90,6 +101,7 @@ export default function ReservationsPage() {
   const [khHolidays, setKhHolidays] = useState<Record<string, string>>({})
   const [notifyingId, setNotifyingId] = useState<string | null>(null)
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([])
+  const [linkedPettyCash, setLinkedPettyCash] = useState<any[]>([])
 
   useEffect(() => {
     if (activeBranch) { loadData(); loadPaymentMethods() }
@@ -99,6 +111,16 @@ export default function ReservationsPage() {
     if (!activeBranch) return
     const { data } = await supabase.from('payment_methods').select('*').eq('branch_id', activeBranch.id).eq('is_active', true).order('sort_order')
     setPaymentMethods((data ?? []) as PaymentMethod[])
+  }
+
+  async function loadLinkedPettyCash(reservationId: string) {
+    const { data } = await supabase
+      .from('petty_cash_transactions')
+      .select('id, description, amount, transaction_date, reservation_line_item_id')
+      .eq('reservation_id', reservationId)
+      .eq('transaction_type', 'out')
+      .order('transaction_date')
+    setLinkedPettyCash((data ?? []) as any[])
   }
 
   // Fetch Cambodian public holidays from Calendarific (once per year, cached 90 days)
@@ -128,7 +150,7 @@ export default function ReservationsPage() {
     if (!activeBranch) return
     const [resRes, houseRes] = await Promise.all([
       supabase.from('reservations')
-        .select('*, guest:guests(full_name, email, phone), house:houses(name, house_type, base_rate_per_night), line_items:reservation_line_items(id, label, amount, discount, revenue_account_code, sort_order), deposit_receipts(id, receipt_number, amount, payment_method, receipt_date, status)')
+        .select('*, guest:guests(full_name, email, phone), house:houses(name, house_type, base_rate_per_night), line_items:reservation_line_items(id, label, amount, discount, revenue_account_code, cost_amount, cost_account_code, sort_order), deposit_receipts(id, receipt_number, amount, payment_method, receipt_date, status)')
         .eq('branch_id', activeBranch.id)
         .order('check_in_date', { ascending: false }),
       supabase.from('houses')
@@ -164,6 +186,7 @@ export default function ReservationsPage() {
     setHouseDiscount(0)
     setPaxCount('')
     setArrivalTime('')
+    setLinkedPettyCash([])
     setModalOpen(true)
   }
 
@@ -188,7 +211,7 @@ export default function ReservationsPage() {
     setLineItems(
       [...existing]
         .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
-        .map(i => ({ id: i.id, label: i.label, amount: i.amount, discount: i.discount ?? 0, revenue_account_code: i.revenue_account_code ?? '4300' }))
+        .map(i => ({ id: i.id, label: i.label, amount: i.amount, discount: i.discount ?? 0, revenue_account_code: i.revenue_account_code ?? '4300', cost_amount: i.cost_amount ?? '', cost_account_code: i.cost_account_code ?? '6000' }))
     )
     setDeposit(res.deposit ?? 0)
     setDepositMethod((res as any).deposit_method ?? 'cash')
@@ -197,21 +220,23 @@ export default function ReservationsPage() {
     setHouseDiscount((res as any).house_discount ?? 0)
     setPaxCount(res.pax_count ?? '')
     setArrivalTime(res.arrival_time ?? '')
+    setLinkedPettyCash([])
+    if (res.id) loadLinkedPettyCash(res.id)
     setModalOpen(true)
   }
 
-  function addPreset(preset: { label: string; icon: string; code: string }) {
+  function addPreset(preset: { label: string; icon: string; code: string; costCode: string }) {
     if (lineItems.some(i => i.label === preset.label)) {
       toast(`${preset.label} already added`, 'info'); return
     }
-    setLineItems(prev => [...prev, { label: preset.label, amount: '', discount: 0, revenue_account_code: preset.code }])
+    setLineItems(prev => [...prev, { label: preset.label, amount: '', discount: 0, revenue_account_code: preset.code, cost_amount: '', cost_account_code: preset.costCode }])
   }
 
   function addCustom() {
-    setLineItems(prev => [...prev, { label: '', amount: '', discount: 0, revenue_account_code: '4300' }])
+    setLineItems(prev => [...prev, { label: '', amount: '', discount: 0, revenue_account_code: '4300', cost_amount: '', cost_account_code: '6000' }])
   }
 
-  function updateItem(idx: number, field: 'label' | 'amount' | 'discount' | 'revenue_account_code', value: string | number) {
+  function updateItem(idx: number, field: 'label' | 'amount' | 'discount' | 'revenue_account_code' | 'cost_amount' | 'cost_account_code', value: string | number) {
     setLineItems(prev => prev.map((item, i) => i === idx ? { ...item, [field]: value } : item))
   }
 
@@ -328,6 +353,10 @@ export default function ReservationsPage() {
   const addOnsGross = lineItems.reduce((s, i) => s + Number(i.amount || 0), 0)
   const addOnsItemDiscount = lineItems.reduce((s, i) => s + Math.max(0, Number(i.discount || 0)), 0)
   const addOnsTotal = lineItems.reduce((s, i) => s + Math.max(0, Number(i.amount || 0) - Number(i.discount || 0)), 0)
+  const addOnsCost = lineItems.reduce((s, i) => s + (i.cost_amount !== '' && i.cost_amount != null ? Number(i.cost_amount) : 0), 0)
+  const addOnsMargin = addOnsTotal - addOnsCost
+  const addOnsMarginPct = addOnsTotal > 0 ? Math.round((addOnsMargin / addOnsTotal) * 100) : null
+  const totalActual = linkedPettyCash.reduce((s, p) => s + Number(p.amount), 0)
   const totalItemDiscounts = houseDiscountNum + addOnsItemDiscount
   const grossSubtotal = houseGross + addOnsGross
   const subtotal = houseBase + addOnsTotal
@@ -500,6 +529,8 @@ export default function ReservationsPage() {
             amount: Number(item.amount) || 0,
             discount: Math.max(0, Number(item.discount) || 0),
             revenue_account_code: item.revenue_account_code || '4300',
+            cost_amount: item.cost_amount !== '' && item.cost_amount != null ? Number(item.cost_amount) : null,
+            cost_account_code: item.cost_amount !== '' && item.cost_amount != null ? (item.cost_account_code || '6000') : null,
             sort_order: i,
           }))
         )
@@ -1212,9 +1243,11 @@ export default function ReservationsPage() {
               <div className="space-y-2 pt-1 border-t border-hborder">
                 <div className="flex items-center gap-2 px-1">
                   <span className="flex-1 text-[10px] font-semibold text-hmuted uppercase tracking-wide">Description</span>
-                  <span className="w-32 text-[10px] font-semibold text-hmuted uppercase tracking-wide">Revenue Type</span>
-                  <span className="w-28 text-[10px] font-semibold text-hmuted uppercase tracking-wide text-right">Amount ($)</span>
-                  <span className="w-24 text-[10px] font-semibold text-orange-500 uppercase tracking-wide text-right">Discount ($)</span>
+                  <span className="w-28 text-[10px] font-semibold text-hmuted uppercase tracking-wide">Revenue</span>
+                  <span className="w-24 text-[10px] font-semibold text-hmuted uppercase tracking-wide text-right">Price ($)</span>
+                  <span className="w-20 text-[10px] font-semibold text-orange-500 uppercase tracking-wide text-right">Disc. ($)</span>
+                  <span className="w-28 text-[10px] font-semibold text-emerald-600 uppercase tracking-wide">Cost Acct</span>
+                  <span className="w-20 text-[10px] font-semibold text-emerald-600 uppercase tracking-wide text-right">Cost ($)</span>
                   <span className="w-6" />
                 </div>
                 {lineItems.map((item, idx) => (
@@ -1228,30 +1261,49 @@ export default function ReservationsPage() {
                     <select
                       value={item.revenue_account_code || '4300'}
                       onChange={e => updateItem(idx, 'revenue_account_code', e.target.value)}
-                      className="w-32 border border-hborder rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-navy bg-hbg text-hmuted"
+                      className="w-28 border border-hborder rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-navy bg-hbg text-hmuted"
                     >
                       {REVENUE_CODES.map(r => (
                         <option key={r.code} value={r.code}>{r.label}</option>
                       ))}
                     </select>
-                    <div className="relative w-28 flex-shrink-0">
+                    <div className="relative w-24 flex-shrink-0">
                       <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-hmuted text-sm pointer-events-none">$</span>
                       <input
                         type="number" min={0} step={0.01}
                         value={item.amount}
                         onChange={e => updateItem(idx, 'amount', e.target.value)}
                         placeholder="0.00"
-                        className="w-full pl-6 pr-3 py-1.5 border border-hborder rounded-lg text-sm focus:outline-none focus:border-navy bg-hbg text-right"
+                        className="w-full pl-6 pr-2 py-1.5 border border-hborder rounded-lg text-sm focus:outline-none focus:border-navy bg-hbg text-right"
                       />
                     </div>
-                    <div className="relative w-24 flex-shrink-0">
-                      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-orange-400 text-sm pointer-events-none">−$</span>
+                    <div className="relative w-20 flex-shrink-0">
+                      <span className="absolute left-2 top-1/2 -translate-y-1/2 text-orange-400 text-xs pointer-events-none">−$</span>
                       <input
                         type="number" min={0} step={0.01}
                         value={item.discount || ''}
                         onChange={e => updateItem(idx, 'discount', e.target.value)}
                         placeholder="0"
-                        className="w-full pl-7 pr-2 py-1.5 border border-orange-200 rounded-lg text-sm focus:outline-none focus:border-orange-400 bg-orange-50 text-orange-700 text-right"
+                        className="w-full pl-6 pr-2 py-1.5 border border-orange-200 rounded-lg text-sm focus:outline-none focus:border-orange-400 bg-orange-50 text-orange-700 text-right"
+                      />
+                    </div>
+                    <select
+                      value={item.cost_account_code || '6000'}
+                      onChange={e => updateItem(idx, 'cost_account_code', e.target.value)}
+                      className="w-28 border border-emerald-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-emerald-400 bg-emerald-50 text-emerald-700"
+                    >
+                      {COST_CODES.map(c => (
+                        <option key={c.code} value={c.code}>{c.label}</option>
+                      ))}
+                    </select>
+                    <div className="relative w-20 flex-shrink-0">
+                      <span className="absolute left-2 top-1/2 -translate-y-1/2 text-emerald-500 text-xs pointer-events-none">$</span>
+                      <input
+                        type="number" min={0} step={0.01}
+                        value={item.cost_amount || ''}
+                        onChange={e => updateItem(idx, 'cost_amount', e.target.value)}
+                        placeholder="0.00"
+                        className="w-full pl-5 pr-2 py-1.5 border border-emerald-200 rounded-lg text-sm focus:outline-none focus:border-emerald-400 bg-emerald-50 text-emerald-700 text-right"
                       />
                     </div>
                     <button
@@ -1300,13 +1352,44 @@ export default function ReservationsPage() {
                 )}
                 {lineItems.filter(i => i.label.trim()).map((item, idx) => {
                   const net = Math.max(0, Number(item.amount || 0) - Number(item.discount || 0))
+                  const cost = item.cost_amount !== '' && item.cost_amount != null ? Number(item.cost_amount) : null
+                  const actualLinked = item.id
+                    ? linkedPettyCash.filter(p => p.reservation_line_item_id === item.id).reduce((s, p) => s + Number(p.amount), 0)
+                    : 0
+                  const hasActual = item.id ? linkedPettyCash.some(p => p.reservation_line_item_id === item.id) : false
+                  const effectiveCost = hasActual ? actualLinked : cost
+                  const margin = effectiveCost != null ? net - effectiveCost : null
                   return (
                     <div key={idx} className="flex justify-between text-sm">
                       <span className="text-hmuted">{item.label}</span>
-                      <span className="font-medium text-htext">{formatCurrency(net)}</span>
+                      <div className="flex items-center gap-3">
+                        {(cost != null || hasActual) && (
+                          <div className="flex flex-col items-end text-xs leading-tight">
+                            {cost != null && <span className="text-hmuted">est. {formatCurrency(cost)}</span>}
+                            {hasActual && <span className="text-emerald-600 font-medium">actual {formatCurrency(actualLinked)}</span>}
+                          </div>
+                        )}
+                        {margin != null && (
+                          <span className={`text-xs ${margin >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+                            {margin >= 0 ? '+' : ''}{formatCurrency(margin)}
+                          </span>
+                        )}
+                        <span className="font-medium text-htext">{formatCurrency(net)}</span>
+                      </div>
                     </div>
                   )
                 })}
+
+                {(addOnsCost > 0 || totalActual > 0) && (
+                  <div className="flex justify-between text-xs text-emerald-700 bg-emerald-50 rounded-lg px-3 py-1.5 border border-emerald-100">
+                    <span>Service Cost</span>
+                    <div className="flex items-center gap-3 font-medium">
+                      {addOnsCost > 0 && <span className="text-hmuted">est. −{formatCurrency(addOnsCost)}</span>}
+                      {totalActual > 0 && <span>actual −{formatCurrency(totalActual)}</span>}
+                      {addOnsMarginPct != null && <span>· {addOnsMarginPct}% est. margin</span>}
+                    </div>
+                  </div>
+                )}
 
                 {totalItemDiscounts > 0 ? (
                   <>

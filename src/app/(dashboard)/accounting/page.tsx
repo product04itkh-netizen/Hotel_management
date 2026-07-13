@@ -129,9 +129,11 @@ export default function AccountingPage() {
   const [pcForm, setPcForm] = useState({
     date: todayStr(), description: '', category: 'Miscellaneous', amount: '',
     type: 'out' as 'in' | 'out', reference: '', expense_account_id: '',
+    reservation_id: '', reservation_line_item_id: '',
   })
   const [pcSaving, setPcSaving] = useState(false)
   const [pcFilter, setPcFilter] = useState<'all' | 'in' | 'out'>('all')
+  const [pcReservations, setPcReservations] = useState<any[]>([])
 
   // Overview
   const [overview, setOverview] = useState({
@@ -219,7 +221,7 @@ export default function AccountingPage() {
       loadAccounts(); loadEntries(); loadPetty()
       loadAR(); loadBills(); loadVendors()
       loadPeriods(); loadRecurring()
-      loadPaymentMethods()
+      loadPaymentMethods(); loadPcReservations()
     }
   }, [activeBranch]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -256,9 +258,21 @@ export default function AccountingPage() {
   async function loadPetty() {
     if (!activeBranch) return
     const { data } = await supabase.from('petty_cash_transactions')
-      .select('*').eq('branch_id', activeBranch.id)
+      .select('*, reservation:reservations(reservation_number, guest:guests(full_name))')
+      .eq('branch_id', activeBranch.id)
       .order('transaction_date', { ascending: false })
     setPetty((data ?? []) as PettyCashTransaction[])
+  }
+
+  async function loadPcReservations() {
+    if (!activeBranch) return
+    const { data } = await supabase
+      .from('reservations')
+      .select('id, reservation_number, check_in_date, guest:guests(full_name), line_items:reservation_line_items(id, label)')
+      .eq('branch_id', activeBranch.id)
+      .order('check_in_date', { ascending: false })
+      .limit(120)
+    setPcReservations((data ?? []) as any[])
   }
 
   async function loadAR() {
@@ -751,15 +765,17 @@ export default function AccountingPage() {
       transaction_date: pcForm.date, description: pcForm.description, category: pcForm.category,
       amount: Number(pcForm.amount), transaction_type: pcForm.type,
       reference: pcForm.reference || null, journal_entry_id: jeId,
+      reservation_id: pcForm.reservation_id || null,
+      reservation_line_item_id: pcForm.reservation_line_item_id || null,
       branch_id: activeBranch?.id ?? null,
     })
-    if (error) { 
+    if (error) {
       if (jeId) await supabase.from('journal_entries').delete().eq('id', jeId)
-      toast(error.message, 'error'); setPcSaving(false); return 
+      toast(error.message, 'error'); setPcSaving(false); return
     }
     toast(`Petty cash ${pcForm.type} recorded`)
     setPcSaving(false); setPcFormOpen(false)
-    setPcForm({ date: todayStr(), description: '', category: 'Miscellaneous', amount: '', type: 'out', reference: '', expense_account_id: '' })
+    setPcForm({ date: todayStr(), description: '', category: 'Miscellaneous', amount: '', type: 'out', reference: '', expense_account_id: '', reservation_id: '', reservation_line_item_id: '' })
     loadPetty(); loadEntries()
   }
 
@@ -1106,6 +1122,7 @@ export default function AccountingPage() {
       'In': t.transaction_type === 'in' ? Number(t.amount) : 0,
       'Out': t.transaction_type === 'out' ? Number(t.amount) : 0,
       'Reference': t.reference ?? '',
+      'Reservation': (t as any).reservation?.reservation_number ?? '',
     })) }])
   }
 
@@ -2013,76 +2030,113 @@ export default function AccountingPage() {
         )}
 
         {/* ══ PETTY CASH ════════════════════════════════════════════ */}
-        {tab === 'petty' && (
+        {tab === 'petty' && (() => {
+          const pcTotalIn  = petty.filter(t => t.transaction_type === 'in').reduce((s, t) => s + Number(t.amount), 0)
+          const pcTotalOut = petty.filter(t => t.transaction_type === 'out').reduce((s, t) => s + Number(t.amount), 0)
+          const pcLinked   = petty.filter(t => (t as any).reservation).length
+          return (
           <div>
+            {/* ── Stats row ── */}
             <div className="grid grid-cols-4 gap-4 mb-5">
-              <div className="col-span-1 bg-white border border-hborder rounded-2xl p-5 shadow-card relative overflow-hidden">
+              <div className="bg-white border border-hborder rounded-2xl p-5 shadow-card relative overflow-hidden">
                 <div className="absolute top-0 left-0 w-1 h-full rounded-l-2xl bg-gold" />
-                <p className="text-xs text-hmuted uppercase tracking-wide pl-2">Petty Cash Balance</p>
+                <p className="text-[11px] text-hmuted uppercase tracking-wide font-semibold pl-2">Balance</p>
                 <p className={cn('font-serif text-3xl mt-1 pl-2', pettyCashBalance < 0 ? 'text-red-600' : 'text-dark-navy')}>
                   {formatCurrency(pettyCashBalance)}
                 </p>
                 <p className="text-[10px] text-hmuted pl-2 mt-1">1010 — Cash on Hand</p>
               </div>
-              <div className="bg-white border border-hborder rounded-2xl p-4 shadow-card">
-                <p className="text-xs text-hmuted uppercase tracking-wide">Total In</p>
-                <p className="font-serif text-xl text-green-700 mt-1">
-                  {formatCurrency(petty.filter(t => t.transaction_type === 'in').reduce((s, t) => s + Number(t.amount), 0))}
-                </p>
+              <div className="bg-white border border-hborder rounded-2xl p-5 shadow-card relative overflow-hidden">
+                <div className="absolute top-0 left-0 w-1 h-full rounded-l-2xl bg-green-400" />
+                <p className="text-[11px] text-hmuted uppercase tracking-wide font-semibold pl-2">Total In</p>
+                <p className="font-serif text-2xl text-green-700 mt-1 pl-2">+{formatCurrency(pcTotalIn)}</p>
+                <p className="text-[10px] text-hmuted pl-2 mt-1">Replenishments</p>
               </div>
-              <div className="bg-white border border-hborder rounded-2xl p-4 shadow-card">
-                <p className="text-xs text-hmuted uppercase tracking-wide">Total Out</p>
-                <p className="font-serif text-xl text-red-600 mt-1">
-                  {formatCurrency(petty.filter(t => t.transaction_type === 'out').reduce((s, t) => s + Number(t.amount), 0))}
-                </p>
+              <div className="bg-white border border-hborder rounded-2xl p-5 shadow-card relative overflow-hidden">
+                <div className="absolute top-0 left-0 w-1 h-full rounded-l-2xl bg-red-400" />
+                <p className="text-[11px] text-hmuted uppercase tracking-wide font-semibold pl-2">Total Out</p>
+                <p className="font-serif text-2xl text-red-600 mt-1 pl-2">-{formatCurrency(pcTotalOut)}</p>
+                <p className="text-[10px] text-hmuted pl-2 mt-1">Expenses</p>
               </div>
-              <div className="bg-white border border-hborder rounded-2xl p-4 shadow-card flex items-end justify-end">
-                <Button onClick={() => { setPcForm(f => ({ ...f, type: 'out' })); setPcFormOpen(true) }}>+ Record Transaction</Button>
+              <div className="bg-white border border-hborder rounded-2xl p-5 shadow-card relative overflow-hidden">
+                <div className="absolute top-0 left-0 w-1 h-full rounded-l-2xl bg-blue-400" />
+                <p className="text-[11px] text-hmuted uppercase tracking-wide font-semibold pl-2">Linked</p>
+                <p className="font-serif text-2xl text-dark-navy mt-1 pl-2">{pcLinked}</p>
+                <p className="text-[10px] text-hmuted pl-2 mt-1">of {petty.length} tagged to reservation</p>
               </div>
             </div>
+
+            {/* ── Toolbar ── */}
             <div className="flex items-center justify-between mb-4">
               <div className="flex gap-1 bg-hsurface2 rounded-xl p-1">
                 {(['all', 'in', 'out'] as const).map(f => (
                   <button key={f} onClick={() => setPcFilter(f)}
-                    className={cn('px-4 py-1.5 rounded-lg text-sm font-medium transition-colors capitalize',
+                    className={cn('px-4 py-1.5 rounded-lg text-sm font-medium transition-colors',
                       pcFilter === f ? 'bg-white text-dark-navy shadow-sm' : 'text-hmuted hover:text-htext'
                     )}
                   >{f === 'all' ? 'All' : f === 'in' ? 'Cash In' : 'Cash Out'}</button>
                 ))}
               </div>
-              <Button variant="ghost" onClick={exportPettyCash}>↓ Export</Button>
+              <div className="flex items-center gap-2">
+                <Button variant="ghost" onClick={exportPettyCash}>↓ Export</Button>
+                <Button onClick={() => { setPcForm(f => ({ ...f, type: 'out' })); setPcFormOpen(true) }}>+ Record Transaction</Button>
+              </div>
             </div>
+
+            {/* ── Table ── */}
             <div className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
               <table className="w-full text-sm">
-                <thead><tr className="bg-hsurface2">
-                  {['Date', 'Description', 'Category', 'Type', 'Amount', 'Reference'].map(h => (
-                    <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide">{h}</th>
-                  ))}
-                </tr></thead>
+                <thead>
+                  <tr className="bg-hsurface2 border-b border-hborder">
+                    {['Date', 'Description', 'Category', 'Type', 'Amount', 'Reference', 'Reservation'].map(h => (
+                      <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
                 <tbody>
                   {filteredPetty.length === 0 ? (
-                    <tr><td colSpan={6} className="px-5 py-10 text-center text-hmuted">No petty cash transactions yet</td></tr>
-                  ) : filteredPetty.map(t => (
-                    <tr key={t.id} className="border-t border-hborder hover:bg-hbg/40">
-                      <td className="px-4 py-3 text-xs text-hmuted whitespace-nowrap">{formatDate(t.transaction_date)}</td>
-                      <td className="px-4 py-3 text-htext">{t.description}</td>
-                      <td className="px-4 py-3 text-xs text-hmuted">{t.category}</td>
-                      <td className="px-4 py-3">
-                        <span className={cn('text-xs font-semibold px-2 py-0.5 rounded-full', t.transaction_type === 'in' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600')}>
-                          {t.transaction_type === 'in' ? '↑ In' : '↓ Out'}
-                        </span>
-                      </td>
-                      <td className={cn('px-4 py-3 font-semibold', t.transaction_type === 'in' ? 'text-green-700' : 'text-red-600')}>
-                        {t.transaction_type === 'out' ? '-' : '+'}{formatCurrency(t.amount)}
-                      </td>
-                      <td className="px-4 py-3 text-xs text-hmuted font-mono">{t.reference ?? '—'}</td>
-                    </tr>
-                  ))}
+                    <tr><td colSpan={7} className="px-5 py-12 text-center text-hmuted text-sm">No petty cash transactions yet</td></tr>
+                  ) : filteredPetty.map(t => {
+                    const isIn  = t.transaction_type === 'in'
+                    const res   = (t as any).reservation
+                    return (
+                      <tr key={t.id} className="border-t border-hborder hover:bg-hbg/50 transition-colors">
+                        <td className="px-4 py-3 text-xs text-hmuted whitespace-nowrap">{formatDate(t.transaction_date)}</td>
+                        <td className="px-4 py-3 text-htext font-medium">{t.description}</td>
+                        <td className="px-4 py-3">
+                          <span className="text-xs bg-hsurface2 text-hmuted px-2 py-0.5 rounded-full">{t.category}</span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className={cn('inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full',
+                            isIn ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'
+                          )}>
+                            {isIn ? '↑' : '↓'} {isIn ? 'In' : 'Out'}
+                          </span>
+                        </td>
+                        <td className={cn('px-4 py-3 font-semibold tabular-nums', isIn ? 'text-green-700' : 'text-red-600')}>
+                          {isIn ? '+' : '−'}{formatCurrency(t.amount)}
+                        </td>
+                        <td className="px-4 py-3 text-xs text-hmuted font-mono">{t.reference || '—'}</td>
+                        <td className="px-4 py-3 text-xs">
+                          {res ? (
+                            <div>
+                              <span className="text-blue-600 font-medium">{res.reservation_number}</span>
+                              {res.guest?.full_name && (
+                                <p className="text-hmuted mt-0.5">{res.guest.full_name}</p>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-hmuted">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
           </div>
-        )}
+        )})()}
       </div>
 
       {/* ── COA Modal ── */}
@@ -2564,6 +2618,39 @@ export default function AccountingPage() {
                 {expenseAccounts.map(a => <option key={a.id} value={a.id}>{a.code} — {a.name}</option>)}
               </select>
               <p className="text-[10px] text-hmuted mt-1">Creates DR Expense / CR 1010 Cash on Hand</p>
+            </div>
+          )}
+          {pcForm.type === 'out' && (
+            <div className="border-t border-hborder pt-3 space-y-2">
+              <p className="text-[10px] font-semibold text-hmuted uppercase tracking-wide">Link to Reservation (optional)</p>
+              <select
+                value={pcForm.reservation_id}
+                onChange={e => setPcForm(f => ({ ...f, reservation_id: e.target.value, reservation_line_item_id: '' }))}
+                className={input}
+              >
+                <option value="">— No reservation link —</option>
+                {pcReservations.map(r => (
+                  <option key={r.id} value={r.id}>
+                    {r.reservation_number} — {(r.guest as any)?.full_name ?? 'Guest'} ({r.check_in_date})
+                  </option>
+                ))}
+              </select>
+              {pcForm.reservation_id && (() => {
+                const res = pcReservations.find(r => r.id === pcForm.reservation_id)
+                const items = ((res?.line_items ?? []) as any[]).filter((i: any) => i.label)
+                return items.length > 0 ? (
+                  <select
+                    value={pcForm.reservation_line_item_id}
+                    onChange={e => setPcForm(f => ({ ...f, reservation_line_item_id: e.target.value }))}
+                    className={input}
+                  >
+                    <option value="">— Reservation-level (no specific add-on) —</option>
+                    {items.map((i: any) => (
+                      <option key={i.id} value={i.id}>{i.label}</option>
+                    ))}
+                  </select>
+                ) : null
+              })()}
             </div>
           )}
           <div className="flex justify-end gap-3 pt-1">

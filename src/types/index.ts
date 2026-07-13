@@ -178,6 +178,8 @@ export interface PettyCashTransaction {
   transaction_type: 'in' | 'out'
   reference?: string
   journal_entry_id?: string
+  reservation_id?: string | null
+  reservation_line_item_id?: string | null
   branch_id?: string
   created_at: string
 }
@@ -223,6 +225,8 @@ export interface ReservationLineItem {
   amount: number
   discount?: number
   revenue_account_code?: string
+  cost_amount?: number | null
+  cost_account_code?: string | null
   sort_order?: number
   created_at?: string
 }

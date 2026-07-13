@@ -77,7 +77,7 @@ export default function BillingPage() {
         .eq('branch_id', activeBranch.id)
         .order('created_at', { ascending: false }),
       supabase.from('reservations')
-        .select('*, guest:guests(full_name), house:houses(name, base_rate_per_night), line_items:reservation_line_items(id, label, amount, discount, revenue_account_code, sort_order)')
+        .select('*, guest:guests(full_name), house:houses(name, base_rate_per_night), line_items:reservation_line_items(id, label, amount, discount, revenue_account_code, cost_amount, cost_account_code, sort_order)')
         .eq('branch_id', activeBranch.id)
         .in('status', ['confirmed', 'checked_in', 'checked_out'])
         .order('created_at', { ascending: false }),
@@ -898,6 +898,21 @@ export default function BillingPage() {
                   <span className="font-medium">{formatCurrency(taxAmount)}</span>
                 </div>
               )}
+              {(() => {
+                const srcRes = reservations.find(r => r.id === form.reservation_id)
+                const lineItems: any[] = (srcRes as any)?.line_items ?? []
+                const totalCost = lineItems.reduce((s: number, i: any) => s + (i.cost_amount != null ? Number(i.cost_amount) : 0), 0)
+                const addOnRev = lineItems.reduce((s: number, i: any) => s + Math.max(0, Number(i.amount) - Number(i.discount ?? 0)), 0)
+                if (totalCost === 0) return null
+                const margin = addOnRev - totalCost
+                const pct = addOnRev > 0 ? Math.round((margin / addOnRev) * 100) : 0
+                return (
+                  <div className="flex justify-between text-xs bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2 text-emerald-700">
+                    <span>Service Cost (est.) · Add-on Margin</span>
+                    <span className="font-semibold">−{formatCurrency(totalCost)} · {formatCurrency(margin)} ({pct}%)</span>
+                  </div>
+                )
+              })()}
               <div className="flex justify-between font-bold text-dark-navy border-t border-hborder pt-2 text-[15px]">
                 <span>Total Due</span>
                 <span>{formatCurrency(total)}</span>
