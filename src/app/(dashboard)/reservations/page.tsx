@@ -1240,81 +1240,75 @@ export default function ReservationsPage() {
 
             {/* Line items list */}
             {lineItems.length > 0 && (
-              <div className="space-y-2 pt-1 border-t border-hborder">
-                <div className="flex items-center gap-2 px-1">
-                  <span className="flex-1 text-[10px] font-semibold text-hmuted uppercase tracking-wide">Description</span>
-                  <span className="w-28 text-[10px] font-semibold text-hmuted uppercase tracking-wide">Revenue</span>
-                  <span className="w-24 text-[10px] font-semibold text-hmuted uppercase tracking-wide text-right">Price ($)</span>
-                  <span className="w-20 text-[10px] font-semibold text-orange-500 uppercase tracking-wide text-right">Disc. ($)</span>
-                  <span className="w-28 text-[10px] font-semibold text-emerald-600 uppercase tracking-wide">Cost Acct</span>
-                  <span className="w-20 text-[10px] font-semibold text-emerald-600 uppercase tracking-wide text-right">Cost ($)</span>
-                  <span className="w-6" />
-                </div>
+              <div className="space-y-2 pt-2 border-t border-hborder">
                 {lineItems.map((item, idx) => (
-                  <div key={idx} className="flex items-center gap-2">
-                    <input
-                      value={item.label}
-                      onChange={e => updateItem(idx, 'label', e.target.value)}
-                      placeholder="Service description…"
-                      className="flex-1 border border-hborder rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-navy bg-hbg"
-                    />
-                    <select
-                      value={item.revenue_account_code || '4300'}
-                      onChange={e => updateItem(idx, 'revenue_account_code', e.target.value)}
-                      className="w-28 border border-hborder rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-navy bg-hbg text-hmuted"
-                    >
-                      {REVENUE_CODES.map(r => (
-                        <option key={r.code} value={r.code}>{r.label}</option>
-                      ))}
-                    </select>
-                    <div className="relative w-24 flex-shrink-0">
-                      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-hmuted text-sm pointer-events-none">$</span>
+                  <div key={idx} className="rounded-xl border border-hborder bg-white overflow-hidden">
+                    {/* Row 1: description + price + delete */}
+                    <div className="flex items-center gap-2 px-3 pt-2.5 pb-1.5">
                       <input
-                        type="number" min={0} step={0.01}
-                        value={item.amount}
-                        onChange={e => updateItem(idx, 'amount', e.target.value)}
-                        placeholder="0.00"
-                        className="w-full pl-6 pr-2 py-1.5 border border-hborder rounded-lg text-sm focus:outline-none focus:border-navy bg-hbg text-right"
+                        value={item.label}
+                        onChange={e => updateItem(idx, 'label', e.target.value)}
+                        placeholder="Service description…"
+                        className="flex-1 bg-hsurface2 border border-transparent rounded-lg px-3 py-1.5 text-sm font-medium focus:outline-none focus:border-navy focus:bg-white transition-colors"
                       />
+                      <div className="relative flex-shrink-0 w-28">
+                        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-hmuted text-sm pointer-events-none select-none">$</span>
+                        <input
+                          type="number" min={0} step={0.01}
+                          value={item.amount}
+                          onChange={e => updateItem(idx, 'amount', e.target.value)}
+                          placeholder="0.00"
+                          className="w-full pl-6 pr-2 py-1.5 border border-hborder rounded-lg text-sm focus:outline-none focus:border-navy bg-hsurface2 focus:bg-white text-right transition-colors"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeItem(idx)}
+                        className="w-6 h-6 flex-shrink-0 flex items-center justify-center text-hmuted hover:text-red-500 transition-colors rounded"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
                     </div>
-                    <div className="relative w-20 flex-shrink-0">
-                      <span className="absolute left-2 top-1/2 -translate-y-1/2 text-orange-400 text-xs pointer-events-none">−$</span>
-                      <input
-                        type="number" min={0} step={0.01}
-                        value={item.discount || ''}
-                        onChange={e => updateItem(idx, 'discount', e.target.value)}
-                        placeholder="0"
-                        className="w-full pl-6 pr-2 py-1.5 border border-orange-200 rounded-lg text-sm focus:outline-none focus:border-orange-400 bg-orange-50 text-orange-700 text-right"
-                      />
+                    {/* Row 2: revenue acct · discount · cost acct · est. cost (spacer aligns with delete btn) */}
+                    <div className="flex items-center gap-2 px-3 pb-2.5">
+                      <select
+                        value={item.revenue_account_code || '4300'}
+                        onChange={e => updateItem(idx, 'revenue_account_code', e.target.value)}
+                        className="flex-1 border border-hborder rounded-lg px-2.5 py-1 text-xs text-hmuted focus:outline-none focus:border-navy bg-hsurface2 cursor-pointer"
+                      >
+                        {REVENUE_CODES.map(r => <option key={r.code} value={r.code}>{r.label}</option>)}
+                      </select>
+                      <div className="relative flex-shrink-0 w-20">
+                        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-orange-400 text-xs pointer-events-none select-none">-$</span>
+                        <input
+                          type="number" min={0} step={0.01}
+                          value={item.discount || ''}
+                          onChange={e => updateItem(idx, 'discount', e.target.value)}
+                          placeholder="0"
+                          className="w-full pl-6 pr-2 py-1 border border-orange-200 rounded-lg text-xs focus:outline-none focus:border-orange-400 bg-orange-50 text-orange-700 text-right"
+                        />
+                      </div>
+                      <select
+                        value={item.cost_account_code || '6000'}
+                        onChange={e => updateItem(idx, 'cost_account_code', e.target.value)}
+                        className="flex-1 border border-emerald-200 rounded-lg px-2.5 py-1 text-xs text-emerald-700 focus:outline-none focus:border-emerald-400 bg-emerald-50 cursor-pointer"
+                      >
+                        {COST_CODES.map(c => <option key={c.code} value={c.code}>{c.label}</option>)}
+                      </select>
+                      <div className="relative flex-shrink-0 w-20">
+                        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-emerald-500 text-xs pointer-events-none select-none">$</span>
+                        <input
+                          type="number" min={0} step={0.01}
+                          value={item.cost_amount || ''}
+                          onChange={e => updateItem(idx, 'cost_amount', e.target.value)}
+                          placeholder="0.00"
+                          className="w-full pl-5 pr-2 py-1 border border-emerald-200 rounded-lg text-xs focus:outline-none focus:border-emerald-400 bg-emerald-50 text-emerald-700 text-right"
+                        />
+                      </div>
+                      <div className="w-6 flex-shrink-0" />
                     </div>
-                    <select
-                      value={item.cost_account_code || '6000'}
-                      onChange={e => updateItem(idx, 'cost_account_code', e.target.value)}
-                      className="w-28 border border-emerald-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-emerald-400 bg-emerald-50 text-emerald-700"
-                    >
-                      {COST_CODES.map(c => (
-                        <option key={c.code} value={c.code}>{c.label}</option>
-                      ))}
-                    </select>
-                    <div className="relative w-20 flex-shrink-0">
-                      <span className="absolute left-2 top-1/2 -translate-y-1/2 text-emerald-500 text-xs pointer-events-none">$</span>
-                      <input
-                        type="number" min={0} step={0.01}
-                        value={item.cost_amount || ''}
-                        onChange={e => updateItem(idx, 'cost_amount', e.target.value)}
-                        placeholder="0.00"
-                        className="w-full pl-5 pr-2 py-1.5 border border-emerald-200 rounded-lg text-sm focus:outline-none focus:border-emerald-400 bg-emerald-50 text-emerald-700 text-right"
-                      />
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => removeItem(idx)}
-                      className="w-6 h-6 flex items-center justify-center text-hmuted hover:text-red-500 transition-colors rounded flex-shrink-0"
-                    >
-                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    </button>
                   </div>
                 ))}
               </div>
@@ -1359,34 +1353,38 @@ export default function ReservationsPage() {
                   const hasActual = item.id ? linkedPettyCash.some(p => p.reservation_line_item_id === item.id) : false
                   const effectiveCost = hasActual ? actualLinked : cost
                   const margin = effectiveCost != null ? net - effectiveCost : null
+                  const hasCostInfo = cost != null || hasActual
                   return (
-                    <div key={idx} className="flex justify-between text-sm">
-                      <span className="text-hmuted">{item.label}</span>
-                      <div className="flex items-center gap-3">
-                        {(cost != null || hasActual) && (
-                          <div className="flex flex-col items-end text-xs leading-tight">
-                            {cost != null && <span className="text-hmuted">est. {formatCurrency(cost)}</span>}
-                            {hasActual && <span className="text-emerald-600 font-medium">actual {formatCurrency(actualLinked)}</span>}
-                          </div>
-                        )}
-                        {margin != null && (
-                          <span className={`text-xs ${margin >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
-                            {margin >= 0 ? '+' : ''}{formatCurrency(margin)}
-                          </span>
-                        )}
-                        <span className="font-medium text-htext">{formatCurrency(net)}</span>
+                    <div key={idx} className="py-0.5">
+                      <div className="flex justify-between items-baseline text-sm">
+                        <span className="text-hmuted">{item.label}</span>
+                        <div className="flex items-baseline gap-3">
+                          {margin != null && (
+                            <span className={`text-xs ${margin >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+                              {margin >= 0 ? '+' : ''}{formatCurrency(margin)}
+                            </span>
+                          )}
+                          <span className="font-medium text-htext w-20 text-right">{formatCurrency(net)}</span>
+                        </div>
                       </div>
+                      {hasCostInfo && (
+                        <div className="flex justify-end items-center gap-2 text-xs mt-0.5">
+                          {cost != null && <span className="text-hmuted">est. {formatCurrency(cost)}</span>}
+                          {hasActual && cost != null && <span className="text-hmuted">·</span>}
+                          {hasActual && <span className="text-emerald-600 font-medium">actual {formatCurrency(actualLinked)}</span>}
+                        </div>
+                      )}
                     </div>
                   )
                 })}
 
                 {(addOnsCost > 0 || totalActual > 0) && (
-                  <div className="flex justify-between text-xs text-emerald-700 bg-emerald-50 rounded-lg px-3 py-1.5 border border-emerald-100">
-                    <span>Service Cost</span>
-                    <div className="flex items-center gap-3 font-medium">
+                  <div className="flex justify-between items-center text-xs bg-emerald-50 rounded-lg px-3 py-2 border border-emerald-100 mt-1">
+                    <span className="text-emerald-700 font-medium">Service Cost</span>
+                    <div className="flex items-center gap-4">
                       {addOnsCost > 0 && <span className="text-hmuted">est. −{formatCurrency(addOnsCost)}</span>}
-                      {totalActual > 0 && <span>actual −{formatCurrency(totalActual)}</span>}
-                      {addOnsMarginPct != null && <span>· {addOnsMarginPct}% est. margin</span>}
+                      {totalActual > 0 && <span className="text-emerald-700 font-semibold">actual −{formatCurrency(totalActual)}</span>}
+                      {addOnsMarginPct != null && <span className="text-emerald-600">· {addOnsMarginPct}% margin</span>}
                     </div>
                   </div>
                 )}
