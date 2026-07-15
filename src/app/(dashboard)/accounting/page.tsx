@@ -134,6 +134,8 @@ export default function AccountingPage() {
   const [pcSaving, setPcSaving] = useState(false)
   const [pcFilter, setPcFilter] = useState<'all' | 'in' | 'out'>('all')
   const [pcReservations, setPcReservations] = useState<any[]>([])
+  const [pcEditId, setPcEditId] = useState<string | null>(null)
+  const [pcEditJeId, setPcEditJeId] = useState<string | null>(null)
 
   // Overview
   const [overview, setOverview] = useState({
@@ -239,7 +241,7 @@ export default function AccountingPage() {
       .select('*').eq('branch_id', activeBranch.id).order('code')
     const accts = (data ?? []) as ChartOfAccount[]
     setAccounts(accts)
-    const requiredCodes = ['1010', '1020', '2100', '5800']
+    const requiredCodes = ['1010', '1011', '1020', '2100', '5800']
     const missing = requiredCodes.filter(c => !accts.find(a => a.code === c && a.is_active))
     if (missing.length) {
       toast(`Missing required COA accounts: ${missing.join(', ')} — auto journal entries will be skipped until added`, 'error')
@@ -273,6 +275,42 @@ export default function AccountingPage() {
       .order('check_in_date', { ascending: false })
       .limit(120)
     setPcReservations((data ?? []) as any[])
+  }
+
+  function openEditPc(t: PettyCashTransaction) {
+    setPcEditId(t.id)
+    setPcEditJeId(t.journal_entry_id ?? null)
+    setPcForm({
+      date: t.transaction_date,
+      description: t.description,
+      category: t.category,
+      amount: String(t.amount),
+      type: t.transaction_type,
+      reference: t.reference ?? '',
+      expense_account_id: '',
+      reservation_id: t.reservation_id ?? '',
+      reservation_line_item_id: t.reservation_line_item_id ?? '',
+    })
+    setPcFormOpen(true)
+  }
+
+  function deletePettyCash(t: PettyCashTransaction) {
+    setConfirmDialog({
+      title: 'Delete Transaction',
+      message: `Delete "${t.description}" (${formatCurrency(t.amount)})?${t.journal_entry_id ? ' The associated journal entry will also be removed.' : ''}`,
+      confirmLabel: 'Delete',
+      variant: 'danger',
+      onConfirm: async () => {
+        const { error } = await supabase.from('petty_cash_transactions').delete().eq('id', t.id)
+        if (error) { toast(error.message, 'error'); return }
+        if (t.journal_entry_id) {
+          await supabase.from('journal_entry_lines').delete().eq('entry_id', t.journal_entry_id)
+          await supabase.from('journal_entries').delete().eq('id', t.journal_entry_id)
+        }
+        toast('Transaction deleted')
+        loadPetty(); loadEntries()
+      },
+    })
   }
 
   async function loadAR() {
@@ -721,9 +759,39 @@ export default function AccountingPage() {
   async function savePettyCash() {
     if (!pcForm.description || Number(pcForm.amount) <= 0) { toast('Description and amount required', 'error'); return }
     setPcSaving(true)
+
+    // ── Edit existing ──────────────────────────────────────────────
+    if (pcEditId) {
+      const { error } = await supabase.from('petty_cash_transactions').update({
+        transaction_date: pcForm.date, description: pcForm.description, category: pcForm.category,
+        amount: Number(pcForm.amount), transaction_type: pcForm.type,
+        reference: pcForm.reference || null,
+        reservation_id: pcForm.reservation_id || null,
+        reservation_line_item_id: pcForm.reservation_line_item_id || null,
+      }).eq('id', pcEditId)
+      if (error) { toast(error.message, 'error'); setPcSaving(false); return }
+      if (pcEditJeId) {
+        await supabase.from('journal_entries').update({
+          entry_date: pcForm.date,
+          description: `Petty cash ${pcForm.type} — ${pcForm.description}`,
+        }).eq('id', pcEditJeId)
+        const { data: lines } = await supabase.from('journal_entry_lines').select('id, debit, credit').eq('entry_id', pcEditJeId)
+        for (const line of lines ?? []) {
+          if (line.debit > 0) await supabase.from('journal_entry_lines').update({ debit: Number(pcForm.amount), description: pcForm.description }).eq('id', line.id)
+          else await supabase.from('journal_entry_lines').update({ credit: Number(pcForm.amount), description: pcForm.description }).eq('id', line.id)
+        }
+      }
+      toast('Transaction updated')
+      setPcSaving(false); setPcFormOpen(false); setPcEditId(null); setPcEditJeId(null)
+      setPcForm({ date: todayStr(), description: '', category: 'Miscellaneous', amount: '', type: 'out', reference: '', expense_account_id: '', reservation_id: '', reservation_line_item_id: '' })
+      loadPetty(); loadEntries()
+      return
+    }
+
+    // ── Insert new ─────────────────────────────────────────────────
     let jeId: string | null = null
     try {
-      const cashOnHandAcct = accounts.find(a => a.code === '1010')
+      const cashOnHandAcct = accounts.find(a => a.code === '1011') ?? accounts.find(a => a.code === '1010')
       const cashAtBankAcct = accounts.find(a => a.code === '1020')
       const expenseAcct    = pcForm.expense_account_id
         ? accounts.find(a => a.id === pcForm.expense_account_id)
@@ -1153,7 +1221,7 @@ export default function AccountingPage() {
               {[
                 { label: 'AR Outstanding',    value: formatCurrency(overview.arOutstanding),  color: '#004AAD', sub: 'Unpaid customer invoices' },
                 { label: 'AP Outstanding',    value: formatCurrency(overview.apOutstanding),  color: '#B83232', sub: 'Unpaid supplier bills' },
-                { label: 'Petty Cash',        value: formatCurrency(pettyCashBalance),         color: '#C89B3C', sub: '1010 — Cash on Hand' },
+                { label: 'Petty Cash',        value: formatCurrency(pettyCashBalance),         color: '#C89B3C', sub: (() => { const a = accounts.find(x => x.code === '1011') ?? accounts.find(x => x.code === '1010'); return a ? `${a.code} — ${a.name}` : '1011 — Petty Cash' })() },
               ].map(s => (
                 <div key={s.label} className="bg-white border border-hborder rounded-2xl p-4 shadow-card relative overflow-hidden">
                   <div className="absolute top-0 left-0 w-1 h-full rounded-l-2xl" style={{ background: s.color }} />
@@ -2044,7 +2112,7 @@ export default function AccountingPage() {
                 <p className={cn('font-serif text-3xl mt-1 pl-2', pettyCashBalance < 0 ? 'text-red-600' : 'text-dark-navy')}>
                   {formatCurrency(pettyCashBalance)}
                 </p>
-                <p className="text-[10px] text-hmuted pl-2 mt-1">1010 — Cash on Hand</p>
+                <p className="text-[10px] text-hmuted pl-2 mt-1">{(() => { const a = accounts.find(x => x.code === '1011') ?? accounts.find(x => x.code === '1010'); return a ? `${a.code} — ${a.name}` : '1011 — Petty Cash' })()}</p>
               </div>
               <div className="bg-white border border-hborder rounded-2xl p-5 shadow-card relative overflow-hidden">
                 <div className="absolute top-0 left-0 w-1 h-full rounded-l-2xl bg-green-400" />
@@ -2088,14 +2156,14 @@ export default function AccountingPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-hsurface2 border-b border-hborder">
-                    {['Date', 'Description', 'Category', 'Type', 'Amount', 'Reference', 'Reservation'].map(h => (
+                    {['Date', 'Description', 'Category', 'Type', 'Amount', 'Reference', 'Reservation', ''].map(h => (
                       <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide">{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {filteredPetty.length === 0 ? (
-                    <tr><td colSpan={7} className="px-5 py-12 text-center text-hmuted text-sm">No petty cash transactions yet</td></tr>
+                    <tr><td colSpan={8} className="px-5 py-12 text-center text-hmuted text-sm">No petty cash transactions yet</td></tr>
                   ) : filteredPetty.map(t => {
                     const isIn  = t.transaction_type === 'in'
                     const res   = (t as any).reservation
@@ -2128,6 +2196,26 @@ export default function AccountingPage() {
                           ) : (
                             <span className="text-hmuted">—</span>
                           )}
+                        </td>
+                        <td className="px-3 py-3">
+                          <div className="flex items-center gap-1">
+                            <button onClick={() => openEditPc(t)}
+                              className="p-1.5 rounded-lg text-hmuted hover:text-navy hover:bg-hsurface2 transition-colors"
+                              title="Edit"
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                              </svg>
+                            </button>
+                            <button onClick={() => deletePettyCash(t)}
+                              className="p-1.5 rounded-lg text-hmuted hover:text-red-500 hover:bg-red-50 transition-colors"
+                              title="Delete"
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                              </svg>
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     )
@@ -2575,7 +2663,7 @@ export default function AccountingPage() {
       </Modal>
 
       {/* ── Petty Cash Modal ── */}
-      <Modal open={pcFormOpen} onClose={() => setPcFormOpen(false)} title="Record Petty Cash" size="sm">
+      <Modal open={pcFormOpen} onClose={() => { setPcFormOpen(false); setPcEditId(null); setPcEditJeId(null) }} title={pcEditId ? 'Edit Transaction' : 'Record Petty Cash'} size="sm">
         <div className="space-y-3">
           <div className="flex gap-1 bg-hsurface2 rounded-xl p-1">
             {(['out', 'in'] as const).map(t => (
@@ -2614,10 +2702,10 @@ export default function AccountingPage() {
             <div>
               <label className="block text-xs text-hmuted mb-1">Post to GL Account (optional)</label>
               <select value={pcForm.expense_account_id} onChange={e => setPcForm(f => ({ ...f, expense_account_id: e.target.value }))} className={input}>
-                <option value="">Auto (5800 Miscellaneous)</option>
+                <option value="">{(() => { const a = accounts.find(x => x.code === '5800'); return a ? `Auto (${a.code} ${a.name})` : 'Auto (default expense account)' })()}</option>
                 {expenseAccounts.map(a => <option key={a.id} value={a.id}>{a.code} — {a.name}</option>)}
               </select>
-              <p className="text-[10px] text-hmuted mt-1">Creates DR Expense / CR 1010 Cash on Hand</p>
+              <p className="text-[10px] text-hmuted mt-1">Creates DR Expense / CR {(() => { const a = accounts.find(x => x.code === '1011') ?? accounts.find(x => x.code === '1010'); return a ? `${a.code} ${a.name}` : '1011 Petty Cash' })()}</p>
             </div>
           )}
           {pcForm.type === 'out' && (
@@ -2654,8 +2742,8 @@ export default function AccountingPage() {
             </div>
           )}
           <div className="flex justify-end gap-3 pt-1">
-            <Button variant="ghost" onClick={() => setPcFormOpen(false)}>Cancel</Button>
-            <Button onClick={savePettyCash} disabled={pcSaving}>{pcSaving ? 'Saving…' : 'Record Transaction'}</Button>
+            <Button variant="ghost" onClick={() => { setPcFormOpen(false); setPcEditId(null); setPcEditJeId(null) }}>Cancel</Button>
+            <Button onClick={savePettyCash} disabled={pcSaving}>{pcSaving ? 'Saving…' : pcEditId ? 'Save Changes' : 'Record Transaction'}</Button>
           </div>
         </div>
       </Modal>

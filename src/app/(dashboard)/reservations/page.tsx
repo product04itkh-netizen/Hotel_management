@@ -37,21 +37,6 @@ const PRESET_ADDONS = [
   { label: 'Bike Rental',      icon: '🚲', code: '4200', costCode: '5400' },
 ]
 
-const REVENUE_CODES = [
-  { code: '4000', label: '4000 House Rental' },
-  { code: '4100', label: '4100 Food & Beverage' },
-  { code: '4200', label: '4200 Activity & Rental' },
-  { code: '4300', label: '4300 Other Revenue' },
-]
-
-const COST_CODES = [
-  { code: '5300', label: '5300 Food & Grocery' },
-  { code: '5400', label: '5400 Repairs & Maint.' },
-  { code: '5500', label: '5500 Petroleum' },
-  { code: '5600', label: '5600 Gas & Charcoal' },
-  { code: '5800', label: '5800 Delivery' },
-  { code: '6000', label: '6000 Other Expense' },
-]
 
 interface LineItemForm {
   id?: string
@@ -102,6 +87,8 @@ export default function ReservationsPage() {
   const [notifyingId, setNotifyingId] = useState<string | null>(null)
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([])
   const [linkedPettyCash, setLinkedPettyCash] = useState<any[]>([])
+  const [revenueAccounts, setRevenueAccounts] = useState<{code: string, name: string}[]>([])
+  const [costAccounts, setCostAccounts] = useState<{code: string, name: string}[]>([])
 
   useEffect(() => {
     if (activeBranch) { loadData(); loadPaymentMethods() }
@@ -148,7 +135,7 @@ export default function ReservationsPage() {
 
   async function loadData() {
     if (!activeBranch) return
-    const [resRes, houseRes] = await Promise.all([
+    const [resRes, houseRes, revAcctRes, costAcctRes] = await Promise.all([
       supabase.from('reservations')
         .select('*, guest:guests(full_name, email, phone), house:houses(name, house_type, base_rate_per_night), line_items:reservation_line_items(id, label, amount, discount, revenue_account_code, cost_amount, cost_account_code, sort_order), deposit_receipts(id, receipt_number, amount, payment_method, receipt_date, status)')
         .eq('branch_id', activeBranch.id)
@@ -157,9 +144,13 @@ export default function ReservationsPage() {
         .select('*')
         .eq('branch_id', activeBranch.id)
         .order('name'),
+      supabase.from('chart_of_accounts').select('code, name').eq('branch_id', activeBranch.id).eq('is_active', true).eq('type', 'revenue').order('code'),
+      supabase.from('chart_of_accounts').select('code, name').eq('branch_id', activeBranch.id).eq('is_active', true).eq('type', 'expense').order('code'),
     ])
     setReservations((resRes.data ?? []) as unknown as Reservation[])
     setHouses((houseRes.data ?? []) as unknown as House[])
+    setRevenueAccounts((revAcctRes.data ?? []) as {code: string, name: string}[])
+    setCostAccounts((costAcctRes.data ?? []) as {code: string, name: string}[])
     setLoading(false)
   }
 
@@ -1278,7 +1269,7 @@ export default function ReservationsPage() {
                         onChange={e => updateItem(idx, 'revenue_account_code', e.target.value)}
                         className="flex-1 border border-hborder rounded-lg px-2.5 py-1 text-xs text-hmuted focus:outline-none focus:border-navy bg-hsurface2 cursor-pointer"
                       >
-                        {REVENUE_CODES.map(r => <option key={r.code} value={r.code}>{r.label}</option>)}
+                        {revenueAccounts.map(r => <option key={r.code} value={r.code}>{r.code} {r.name}</option>)}
                       </select>
                       <div className="relative flex-shrink-0 w-20">
                         <span className="absolute left-2 top-1/2 -translate-y-1/2 text-orange-400 text-xs pointer-events-none select-none">-$</span>
@@ -1295,7 +1286,7 @@ export default function ReservationsPage() {
                         onChange={e => updateItem(idx, 'cost_account_code', e.target.value)}
                         className="flex-1 border border-emerald-200 rounded-lg px-2.5 py-1 text-xs text-emerald-700 focus:outline-none focus:border-emerald-400 bg-emerald-50 cursor-pointer"
                       >
-                        {COST_CODES.map(c => <option key={c.code} value={c.code}>{c.label}</option>)}
+                        {costAccounts.map(c => <option key={c.code} value={c.code}>{c.code} {c.name}</option>)}
                       </select>
                       <div className="relative flex-shrink-0 w-20">
                         <span className="absolute left-2 top-1/2 -translate-y-1/2 text-emerald-500 text-xs pointer-events-none select-none">$</span>

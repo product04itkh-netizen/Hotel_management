@@ -984,7 +984,7 @@ export default function BillingPage() {
                 ))}
               </select>
               <p className="text-[10px] text-hmuted mt-1">
-                Posts to: {(() => { const pm = paymentMethods.find(m => m.value === payForm.payment_method); const code = (pm as any)?.account_code || (pm?.is_cash ? '1010' : '1020'); return code === '1010' ? '1010 Cash on Hand' : `${code} Bank` })()}
+                Posts to: {(() => { const pm = paymentMethods.find(m => m.value === payForm.payment_method); const code = (pm as any)?.account_code || (pm?.is_cash ? '1010' : '1020'); return `${code} ${pm?.is_cash ? 'Cash on Hand' : 'Bank'}` })()}
               </p>
             </div>
             <div>
@@ -1085,7 +1085,7 @@ export default function BillingPage() {
               <div style={{ background: '#1a1a2e', borderRadius: '12px 12px 0 0', padding: '24px 32px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src="/logo.jpg" alt="OnlyOne Homestay" style={{ height: 64, width: 64, objectFit: 'contain', borderRadius: 8, background: 'white', padding: 4 }} />
+                  <img src="/logo.jpg" alt={settings?.hotel_name ?? 'OnlyOne Homestay'} style={{ height: 64, width: 64, objectFit: 'contain', borderRadius: 8, background: 'white', padding: 4 }} />
                   <div>
                     <div style={{ color: '#c89b3c', fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 2 }}>{activeBranch?.location ?? ''}</div>
                     {hotelPhone && <div style={{ color: '#a0aec0', fontSize: 12, marginTop: 3 }}>{hotelPhone}</div>}
