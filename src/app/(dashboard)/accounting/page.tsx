@@ -113,14 +113,17 @@ export default function AccountingPage() {
   const [jeForm, setJeForm] = useState({ date: '', description: '', reference: '', reference_type: 'manual' })
   const [jeLines, setJeLines] = useState([emptyJeLine(), emptyJeLine()])
   const [jeSaving, setJeSaving] = useState(false)
-  const [expandedEntryId, setExpandedEntryId] = useState<string | null>(null)
+  const [expandedEntries, setExpandedEntries] = useState<Set<string>>(new Set())
   const [entryLines, setEntryLines] = useState<Record<string, any[]>>({})
+  const [jeFrom, setJeFrom] = useState('')
+  const [jeTo, setJeTo] = useState('')
+  const [jeSearch, setJeSearch] = useState('')
 
   // General Ledger
-  const [ledgerAccountId, setLedgerAccountId] = useState('')
+  const [ledgerAccountFilter, setLedgerAccountFilter] = useState('')
   const [ledgerFrom, setLedgerFrom] = useState('')
-  const [ledgerTo, setLedgerTo] = useState('')
-  const [ledgerRows, setLedgerRows] = useState<any[]>([])
+  const [ledgerTo, setLedgerTo] = useState(todayStr())
+  const [ledgerGroups, setLedgerGroups] = useState<{ account: any, rows: any[] }[]>([])
   const [ledgerLoading, setLedgerLoading] = useState(false)
 
   // Petty Cash
@@ -227,6 +230,10 @@ export default function AccountingPage() {
     }
   }, [activeBranch]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => {
+    if (tab === 'ledger' && activeBranch) loadLedger()
+  }, [tab, activeBranch]) // eslint-disable-line react-hooks/exhaustive-deps
+
   async function loadPaymentMethods() {
     if (!activeBranch) return
     const { data } = await supabase.from('payment_methods').select('name, value, is_cash').eq('branch_id', activeBranch.id).eq('is_active', true).order('sort_order')
@@ -253,8 +260,22 @@ export default function AccountingPage() {
     const { data } = await supabase.from('journal_entries')
       .select('*').eq('branch_id', activeBranch.id)
       .order('entry_date', { ascending: false }).limit(100)
-    setEntries((data ?? []) as JournalEntry[])
+    const fetched = (data ?? []) as JournalEntry[]
+    setEntries(fetched)
     computeOverview(data ?? [])
+    if (fetched.length > 0) {
+      const ids = fetched.map(e => e.id)
+      const { data: linesData } = await supabase.from('journal_entry_lines')
+        .select('*, account:chart_of_accounts(code, name, type)')
+        .in('entry_id', ids).order('debit', { ascending: false })
+      const byEntry: Record<string, any[]> = {}
+      for (const line of (linesData ?? [])) {
+        if (!byEntry[line.entry_id]) byEntry[line.entry_id] = []
+        byEntry[line.entry_id].push(line)
+      }
+      setEntryLines(byEntry)
+      setExpandedEntries(new Set(ids))
+    }
   }
 
   async function loadPetty() {
@@ -347,33 +368,45 @@ export default function AccountingPage() {
   }
 
   async function loadLedger() {
-    if (!ledgerAccountId || !activeBranch) return
+    if (!activeBranch) return
     setLedgerLoading(true)
-    // Step 1: get entry IDs filtered by date — PostgREST cannot filter on nested FK columns
+    // Step 1: get posted entry IDs in date range
     let jeQ = supabase.from('journal_entries')
       .select('id').eq('branch_id', activeBranch.id).eq('status', 'posted')
     if (ledgerFrom) jeQ = jeQ.gte('entry_date', ledgerFrom)
     if (ledgerTo)   jeQ = jeQ.lte('entry_date', ledgerTo)
     const { data: jeData } = await jeQ
     const ids = (jeData ?? []).map((e: any) => e.id)
-    if (ids.length === 0) { setLedgerRows([]); setLedgerLoading(false); return }
-    // Step 2: get lines for those entries on the selected account
-    const { data } = await supabase.from('journal_entry_lines')
-      .select('*, entry:journal_entries(entry_number, entry_date, description, reference)')
-      .eq('account_id', ledgerAccountId)
+    if (ids.length === 0) { setLedgerGroups([]); setLedgerLoading(false); return }
+    // Step 2: get lines — optionally filtered to one account
+    let linesQ = supabase.from('journal_entry_lines')
+      .select('*, entry:journal_entries(entry_number, entry_date, description, reference), account:chart_of_accounts(id, code, name, type)')
       .in('entry_id', ids)
-    const acct = accounts.find(a => a.id === ledgerAccountId)
-    const nb = acct ? normalBalance(acct.type) : 'debit'
-    let balance = 0
-    const rows = (data ?? [])
-      .filter((r: any) => r.entry)
-      .sort((a: any, b: any) => a.entry.entry_date.localeCompare(b.entry.entry_date))
-      .map((r: any) => {
-        const net = nb === 'debit' ? Number(r.debit) - Number(r.credit) : Number(r.credit) - Number(r.debit)
-        balance += net
-        return { ...r, running_balance: balance }
+    if (ledgerAccountFilter) linesQ = linesQ.eq('account_id', ledgerAccountFilter)
+    const { data } = await linesQ
+    // Step 3: group by account, compute per-account running balance
+    const accountMap: Record<string, { account: any; lines: any[] }> = {}
+    for (const line of (data ?? [])) {
+      if (!line.entry || !line.account) continue
+      const key = line.account.id
+      if (!accountMap[key]) accountMap[key] = { account: line.account, lines: [] }
+      accountMap[key].lines.push(line)
+    }
+    const groups = Object.values(accountMap)
+      .sort((a, b) => a.account.code.localeCompare(b.account.code))
+      .map(({ account, lines }) => {
+        const nb = normalBalance(account.type)
+        let balance = 0
+        const rows = lines
+          .sort((a: any, b: any) => a.entry.entry_date.localeCompare(b.entry.entry_date))
+          .map((r: any) => {
+            const net = nb === 'debit' ? Number(r.debit) - Number(r.credit) : Number(r.credit) - Number(r.debit)
+            balance += net
+            return { ...r, running_balance: balance }
+          })
+        return { account, rows }
       })
-    setLedgerRows(rows)
+    setLedgerGroups(groups)
     setLedgerLoading(false)
   }
 
@@ -1110,17 +1143,21 @@ export default function AccountingPage() {
   }
 
   function exportLedger() {
-    if (ledgerRows.length === 0) { toast('Load the ledger first', 'error'); return }
-    const acct = accounts.find(a => a.id === ledgerAccountId)
-    exportXlsx(`Ledger_${acct?.code ?? ''}_${todayStr()}`, [{ name: 'General Ledger', rows: ledgerRows.map(r => ({
-      'Entry #': r.entry?.entry_number ?? '',
-      'Date': r.entry?.entry_date ?? '',
-      'Description': r.entry?.description ?? '',
-      'Reference': r.entry?.reference ?? '',
-      'Debit': Number(r.debit),
-      'Credit': Number(r.credit),
-      'Balance': Number(r.running_balance ?? 0),
-    })) }])
+    if (ledgerGroups.length === 0) { toast('Load the ledger first', 'error'); return }
+    const sheets = ledgerGroups.map(({ account, rows }) => ({
+      name: `${account.code} ${account.name}`.slice(0, 31),
+      rows: rows.map((r: any) => ({
+        'Account': `${account.code} — ${account.name}`,
+        'Entry #': r.entry?.entry_number ?? '',
+        'Date': r.entry?.entry_date ?? '',
+        'Description': r.entry?.description ?? '',
+        'Reference': r.entry?.reference ?? '',
+        'Debit': Number(r.debit),
+        'Credit': Number(r.credit),
+        'Balance': Number(r.running_balance ?? 0),
+      }))
+    }))
+    exportXlsx(`Ledger_${todayStr()}`, sheets)
   }
 
   function exportTrialBalance() {
@@ -1483,11 +1520,36 @@ export default function AccountingPage() {
         )}
 
         {/* ══ JOURNAL ENTRIES ═══════════════════════════════════════ */}
-        {tab === 'journal' && (
+        {tab === 'journal' && (() => {
+          const filteredEntries = entries.filter(e => {
+            if (jeFrom && e.entry_date < jeFrom) return false
+            if (jeTo   && e.entry_date > jeTo)   return false
+            if (jeSearch) {
+              const q = jeSearch.toLowerCase()
+              if (
+                !e.entry_number.toLowerCase().includes(q) &&
+                !(e.description ?? '').toLowerCase().includes(q) &&
+                !(e.reference   ?? '').toLowerCase().includes(q) &&
+                !(e.reference_type ?? '').toLowerCase().includes(q)
+              ) return false
+            }
+            return true
+          })
+          return (
           <div>
-            <div className="flex justify-end gap-2 mb-4">
-              <Button variant="ghost" onClick={exportJournalEntries}>↓ Export</Button>
-              <Button onClick={openAddEntry}>+ New Entry</Button>
+            <div className="flex items-center gap-3 mb-4 flex-wrap">
+              <input type="date" value={jeFrom} onChange={e => setJeFrom(e.target.value)} className={cn(input, 'w-auto')} />
+              <span className="text-hmuted text-sm">–</span>
+              <input type="date" value={jeTo} onChange={e => setJeTo(e.target.value)} className={cn(input, 'w-auto')} />
+              <div className="relative flex-1 min-w-[200px]">
+                <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-hmuted pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z"/></svg>
+                <input type="text" placeholder="Search entries…" value={jeSearch} onChange={e => setJeSearch(e.target.value)}
+                  className={cn(input, 'pl-8')} />
+              </div>
+              <div className="flex gap-2 ml-auto">
+                <Button variant="ghost" onClick={exportJournalEntries}>↓ Export</Button>
+                <Button onClick={openAddEntry}>+ New Entry</Button>
+              </div>
             </div>
             <div className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
               <table className="w-full text-sm">
@@ -1497,17 +1559,23 @@ export default function AccountingPage() {
                   ))}
                 </tr></thead>
                 <tbody>
-                  {entries.length === 0 ? (
-                    <tr><td colSpan={8} className="px-5 py-10 text-center text-hmuted">No journal entries. Entries auto-post when transactions are recorded.</td></tr>
-                  ) : entries.map(e => (
+                  {filteredEntries.length === 0 ? (
+                    <tr><td colSpan={8} className="px-5 py-10 text-center text-hmuted">
+                      {entries.length === 0 ? 'No journal entries. Entries auto-post when transactions are recorded.' : 'No entries match the current filters.'}
+                    </td></tr>
+                  ) : filteredEntries.map(e => (
                     <>
                       <tr key={e.id} className={cn('border-t border-hborder hover:bg-hbg/40 cursor-pointer', e.is_void && 'opacity-50 bg-gray-50/60', e.status === 'draft' && !e.is_void && 'bg-amber-50/40')}
                         onClick={async () => {
-                          if (expandedEntryId === e.id) { setExpandedEntryId(null); return }
-                          setExpandedEntryId(e.id); await loadEntryLines(e.id)
+                          if (expandedEntries.has(e.id)) {
+                            setExpandedEntries(prev => { const s = new Set(prev); s.delete(e.id); return s })
+                          } else {
+                            setExpandedEntries(prev => new Set([...prev, e.id]))
+                            if (!entryLines[e.id]) await loadEntryLines(e.id)
+                          }
                         }}
                       >
-                        <td className="px-3 py-2.5 text-hmuted text-xs">{expandedEntryId === e.id ? '▾' : '▸'}</td>
+                        <td className="px-3 py-2.5 text-hmuted text-xs">{expandedEntries.has(e.id) ? '▾' : '▸'}</td>
                         <td className="px-4 py-2.5 font-mono text-xs text-hmuted">
                           <span className={e.is_void ? 'line-through' : ''}>{e.entry_number}</span>
                           {e.is_void && <span className="ml-1.5 text-[9px] bg-gray-200 text-gray-500 px-1.5 py-0.5 rounded-full font-bold uppercase">VOID</span>}
@@ -1553,9 +1621,9 @@ export default function AccountingPage() {
                           )}
                         </td>
                       </tr>
-                      {expandedEntryId === e.id && entryLines[e.id] && (
+                      {expandedEntries.has(e.id) && entryLines[e.id] && (
                         <tr key={`${e.id}-lines`} className="bg-hbg/50">
-                          <td colSpan={7} className="px-8 py-3">
+                          <td colSpan={8} className="px-8 py-3">
                             <table className="w-full text-xs">
                               <thead><tr>
                                 {['Account', 'Description', 'Debit', 'Credit'].map(h => (
@@ -1587,16 +1655,17 @@ export default function AccountingPage() {
               </table>
             </div>
           </div>
-        )}
+          )
+        })()}
 
         {/* ══ GENERAL LEDGER ════════════════════════════════════════ */}
         {tab === 'ledger' && (
           <div>
-            <div className="flex items-end gap-3 mb-5 bg-white border border-hborder rounded-2xl p-4 shadow-card">
-              <div className="flex-1">
-                <label className="block text-xs text-hmuted mb-1">Account</label>
-                <select value={ledgerAccountId} onChange={e => setLedgerAccountId(e.target.value)} className={input}>
-                  <option value="">Select account…</option>
+            <div className="flex items-end gap-3 mb-5 bg-white border border-hborder rounded-2xl p-4 shadow-card flex-wrap">
+              <div className="flex-1 min-w-[200px]">
+                <label className="block text-xs text-hmuted mb-1">Account (optional)</label>
+                <select value={ledgerAccountFilter} onChange={e => setLedgerAccountFilter(e.target.value)} className={input}>
+                  <option value="">All accounts</option>
                   {ACCOUNT_TYPES.map(type => (
                     <optgroup key={type} label={capitalize(type)}>
                       {accountsByType[type].filter(a => a.is_active).map(a => (
@@ -1614,53 +1683,54 @@ export default function AccountingPage() {
                 <label className="block text-xs text-hmuted mb-1">To</label>
                 <input type="date" value={ledgerTo} onChange={e => setLedgerTo(e.target.value)} className={input} />
               </div>
-              <Button onClick={loadLedger} disabled={!ledgerAccountId}>Load Ledger</Button>
-              {ledgerRows.length > 0 && <Button variant="ghost" onClick={exportLedger}>↓ Export</Button>}
+              <Button onClick={loadLedger}>Apply Filters</Button>
+              {ledgerGroups.length > 0 && <Button variant="ghost" onClick={exportLedger}>↓ Export</Button>}
             </div>
 
             {ledgerLoading ? (
               <p className="text-center text-hmuted py-10">Loading…</p>
-            ) : ledgerAccountId && ledgerRows.length === 0 ? (
-              <p className="text-center text-hmuted py-10">No transactions for this account in the selected period.</p>
-            ) : ledgerRows.length > 0 && (() => {
-              const acct = accounts.find(a => a.id === ledgerAccountId)!
-              return (
-                <div className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
-                  <div className="px-5 py-4 border-b border-hborder">
-                    <h3 className="font-serif text-[17px] text-dark-navy">{acct.code} — {acct.name}</h3>
-                    <p className="text-xs text-hmuted capitalize">{acct.type} · Normal balance: {normalBalance(acct.type)}</p>
-                  </div>
-                  <table className="w-full text-sm">
-                    <thead><tr className="bg-hsurface2">
-                      {['Date', 'Entry #', 'Description', 'Reference', 'Debit', 'Credit', 'Balance'].map(h => (
-                        <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide">{h}</th>
-                      ))}
-                    </tr></thead>
-                    <tbody>
-                      {ledgerRows.map((r: any, i) => (
-                        <tr key={r.id} className={cn('border-t border-hborder', i % 2 === 1 ? 'bg-hbg/30' : '')}>
-                          <td className="px-4 py-2.5 text-xs text-hmuted whitespace-nowrap">{formatDate(r.entry.entry_date)}</td>
-                          <td className="px-4 py-2.5 font-mono text-xs text-hmuted">{r.entry.entry_number}</td>
-                          <td className="px-4 py-2.5 text-htext">{r.entry.description}</td>
-                          <td className="px-4 py-2.5 text-xs text-hmuted font-mono">{r.entry.reference ?? '—'}</td>
-                          <td className="px-4 py-2.5 text-right font-medium">{Number(r.debit)  > 0 ? formatCurrency(r.debit)  : ''}</td>
-                          <td className="px-4 py-2.5 text-right font-medium">{Number(r.credit) > 0 ? formatCurrency(r.credit) : ''}</td>
-                          <td className="px-4 py-2.5 text-right font-bold text-dark-navy whitespace-nowrap">{formatCurrency(r.running_balance)}</td>
+            ) : ledgerGroups.length === 0 ? (
+              <p className="text-center text-hmuted py-10">No posted transactions in the selected period.</p>
+            ) : (
+              <div className="space-y-5">
+                {ledgerGroups.map(({ account, rows }) => (
+                  <div key={account.id} className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
+                    <div className="px-5 py-4 border-b border-hborder">
+                      <h3 className="font-serif text-[17px] text-dark-navy">{account.code} — {account.name}</h3>
+                      <p className="text-xs text-hmuted capitalize">{account.type} · Normal balance: {normalBalance(account.type)}</p>
+                    </div>
+                    <table className="w-full text-sm">
+                      <thead><tr className="bg-hsurface2">
+                        {['Date', 'Entry #', 'Description', 'Reference', 'Debit', 'Credit', 'Balance'].map(h => (
+                          <th key={h} className={cn('px-4 py-3 text-[11px] font-semibold text-hmuted uppercase tracking-wide', h.match(/Debit|Credit|Balance/) ? 'text-right' : 'text-left')}>{h}</th>
+                        ))}
+                      </tr></thead>
+                      <tbody>
+                        {rows.map((r: any, i: number) => (
+                          <tr key={r.id} className={cn('border-t border-hborder', i % 2 === 1 ? 'bg-hbg/30' : '')}>
+                            <td className="px-4 py-2.5 text-xs text-hmuted whitespace-nowrap">{formatDate(r.entry.entry_date)}</td>
+                            <td className="px-4 py-2.5 font-mono text-xs text-hmuted">{r.entry.entry_number}</td>
+                            <td className="px-4 py-2.5 text-htext">{r.entry.description}</td>
+                            <td className="px-4 py-2.5 text-xs text-hmuted font-mono">{r.entry.reference ?? '—'}</td>
+                            <td className="px-4 py-2.5 text-right font-medium">{Number(r.debit)  > 0 ? formatCurrency(r.debit)  : ''}</td>
+                            <td className="px-4 py-2.5 text-right font-medium">{Number(r.credit) > 0 ? formatCurrency(r.credit) : ''}</td>
+                            <td className="px-4 py-2.5 text-right font-bold text-dark-navy whitespace-nowrap">{formatCurrency(r.running_balance)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot>
+                        <tr className="bg-dark-navy text-white">
+                          <td colSpan={4} className="px-4 py-3 text-xs font-semibold uppercase tracking-wide">Totals</td>
+                          <td className="px-4 py-3 text-right font-bold">{formatCurrency(rows.reduce((s: number, r: any) => s + Number(r.debit), 0))}</td>
+                          <td className="px-4 py-3 text-right font-bold">{formatCurrency(rows.reduce((s: number, r: any) => s + Number(r.credit), 0))}</td>
+                          <td className="px-4 py-3 text-right font-bold">{formatCurrency(rows[rows.length - 1]?.running_balance ?? 0)}</td>
                         </tr>
-                      ))}
-                    </tbody>
-                    <tfoot>
-                      <tr className="bg-dark-navy text-white">
-                        <td colSpan={4} className="px-4 py-3 text-xs font-semibold uppercase tracking-wide">Totals</td>
-                        <td className="px-4 py-3 text-right font-bold">{formatCurrency(ledgerRows.reduce((s, r) => s + Number(r.debit), 0))}</td>
-                        <td className="px-4 py-3 text-right font-bold">{formatCurrency(ledgerRows.reduce((s, r) => s + Number(r.credit), 0))}</td>
-                        <td className="px-4 py-3 text-right font-bold">{formatCurrency(ledgerRows[ledgerRows.length - 1]?.running_balance ?? 0)}</td>
-                      </tr>
-                    </tfoot>
-                  </table>
-                </div>
-              )
-            })()}
+                      </tfoot>
+                    </table>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
