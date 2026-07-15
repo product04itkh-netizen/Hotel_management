@@ -1622,32 +1622,33 @@ export default function AccountingPage() {
                         </td>
                       </tr>
                       {expandedEntries.has(e.id) && entryLines[e.id] && (
-                        <tr key={`${e.id}-lines`} className="bg-hbg/50">
-                          <td colSpan={8} className="px-8 py-3">
-                            <table className="w-full text-xs">
-                              <thead><tr>
-                                {['Account', 'Description', 'Debit', 'Credit'].map(h => (
-                                  <th key={h} className={cn('pb-1.5 font-semibold text-hmuted', h.match(/Debit|Credit/) ? 'text-right' : 'text-left')}>{h}</th>
-                                ))}
-                              </tr></thead>
-                              <tbody>
-                                {entryLines[e.id].map((l: any) => (
-                                  <tr key={l.id} className="border-t border-hborder/40">
-                                    <td className="py-1.5 text-navy font-mono">{l.account?.code} — {l.account?.name}</td>
-                                    <td className="py-1.5 text-hmuted">{l.description ?? ''}</td>
-                                    <td className="py-1.5 text-right font-medium">{Number(l.debit)  > 0 ? formatCurrency(l.debit)  : ''}</td>
-                                    <td className="py-1.5 text-right font-medium">{Number(l.credit) > 0 ? formatCurrency(l.credit) : ''}</td>
-                                  </tr>
-                                ))}
-                                <tr className="border-t-2 border-hborder">
-                                  <td colSpan={2} className="py-1.5 font-semibold text-hmuted">Totals</td>
-                                  <td className="py-1.5 text-right font-bold">{formatCurrency(entryLines[e.id].reduce((s: number, l: any) => s + Number(l.debit), 0))}</td>
-                                  <td className="py-1.5 text-right font-bold">{formatCurrency(entryLines[e.id].reduce((s: number, l: any) => s + Number(l.credit), 0))}</td>
-                                </tr>
-                              </tbody>
-                            </table>
-                          </td>
-                        </tr>
+                        <>
+                          <tr key={`${e.id}-lhdr`} className="bg-hsurface2/70 border-t border-hborder/40">
+                            <td />
+                            <td className="px-4 py-1.5 text-[10px] font-semibold text-hmuted uppercase tracking-wide">Account</td>
+                            <td />
+                            <td className="px-4 py-1.5 text-[10px] font-semibold text-hmuted uppercase tracking-wide">Memo</td>
+                            <td colSpan={2} />
+                            <td className="px-4 py-1.5 text-[10px] font-semibold text-hmuted uppercase tracking-wide text-right">Debit</td>
+                            <td className="px-4 py-1.5 text-[10px] font-semibold text-hmuted uppercase tracking-wide text-right">Credit</td>
+                          </tr>
+                          {entryLines[e.id].map((l: any) => (
+                            <tr key={l.id} className="border-t border-hborder/20 bg-hbg/40">
+                              <td />
+                              <td className="px-4 py-2 text-xs font-mono text-navy whitespace-nowrap">{l.account?.code} — {l.account?.name}</td>
+                              <td />
+                              <td className="px-4 py-2 text-xs text-hmuted">{l.description ?? ''}</td>
+                              <td colSpan={2} />
+                              <td className="px-4 py-2 text-xs text-right font-medium tabular-nums">{Number(l.debit)  > 0 ? formatCurrency(l.debit)  : ''}</td>
+                              <td className="px-4 py-2 text-xs text-right font-medium tabular-nums">{Number(l.credit) > 0 ? formatCurrency(l.credit) : ''}</td>
+                            </tr>
+                          ))}
+                          <tr key={`${e.id}-ltot`} className="border-t-2 border-hborder/60 bg-hsurface2/40">
+                            <td colSpan={6} className="px-4 py-2 text-right text-[11px] font-semibold text-hmuted uppercase tracking-wide">Totals</td>
+                            <td className="px-4 py-2 text-right text-xs font-bold tabular-nums">{formatCurrency(entryLines[e.id].reduce((s: number, l: any) => s + Number(l.debit), 0))}</td>
+                            <td className="px-4 py-2 text-right text-xs font-bold tabular-nums">{formatCurrency(entryLines[e.id].reduce((s: number, l: any) => s + Number(l.credit), 0))}</td>
+                          </tr>
+                        </>
                       )}
                     </>
                   ))}
