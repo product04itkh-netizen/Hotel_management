@@ -2,8 +2,9 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
-import { cn } from '@/lib/utils'
+import { cn, capitalize } from '@/lib/utils'
 import { useBranch } from '@/context/BranchContext'
+import { createClient } from '@/lib/supabase/client'
 import type { Branch } from '@/types'
 
 // ─── Navigation items ─────────────────────────────────────────────────────────
@@ -155,14 +156,35 @@ function BranchSwitcher() {
 
 // ─── Sidebar ──────────────────────────────────────────────────────────────────
 
-interface SidebarProps {
-  userName?: string
-  userRole?: string
+function useCurrentStaff() {
+  const [info, setInfo] = useState<{ name: string; role: string } | null>(null)
+
+  useEffect(() => {
+    let active = true
+    async function load() {
+      const supabase = createClient()
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+      const { data } = await supabase.from('staff').select('full_name, role').eq('auth_user_id', user.id).maybeSingle()
+      if (!active) return
+      setInfo(data
+        ? { name: data.full_name, role: capitalize(data.role) }
+        : { name: user.email ?? 'User', role: 'Admin' }
+      )
+    }
+    load()
+    return () => { active = false }
+  }, [])
+
+  return info
 }
 
-export function Sidebar({ userName = 'Tann Pisey & Hong Lim', userRole = 'Owner' }: SidebarProps) {
+export function Sidebar() {
   const pathname = usePathname()
   const [pendingHref, setPendingHref] = useState<string | null>(null)
+  const currentUser = useCurrentStaff()
+  const userName = currentUser?.name ?? '…'
+  const userRole = currentUser?.role ?? ''
 
   useEffect(() => {
     setPendingHref(null)

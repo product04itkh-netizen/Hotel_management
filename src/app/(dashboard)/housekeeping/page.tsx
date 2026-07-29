@@ -37,7 +37,7 @@ export default function HousekeepingPage() {
     if (!activeBranch) return
     const [taskRes, houseRes, roomRes, staffRes] = await Promise.all([
       supabase.from('housekeeping_tasks')
-        .select('*, room:rooms(id, room_number, room_type, house:houses(id, name)), house:houses(id, name, house_type), staff:staff(full_name)')
+        .select('*, room:rooms(id, room_number, room_type, house:houses(id, name, code)), house:houses(id, name, code, house_type), staff:staff(full_name)')
         .eq('branch_id', activeBranch.id)
         .order('created_at', { ascending: false }),
       supabase.from('houses')
@@ -45,7 +45,7 @@ export default function HousekeepingPage() {
         .eq('branch_id', activeBranch.id)
         .order('name'),
       supabase.from('rooms')
-        .select('id, room_number, room_type, house_id, house:houses(id, name)')
+        .select('id, room_number, room_type, house_id, house:houses(id, name, code)')
         .eq('branch_id', activeBranch.id)
         .order('room_number'),
       supabase.from('staff')
@@ -68,15 +68,15 @@ export default function HousekeepingPage() {
     const house = (task as any).house
     const room = (task as any).room
     if (room?.room_number) {
-      const houseName = room.house?.name ?? house?.name ?? ''
+      const houseLabel = room.house?.code || room.house?.name || house?.code || house?.name || ''
       return {
-        primary: houseName ? `${houseName} — ${room.room_number}` : room.room_number,
+        primary: houseLabel ? `${houseLabel} — ${room.room_number}` : room.room_number,
         secondary: capitalize(room.room_type ?? ''),
       }
     }
     if (house?.name) {
       return {
-        primary: house.name,
+        primary: house.code || house.name,
         secondary: capitalize((house.house_type ?? '').replace('_', ' ')) + ' (whole property)',
       }
     }
@@ -200,13 +200,13 @@ export default function HousekeepingPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-hsurface2">
-                <th className="px-5 py-3 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide">Property / Room</th>
-                <th className="px-5 py-3 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide">Task</th>
-                <th className="px-5 py-3 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide">Priority</th>
-                <th className="px-5 py-3 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide">Due</th>
-                <th className="px-5 py-3 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide">Assigned To</th>
-                <th className="px-5 py-3 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide">Status</th>
-                <th className="px-5 py-3 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide">Actions</th>
+                <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide">Property / Room</th>
+                <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide">Task</th>
+                <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide">Priority</th>
+                <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide">Due</th>
+                <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide">Assigned To</th>
+                <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide">Status</th>
+                <th className="px-3 py-2.5 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -218,28 +218,28 @@ export default function HousekeepingPage() {
                 const { primary, secondary } = getTaskLabel(task)
                 return (
                   <tr key={task.id} className="border-t border-hborder hover:bg-hbg/40">
-                    <td className="px-5 py-3">
-                      <p className="font-medium text-htext">{primary}</p>
-                      {secondary && <p className="text-xs text-hmuted">{secondary}</p>}
+                    <td className="px-3 py-2 max-w-[220px]">
+                      <p className="font-medium text-htext truncate" title={primary}>{primary}</p>
+                      {secondary && <p className="text-xs text-hmuted truncate">{secondary}</p>}
                       {task.notes && !secondary.includes('From notes') && (
-                        <p className="text-xs text-hmuted/70 italic mt-0.5 truncate max-w-[200px]">{task.notes}</p>
+                        <p className="text-xs text-hmuted/70 italic mt-0.5 truncate">{task.notes}</p>
                       )}
                     </td>
-                    <td className="px-5 py-3 capitalize text-hmuted">{task.task_type}</td>
-                    <td className="px-5 py-3"><Badge status={task.priority} /></td>
-                    <td className="px-5 py-3 text-hmuted text-xs">{task.due_date ? formatDate(task.due_date) : '—'}</td>
-                    <td className="px-5 py-3">
+                    <td className="px-3 py-2 capitalize text-hmuted text-xs whitespace-nowrap">{task.task_type}</td>
+                    <td className="px-3 py-2"><Badge status={task.priority} /></td>
+                    <td className="px-3 py-2 text-hmuted text-xs whitespace-nowrap">{task.due_date ? formatDate(task.due_date) : '—'}</td>
+                    <td className="px-3 py-2">
                       <select
                         value={task.assigned_to ?? ''}
                         onChange={e => handleAssign(task.id, e.target.value)}
-                        className="border border-hborder rounded-lg px-2 py-1 text-xs bg-white focus:outline-none focus:border-navy"
+                        className="border border-hborder rounded-lg px-2 py-1 text-xs bg-white focus:outline-none focus:border-navy max-w-[140px]"
                       >
                         <option value="">Unassigned</option>
                         {staff.map(s => <option key={s.id} value={s.id}>{s.full_name}</option>)}
                       </select>
                     </td>
-                    <td className="px-5 py-3"><Badge status={task.status} /></td>
-                    <td className="px-5 py-3">
+                    <td className="px-3 py-2"><Badge status={task.status} /></td>
+                    <td className="px-3 py-2">
                       <div className="flex gap-1.5">
                         {task.status === 'pending' && (
                           <Button size="sm" variant="ghost" onClick={() => updateStatus(task.id, 'in_progress')}>Start</Button>

@@ -212,7 +212,42 @@ export interface House {
   status: HouseStatus
   amenities: string[]
   description?: string
+  code?: string
   rooms?: Room[]
+  created_at: string
+  updated_at: string
+}
+
+// ─── Service Catalog (Activities & Services, F&B) ─────────────────────────
+export type ServiceCatalogCategory = 'activity' | 'fnb'
+
+export interface ServiceCatalogItem {
+  id: string
+  branch_id: string
+  category: ServiceCatalogCategory
+  code: string
+  name_en: string
+  name_kh?: string
+  details?: string
+  unit_price: number
+  revenue_account_code: string
+  cost_account_code: string
+  is_active: boolean
+  sort_order: number
+  created_at: string
+  updated_at: string
+}
+
+// ─── House Promotion ─────────────────────────────────────────────────────
+export interface HousePromotion {
+  id: string
+  house_id: string
+  branch_id: string
+  name: string
+  promo_rate: number
+  start_date: string
+  end_date: string
+  is_active: boolean
   created_at: string
   updated_at: string
 }
@@ -222,6 +257,8 @@ export interface ReservationLineItem {
   id?: string
   reservation_id?: string
   label: string
+  qty?: number
+  unit_price?: number | null
   amount: number
   discount?: number
   revenue_account_code?: string
@@ -429,6 +466,9 @@ export interface HotelSettings {
   currency: string
   check_in_time: string
   check_out_time: string
+  bank_name?: string
+  bank_account_name?: string
+  bank_account_number?: string
   branch_id?: string
   branch?: Branch
   created_at: string

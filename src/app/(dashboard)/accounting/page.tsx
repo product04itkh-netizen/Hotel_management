@@ -298,9 +298,19 @@ export default function AccountingPage() {
     setPcReservations((data ?? []) as any[])
   }
 
-  function openEditPc(t: PettyCashTransaction) {
+  async function openEditPc(t: PettyCashTransaction) {
     setPcEditId(t.id)
     setPcEditJeId(t.journal_entry_id ?? null)
+    let expenseAccountId = ''
+    if (t.transaction_type === 'out' && t.journal_entry_id) {
+      const { data: debitLine } = await supabase
+        .from('journal_entry_lines')
+        .select('account_id')
+        .eq('entry_id', t.journal_entry_id)
+        .gt('debit', 0)
+        .maybeSingle()
+      if (debitLine) expenseAccountId = debitLine.account_id
+    }
     setPcForm({
       date: t.transaction_date,
       description: t.description,
@@ -308,7 +318,7 @@ export default function AccountingPage() {
       amount: String(t.amount),
       type: t.transaction_type,
       reference: t.reference ?? '',
-      expense_account_id: '',
+      expense_account_id: expenseAccountId,
       reservation_id: t.reservation_id ?? '',
       reservation_line_item_id: t.reservation_line_item_id ?? '',
     })
@@ -337,7 +347,7 @@ export default function AccountingPage() {
   async function loadAR() {
     if (!activeBranch) return
     const { data } = await supabase.from('invoices')
-      .select('*, guest:guests(full_name), house:houses(name)')
+      .select('*, guest:guests(full_name), house:houses(name, code)')
       .eq('branch_id', activeBranch.id)
       .order('invoice_date', { ascending: false })
     setArInvoices(data ?? [])
@@ -809,9 +819,17 @@ export default function AccountingPage() {
           description: `Petty cash ${pcForm.type} — ${pcForm.description}`,
         }).eq('id', pcEditJeId)
         const { data: lines } = await supabase.from('journal_entry_lines').select('id, debit, credit').eq('entry_id', pcEditJeId)
+        const newExpenseAcctId = pcForm.type === 'out'
+          ? (pcForm.expense_account_id || accounts.find(a => a.code === '5800')?.id)
+          : null
         for (const line of lines ?? []) {
-          if (line.debit > 0) await supabase.from('journal_entry_lines').update({ debit: Number(pcForm.amount), description: pcForm.description }).eq('id', line.id)
-          else await supabase.from('journal_entry_lines').update({ credit: Number(pcForm.amount), description: pcForm.description }).eq('id', line.id)
+          if (line.debit > 0) {
+            const update: Record<string, any> = { debit: Number(pcForm.amount), description: pcForm.description }
+            if (newExpenseAcctId) update.account_id = newExpenseAcctId
+            await supabase.from('journal_entry_lines').update(update).eq('id', line.id)
+          } else {
+            await supabase.from('journal_entry_lines').update({ credit: Number(pcForm.amount), description: pcForm.description }).eq('id', line.id)
+          }
         }
       }
       toast('Transaction updated')
@@ -1290,21 +1308,21 @@ export default function AccountingPage() {
                 </div>
                 <Button size="sm" onClick={() => setTab('journal')}>View All</Button>
               </div>
-              <table className="w-full text-sm">
+              <table className="w-full text-sm table-fixed">
                 <thead><tr className="bg-hsurface2">
-                  {['Entry #', 'Date', 'Description', 'Reference', 'Type'].map(h => (
-                    <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide">{h}</th>
+                  {([['Entry #', 'w-[20%]'], ['Date', 'w-[14%]'], ['Description', 'w-[32%]'], ['Reference', 'w-[20%]'], ['Type', 'w-[14%]']] as const).map(([h, w]) => (
+                    <th key={h} className={cn('px-3 py-2.5 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide', w)}>{h}</th>
                   ))}
                 </tr></thead>
                 <tbody>
                   {entries.slice(0, 10).map(e => (
                     <tr key={e.id} className="border-t border-hborder hover:bg-hbg/40">
-                      <td className="px-4 py-2.5 font-mono text-xs text-hmuted">{e.entry_number}</td>
-                      <td className="px-4 py-2.5 text-xs text-hmuted">{formatDate(e.entry_date)}</td>
-                      <td className="px-4 py-2.5 text-htext">{e.description}</td>
-                      <td className="px-4 py-2.5 text-xs text-hmuted font-mono">{e.reference ?? '—'}</td>
-                      <td className="px-4 py-2.5">
-                        <span className="bg-hsurface2 text-hmuted text-[10px] px-2 py-0.5 rounded-full capitalize">
+                      <td className="px-3 py-2 font-mono text-xs text-hmuted whitespace-nowrap truncate">{e.entry_number}</td>
+                      <td className="px-3 py-2 text-xs text-hmuted whitespace-nowrap">{formatDate(e.entry_date)}</td>
+                      <td className="px-3 py-2 text-htext truncate" title={e.description}>{e.description}</td>
+                      <td className="px-3 py-2 text-xs text-hmuted font-mono whitespace-nowrap truncate">{e.reference ?? '—'}</td>
+                      <td className="px-3 py-2">
+                        <span className="bg-hsurface2 text-hmuted text-[10px] px-2 py-0.5 rounded-full capitalize whitespace-nowrap">
                           {(e.reference_type ?? 'manual').replace(/_/g, ' ')}
                         </span>
                       </td>
@@ -1344,10 +1362,10 @@ export default function AccountingPage() {
                 </p>
               </div>
               <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+                <table className="w-full text-sm table-fixed">
                   <thead><tr className="bg-hsurface2">
-                    {['Invoice #', 'Guest', 'House', 'Date Issued', 'Due Date', 'Total', 'Paid', 'Balance', 'Aging', 'Status'].map(h => (
-                      <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide whitespace-nowrap">{h}</th>
+                    {([['Invoice #', 'w-[10%]'], ['Guest', 'w-[24%]'], ['House', 'w-[8%]'], ['Date Issued', 'w-[8%]'], ['Due Date', 'w-[8%]'], ['Total', 'w-[8%]'], ['Paid', 'w-[8%]'], ['Balance', 'w-[8%]'], ['Aging', 'w-[10%]'], ['Status', 'w-[8%]']] as const).map(([h, w]) => (
+                      <th key={h} className={cn('px-3 py-2.5 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide whitespace-nowrap', w)}>{h}</th>
                     ))}
                   </tr></thead>
                   <tbody>
@@ -1360,22 +1378,22 @@ export default function AccountingPage() {
                       const balance   = Number(inv.total) - Number(inv.amount_paid)
                       return (
                         <tr key={inv.id} className="border-t border-hborder hover:bg-hbg/40">
-                          <td className="px-4 py-2.5 font-mono text-xs text-hmuted whitespace-nowrap">{inv.invoice_number}</td>
-                          <td className="px-4 py-2.5 text-htext">{inv.guest?.full_name ?? '—'}</td>
-                          <td className="px-4 py-2.5 text-xs text-hmuted">{inv.house?.name ?? '—'}</td>
-                          <td className="px-4 py-2.5 text-xs text-hmuted whitespace-nowrap">{formatDate(issueDate)}</td>
-                          <td className="px-4 py-2.5 text-xs text-hmuted whitespace-nowrap">{formatDate(due.toISOString())}</td>
-                          <td className="px-4 py-2.5 font-medium text-right">{formatCurrency(inv.total)}</td>
-                          <td className="px-4 py-2.5 text-right text-green-700">{formatCurrency(inv.amount_paid)}</td>
-                          <td className="px-4 py-2.5 font-semibold text-right text-dark-navy">{formatCurrency(balance)}</td>
-                          <td className="px-4 py-2.5">
+                          <td className="px-3 py-2 font-mono text-xs text-hmuted whitespace-nowrap truncate">{inv.invoice_number}</td>
+                          <td className="px-3 py-2 text-htext truncate" title={inv.guest?.full_name ?? undefined}>{inv.guest?.full_name ?? '—'}</td>
+                          <td className="px-3 py-2 text-xs text-hmuted font-mono whitespace-nowrap truncate" title={inv.house?.name ?? undefined}>{inv.house?.code || inv.house?.name || '—'}</td>
+                          <td className="px-3 py-2 text-xs text-hmuted whitespace-nowrap">{formatDate(issueDate)}</td>
+                          <td className="px-3 py-2 text-xs text-hmuted whitespace-nowrap">{formatDate(due.toISOString())}</td>
+                          <td className="px-3 py-2 font-medium text-right whitespace-nowrap">{formatCurrency(inv.total)}</td>
+                          <td className="px-3 py-2 text-right text-green-700 whitespace-nowrap">{formatCurrency(inv.amount_paid)}</td>
+                          <td className="px-3 py-2 font-semibold text-right text-dark-navy whitespace-nowrap">{formatCurrency(balance)}</td>
+                          <td className="px-3 py-2">
                             {inv.status !== 'paid' && inv.status !== 'void' && (
                               <span className={cn('text-[10px] px-2 py-0.5 rounded-full font-medium whitespace-nowrap', agingColor(od))}>
                                 {agingLabel(od)}
                               </span>
                             )}
                           </td>
-                          <td className="px-4 py-2.5">
+                          <td className="px-3 py-2">
                             <span className={cn('text-[10px] px-2 py-0.5 rounded-full font-medium capitalize',
                               inv.status === 'paid'    ? 'bg-green-100 text-green-700' :
                               inv.status === 'partial' ? 'bg-yellow-100 text-yellow-700' :
@@ -1420,10 +1438,10 @@ export default function AccountingPage() {
                 </p>
               </div>
               <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+                <table className="w-full text-sm table-fixed">
                   <thead><tr className="bg-hsurface2">
-                    {['Bill #', 'Vendor', 'Description', 'Account', 'Bill Date', 'Due Date', 'Total', 'Paid', 'Balance', 'Status', 'Actions'].map(h => (
-                      <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide whitespace-nowrap">{h}</th>
+                    {([['Bill #', 'w-[9%]'], ['Vendor', 'w-[11%]'], ['Description', 'w-[20%]'], ['Account', 'w-[7%]'], ['Bill Date', 'w-[8%]'], ['Due Date', 'w-[8%]'], ['Total', 'w-[8%]'], ['Paid', 'w-[8%]'], ['Balance', 'w-[8%]'], ['Status', 'w-[6%]'], ['Actions', 'w-[7%]']] as const).map(([h, w]) => (
+                      <th key={h} className={cn('px-3 py-2.5 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide whitespace-nowrap', w)}>{h}</th>
                     ))}
                   </tr></thead>
                   <tbody>
@@ -1435,16 +1453,16 @@ export default function AccountingPage() {
                       const expAcct = (b as any).expense_account
                       return (
                         <tr key={b.id} className="border-t border-hborder hover:bg-hbg/40">
-                          <td className="px-4 py-2.5 font-mono text-xs text-hmuted whitespace-nowrap">{b.bill_number}</td>
-                          <td className="px-4 py-2.5 text-htext">{vendor?.name ?? '—'}</td>
-                          <td className="px-4 py-2.5 text-htext max-w-[180px] truncate">{b.description}</td>
-                          <td className="px-4 py-2.5 text-xs text-hmuted font-mono">{expAcct ? `${expAcct.code}` : '—'}</td>
-                          <td className="px-4 py-2.5 text-xs text-hmuted whitespace-nowrap">{formatDate(b.bill_date)}</td>
-                          <td className="px-4 py-2.5 text-xs text-hmuted whitespace-nowrap">{b.due_date ? formatDate(b.due_date) : '—'}</td>
-                          <td className="px-4 py-2.5 font-medium text-right">{formatCurrency(b.total)}</td>
-                          <td className="px-4 py-2.5 text-right text-green-700">{formatCurrency(b.amount_paid)}</td>
-                          <td className="px-4 py-2.5 font-semibold text-right">{formatCurrency(balance)}</td>
-                          <td className="px-4 py-2.5">
+                          <td className="px-3 py-2 font-mono text-xs text-hmuted whitespace-nowrap truncate">{b.bill_number}</td>
+                          <td className="px-3 py-2 text-htext truncate" title={vendor?.name ?? undefined}>{vendor?.name ?? '—'}</td>
+                          <td className="px-3 py-2 text-htext truncate" title={b.description ?? undefined}>{b.description}</td>
+                          <td className="px-3 py-2 text-xs text-hmuted font-mono whitespace-nowrap truncate">{expAcct ? `${expAcct.code}` : '—'}</td>
+                          <td className="px-3 py-2 text-xs text-hmuted whitespace-nowrap">{formatDate(b.bill_date)}</td>
+                          <td className="px-3 py-2 text-xs text-hmuted whitespace-nowrap">{b.due_date ? formatDate(b.due_date) : '—'}</td>
+                          <td className="px-3 py-2 font-medium text-right whitespace-nowrap">{formatCurrency(b.total)}</td>
+                          <td className="px-3 py-2 text-right text-green-700 whitespace-nowrap">{formatCurrency(b.amount_paid)}</td>
+                          <td className="px-3 py-2 font-semibold text-right whitespace-nowrap">{formatCurrency(balance)}</td>
+                          <td className="px-3 py-2">
                             <span className={cn('text-[10px] px-2 py-0.5 rounded-full font-medium capitalize',
                               b.status === 'paid'    ? 'bg-green-100 text-green-700' :
                               b.status === 'partial' ? 'bg-yellow-100 text-yellow-700' :
@@ -1452,7 +1470,7 @@ export default function AccountingPage() {
                               'bg-red-100 text-red-700'
                             )}>{b.status}</span>
                           </td>
-                          <td className="px-4 py-2.5">
+                          <td className="px-3 py-2">
                             {b.status !== 'paid' && b.status !== 'void' && (
                               <button
                                 onClick={() => { setSelectedBill(b); setBillPayForm(f => ({ ...f, amount: String(balance) })); setBillPayOpen(true) }}
@@ -1481,10 +1499,10 @@ export default function AccountingPage() {
               </div>
             </div>
             <div className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
-              <table className="w-full text-sm">
+              <table className="w-full text-sm table-fixed">
                 <thead><tr className="bg-hsurface2">
-                  {['Vendor Name', 'Contact', 'Phone', 'Email', 'Terms', 'Outstanding', 'Status', 'Actions'].map(h => (
-                    <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide">{h}</th>
+                  {([['Vendor Name', 'w-[24%]'], ['Contact', 'w-[13%]'], ['Phone', 'w-[11%]'], ['Email', 'w-[17%]'], ['Terms', 'w-[8%]'], ['Outstanding', 'w-[10%]'], ['Status', 'w-[7%]'], ['Actions', 'w-[10%]']] as const).map(([h, w]) => (
+                    <th key={h} className={cn('px-3 py-2.5 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide', w)}>{h}</th>
                   ))}
                 </tr></thead>
                 <tbody>
@@ -1492,18 +1510,18 @@ export default function AccountingPage() {
                     <tr><td colSpan={8} className="px-5 py-10 text-center text-hmuted">No vendors yet. Add the suppliers you regularly pay.</td></tr>
                   ) : vendors.map(v => (
                     <tr key={v.id} className={cn('border-t border-hborder hover:bg-hbg/40', !v.is_active && 'opacity-50')}>
-                      <td className="px-4 py-2.5 font-medium text-htext">{v.name}</td>
-                      <td className="px-4 py-2.5 text-xs text-hmuted">{v.contact_name ?? '—'}</td>
-                      <td className="px-4 py-2.5 text-xs text-hmuted">{v.phone ?? '—'}</td>
-                      <td className="px-4 py-2.5 text-xs text-hmuted">{v.email ?? '—'}</td>
-                      <td className="px-4 py-2.5 text-xs text-hmuted">Net {v.payment_terms}</td>
-                      <td className="px-4 py-2.5 font-semibold text-dark-navy">{formatCurrency(vendorBalance(v.id))}</td>
-                      <td className="px-4 py-2.5">
+                      <td className="px-3 py-2 font-medium text-htext truncate" title={v.name}>{v.name}</td>
+                      <td className="px-3 py-2 text-xs text-hmuted truncate">{v.contact_name ?? '—'}</td>
+                      <td className="px-3 py-2 text-xs text-hmuted whitespace-nowrap truncate">{v.phone ?? '—'}</td>
+                      <td className="px-3 py-2 text-xs text-hmuted truncate" title={v.email ?? undefined}>{v.email ?? '—'}</td>
+                      <td className="px-3 py-2 text-xs text-hmuted whitespace-nowrap">Net {v.payment_terms}</td>
+                      <td className="px-3 py-2 font-semibold text-dark-navy whitespace-nowrap truncate">{formatCurrency(vendorBalance(v.id))}</td>
+                      <td className="px-3 py-2">
                         <span className={cn('text-[10px] px-2 py-0.5 rounded-full font-medium',
                           v.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
                         )}>{v.is_active ? 'Active' : 'Inactive'}</span>
                       </td>
-                      <td className="px-4 py-2.5">
+                      <td className="px-3 py-2">
                         <div className="flex gap-2">
                           <button onClick={() => openEditVendor(v)} className="text-xs text-navy hover:underline">Edit</button>
                           <button onClick={() => toggleVendorActive(v)} className="text-xs text-hmuted hover:text-htext hover:underline">
@@ -1552,10 +1570,10 @@ export default function AccountingPage() {
               </div>
             </div>
             <div className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
-              <table className="w-full text-sm">
+              <table className="w-full text-sm table-fixed">
                 <thead><tr className="bg-hsurface2">
-                  {['', 'Entry #', 'Date', 'Description', 'Reference', 'Type', 'Status', ''].map(h => (
-                    <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide">{h}</th>
+                  {([['', 'w-[3%]'], ['Entry #', 'w-[12%]'], ['Date', 'w-[8%]'], ['Description', 'w-[36%]'], ['Reference', 'w-[12%]'], ['Type', 'w-[11%]'], ['Status', 'w-[9%]'], ['', 'w-[9%]']] as const).map(([h, w], i) => (
+                    <th key={i} className={cn('px-3 py-2.5 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide', w)}>{h}</th>
                   ))}
                 </tr></thead>
                 <tbody>
@@ -1576,19 +1594,19 @@ export default function AccountingPage() {
                         }}
                       >
                         <td className="px-3 py-2.5 text-hmuted text-xs">{expandedEntries.has(e.id) ? '▾' : '▸'}</td>
-                        <td className="px-4 py-2.5 font-mono text-xs text-hmuted">
+                        <td className="px-3 py-2 font-mono text-xs text-hmuted truncate">
                           <span className={e.is_void ? 'line-through' : ''}>{e.entry_number}</span>
                           {e.is_void && <span className="ml-1.5 text-[9px] bg-gray-200 text-gray-500 px-1.5 py-0.5 rounded-full font-bold uppercase">VOID</span>}
                         </td>
-                        <td className="px-4 py-2.5 text-xs text-hmuted whitespace-nowrap">{formatDate(e.entry_date)}</td>
-                        <td className="px-4 py-2.5 text-htext">{e.description}</td>
-                        <td className="px-4 py-2.5 text-xs text-hmuted font-mono">{e.reference ?? '—'}</td>
-                        <td className="px-4 py-2.5">
-                          <span className="bg-hsurface2 text-hmuted text-[10px] px-2 py-0.5 rounded-full capitalize">
+                        <td className="px-3 py-2 text-xs text-hmuted whitespace-nowrap">{formatDate(e.entry_date)}</td>
+                        <td className="px-3 py-2 text-htext truncate" title={e.description}>{e.description}</td>
+                        <td className="px-3 py-2 text-xs text-hmuted font-mono whitespace-nowrap truncate">{e.reference ?? '—'}</td>
+                        <td className="px-3 py-2">
+                          <span className="bg-hsurface2 text-hmuted text-[10px] px-2 py-0.5 rounded-full capitalize whitespace-nowrap">
                             {(e.reference_type ?? 'manual').replace(/_/g, ' ')}
                           </span>
                         </td>
-                        <td className="px-4 py-2.5">
+                        <td className="px-3 py-2">
                           {e.is_void
                             ? <span className="text-[10px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full font-bold uppercase">Void</span>
                             : e.status === 'draft'
@@ -1596,7 +1614,7 @@ export default function AccountingPage() {
                               : <span className="text-[10px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-bold uppercase">Posted</span>
                           }
                         </td>
-                        <td className="px-4 py-2.5" onClick={ev => ev.stopPropagation()}>
+                        <td className="px-3 py-2" onClick={ev => ev.stopPropagation()}>
                           {!e.is_void && (
                             <div className="flex items-center gap-1.5">
                               {e.status === 'draft' && (
@@ -1635,18 +1653,18 @@ export default function AccountingPage() {
                           {entryLines[e.id].map((l: any) => (
                             <tr key={l.id} className="border-t border-hborder/20 bg-hbg/40">
                               <td />
-                              <td className="px-4 py-2 text-xs font-mono text-navy whitespace-nowrap">{l.account?.code} — {l.account?.name}</td>
+                              <td className="px-3 py-2 text-xs font-mono text-navy max-w-[220px] truncate" title={l.account?.name}>{l.account?.code} — {l.account?.name}</td>
                               <td />
-                              <td className="px-4 py-2 text-xs text-hmuted">{l.description ?? ''}</td>
+                              <td className="px-3 py-2 text-xs text-hmuted max-w-[180px] truncate" title={l.description ?? undefined}>{l.description ?? ''}</td>
                               <td colSpan={2} />
-                              <td className="px-4 py-2 text-xs text-right font-medium tabular-nums">{Number(l.debit)  > 0 ? formatCurrency(l.debit)  : ''}</td>
-                              <td className="px-4 py-2 text-xs text-right font-medium tabular-nums">{Number(l.credit) > 0 ? formatCurrency(l.credit) : ''}</td>
+                              <td className="px-3 py-2 text-xs text-right font-medium tabular-nums">{Number(l.debit)  > 0 ? formatCurrency(l.debit)  : ''}</td>
+                              <td className="px-3 py-2 text-xs text-right font-medium tabular-nums">{Number(l.credit) > 0 ? formatCurrency(l.credit) : ''}</td>
                             </tr>
                           ))}
                           <tr key={`${e.id}-ltot`} className="border-t-2 border-hborder/60 bg-hsurface2/40">
                             <td colSpan={6} className="px-4 py-2 text-right text-[11px] font-semibold text-hmuted uppercase tracking-wide">Totals</td>
-                            <td className="px-4 py-2 text-right text-xs font-bold tabular-nums">{formatCurrency(entryLines[e.id].reduce((s: number, l: any) => s + Number(l.debit), 0))}</td>
-                            <td className="px-4 py-2 text-right text-xs font-bold tabular-nums">{formatCurrency(entryLines[e.id].reduce((s: number, l: any) => s + Number(l.credit), 0))}</td>
+                            <td className="px-3 py-2 text-right text-xs font-bold tabular-nums">{formatCurrency(entryLines[e.id].reduce((s: number, l: any) => s + Number(l.debit), 0))}</td>
+                            <td className="px-3 py-2 text-right text-xs font-bold tabular-nums">{formatCurrency(entryLines[e.id].reduce((s: number, l: any) => s + Number(l.credit), 0))}</td>
                           </tr>
                         </>
                       )}
@@ -1700,31 +1718,31 @@ export default function AccountingPage() {
                       <h3 className="font-serif text-[17px] text-dark-navy">{account.code} — {account.name}</h3>
                       <p className="text-xs text-hmuted capitalize">{account.type} · Normal balance: {normalBalance(account.type)}</p>
                     </div>
-                    <table className="w-full text-sm">
+                    <table className="w-full text-sm table-fixed">
                       <thead><tr className="bg-hsurface2">
-                        {['Date', 'Entry #', 'Description', 'Reference', 'Debit', 'Credit', 'Balance'].map(h => (
-                          <th key={h} className={cn('px-4 py-3 text-[11px] font-semibold text-hmuted uppercase tracking-wide', h.match(/Debit|Credit|Balance/) ? 'text-right' : 'text-left')}>{h}</th>
+                        {([['Date', 'w-[10%]'], ['Entry #', 'w-[16%]'], ['Description', 'w-[30%]'], ['Reference', 'w-[16%]'], ['Debit', 'w-[10%]'], ['Credit', 'w-[10%]'], ['Balance', 'w-[8%]']] as const).map(([h, w]) => (
+                          <th key={h} className={cn('px-3 py-2.5 text-[11px] font-semibold text-hmuted uppercase tracking-wide', ['Debit','Credit','Balance'].includes(h) ? 'text-right' : 'text-left', w)}>{h}</th>
                         ))}
                       </tr></thead>
                       <tbody>
                         {rows.map((r: any, i: number) => (
                           <tr key={r.id} className={cn('border-t border-hborder', i % 2 === 1 ? 'bg-hbg/30' : '')}>
-                            <td className="px-4 py-2.5 text-xs text-hmuted whitespace-nowrap">{formatDate(r.entry.entry_date)}</td>
-                            <td className="px-4 py-2.5 font-mono text-xs text-hmuted">{r.entry.entry_number}</td>
-                            <td className="px-4 py-2.5 text-htext">{r.entry.description}</td>
-                            <td className="px-4 py-2.5 text-xs text-hmuted font-mono">{r.entry.reference ?? '—'}</td>
-                            <td className="px-4 py-2.5 text-right font-medium">{Number(r.debit)  > 0 ? formatCurrency(r.debit)  : ''}</td>
-                            <td className="px-4 py-2.5 text-right font-medium">{Number(r.credit) > 0 ? formatCurrency(r.credit) : ''}</td>
-                            <td className="px-4 py-2.5 text-right font-bold text-dark-navy whitespace-nowrap">{formatCurrency(r.running_balance)}</td>
+                            <td className="px-3 py-2 text-xs text-hmuted whitespace-nowrap">{formatDate(r.entry.entry_date)}</td>
+                            <td className="px-3 py-2 font-mono text-xs text-hmuted whitespace-nowrap truncate">{r.entry.entry_number}</td>
+                            <td className="px-3 py-2 text-htext truncate" title={r.entry.description}>{r.entry.description}</td>
+                            <td className="px-3 py-2 text-xs text-hmuted font-mono whitespace-nowrap truncate">{r.entry.reference ?? '—'}</td>
+                            <td className="px-3 py-2 text-right font-medium whitespace-nowrap">{Number(r.debit)  > 0 ? formatCurrency(r.debit)  : ''}</td>
+                            <td className="px-3 py-2 text-right font-medium whitespace-nowrap">{Number(r.credit) > 0 ? formatCurrency(r.credit) : ''}</td>
+                            <td className="px-3 py-2 text-right font-bold text-dark-navy whitespace-nowrap">{formatCurrency(r.running_balance)}</td>
                           </tr>
                         ))}
                       </tbody>
                       <tfoot>
                         <tr className="bg-dark-navy text-white">
                           <td colSpan={4} className="px-4 py-3 text-xs font-semibold uppercase tracking-wide">Totals</td>
-                          <td className="px-4 py-3 text-right font-bold">{formatCurrency(rows.reduce((s: number, r: any) => s + Number(r.debit), 0))}</td>
-                          <td className="px-4 py-3 text-right font-bold">{formatCurrency(rows.reduce((s: number, r: any) => s + Number(r.credit), 0))}</td>
-                          <td className="px-4 py-3 text-right font-bold">{formatCurrency(rows[rows.length - 1]?.running_balance ?? 0)}</td>
+                          <td className="px-3 py-2 text-right font-bold">{formatCurrency(rows.reduce((s: number, r: any) => s + Number(r.debit), 0))}</td>
+                          <td className="px-3 py-2 text-right font-bold">{formatCurrency(rows.reduce((s: number, r: any) => s + Number(r.credit), 0))}</td>
+                          <td className="px-3 py-2 text-right font-bold">{formatCurrency(rows[rows.length - 1]?.running_balance ?? 0)}</td>
                         </tr>
                       </tfoot>
                     </table>
@@ -1757,21 +1775,21 @@ export default function AccountingPage() {
                   <h3 className="font-serif text-[17px] text-dark-navy">Trial Balance</h3>
                   <p className="text-xs text-hmuted">{tbFrom} — {tbTo} · {activeBranch?.location}</p>
                 </div>
-                <table className="w-full text-sm">
+                <table className="w-full text-sm table-fixed">
                   <thead><tr className="bg-hsurface2">
-                    {['Code','Account Name','Type','Debit ($)','Credit ($)','Balance ($)'].map(h => (
-                      <th key={h} className={cn('px-4 py-3 text-[11px] font-semibold text-hmuted uppercase tracking-wide', h.includes('$') ? 'text-right' : 'text-left')}>{h}</th>
+                    {([['Code','w-[10%]'],['Account Name','w-[38%]'],['Type','w-[14%]'],['Debit ($)','w-[13%]'],['Credit ($)','w-[13%]'],['Balance ($)','w-[12%]']] as const).map(([h, w]) => (
+                      <th key={h} className={cn('px-3 py-2.5 text-[11px] font-semibold text-hmuted uppercase tracking-wide', h.includes('$') ? 'text-right' : 'text-left', w)}>{h}</th>
                     ))}
                   </tr></thead>
                   <tbody>
                     {tbRows.map((r, i) => (
                       <tr key={r.id} className={cn('border-t border-hborder', i % 2 === 1 ? 'bg-hbg/30' : '')}>
-                        <td className="px-4 py-2 font-mono text-xs text-navy">{r.code}</td>
-                        <td className="px-4 py-2 text-htext">{r.name}</td>
-                        <td className="px-4 py-2"><span className={cn('text-[10px] px-2 py-0.5 rounded-full font-medium', TYPE_COLOR[r.type as AccountType])}>{r.type}</span></td>
-                        <td className="px-4 py-2 text-right text-hmuted">{r.dr > 0 ? formatCurrency(r.dr) : ''}</td>
-                        <td className="px-4 py-2 text-right text-hmuted">{r.cr > 0 ? formatCurrency(r.cr) : ''}</td>
-                        <td className={cn('px-4 py-2 text-right font-semibold', r.balance < 0 ? 'text-red-600' : 'text-dark-navy')}>{formatCurrency(Math.abs(r.balance))}</td>
+                        <td className="px-3 py-2 font-mono text-xs text-navy whitespace-nowrap truncate">{r.code}</td>
+                        <td className="px-3 py-2 text-htext truncate" title={r.name}>{r.name}</td>
+                        <td className="px-3 py-2"><span className={cn('text-[10px] px-2 py-0.5 rounded-full font-medium', TYPE_COLOR[r.type as AccountType])}>{r.type}</span></td>
+                        <td className="px-3 py-2 text-right text-hmuted whitespace-nowrap">{r.dr > 0 ? formatCurrency(r.dr) : ''}</td>
+                        <td className="px-3 py-2 text-right text-hmuted whitespace-nowrap">{r.cr > 0 ? formatCurrency(r.cr) : ''}</td>
+                        <td className={cn('px-3 py-2 text-right font-semibold whitespace-nowrap', r.balance < 0 ? 'text-red-600' : 'text-dark-navy')}>{formatCurrency(Math.abs(r.balance))}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -1783,9 +1801,9 @@ export default function AccountingPage() {
                       return (
                         <tr className="bg-dark-navy text-white">
                           <td colSpan={3} className="px-4 py-3 font-bold text-sm uppercase tracking-wide">Totals</td>
-                          <td className="px-4 py-3 text-right font-bold">{formatCurrency(totDr)}</td>
-                          <td className="px-4 py-3 text-right font-bold">{formatCurrency(totCr)}</td>
-                          <td className="px-4 py-3 text-right font-bold">
+                          <td className="px-3 py-2 text-right font-bold">{formatCurrency(totDr)}</td>
+                          <td className="px-3 py-2 text-right font-bold">{formatCurrency(totCr)}</td>
+                          <td className="px-3 py-2 text-right font-bold">
                             {balanced ? <span className="text-green-300">✓ Balanced</span> : <span className="text-red-300">⚠ Unbalanced</span>}
                           </td>
                         </tr>
@@ -1983,11 +2001,11 @@ export default function AccountingPage() {
                     ))}
                   </div>
                   <div className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
-                    <table className="w-full text-sm">
+                    <table className="w-full text-sm table-fixed">
                       <thead><tr className="bg-hsurface2">
-                        <th className="px-3 py-3 w-10" />
-                        {['Date','Entry #','Description','Debit','Credit','Cleared'].map(h => (
-                          <th key={h} className={cn('px-4 py-3 text-[11px] font-semibold text-hmuted uppercase tracking-wide', h.match(/Debit|Credit/) ? 'text-right' : 'text-left')}>{h}</th>
+                        <th className="px-3 py-3 w-[5%]" />
+                        {([['Date','w-[10%]'],['Entry #','w-[15%]'],['Description','w-[38%]'],['Debit','w-[11%]'],['Credit','w-[11%]'],['Cleared','w-[10%]']] as const).map(([h, w]) => (
+                          <th key={h} className={cn('px-3 py-2.5 text-[11px] font-semibold text-hmuted uppercase tracking-wide', h.match(/Debit|Credit/) ? 'text-right' : 'text-left', w)}>{h}</th>
                         ))}
                       </tr></thead>
                       <tbody>
@@ -1997,12 +2015,12 @@ export default function AccountingPage() {
                               <input type="checkbox" checked={r.is_reconciled} onChange={() => toggleReconciled(r.id, r.is_reconciled)}
                                 className="w-4 h-4 accent-green-600 cursor-pointer" />
                             </td>
-                            <td className="px-4 py-2.5 text-xs text-hmuted whitespace-nowrap">{formatDate(r.entry?.entry_date)}</td>
-                            <td className="px-4 py-2.5 font-mono text-xs text-hmuted">{r.entry?.entry_number}</td>
-                            <td className="px-4 py-2.5 text-htext max-w-[240px] truncate">{r.entry?.description}</td>
-                            <td className="px-4 py-2.5 text-right font-medium">{Number(r.debit) > 0 ? formatCurrency(r.debit) : ''}</td>
-                            <td className="px-4 py-2.5 text-right font-medium">{Number(r.credit) > 0 ? formatCurrency(r.credit) : ''}</td>
-                            <td className="px-4 py-2.5 text-center">{r.is_reconciled ? <span className="text-green-600 font-bold">✓</span> : ''}</td>
+                            <td className="px-3 py-2 text-xs text-hmuted whitespace-nowrap">{formatDate(r.entry?.entry_date)}</td>
+                            <td className="px-3 py-2 font-mono text-xs text-hmuted truncate">{r.entry?.entry_number}</td>
+                            <td className="px-3 py-2 text-htext truncate">{r.entry?.description}</td>
+                            <td className="px-3 py-2 text-right font-medium whitespace-nowrap">{Number(r.debit) > 0 ? formatCurrency(r.debit) : ''}</td>
+                            <td className="px-3 py-2 text-right font-medium whitespace-nowrap">{Number(r.credit) > 0 ? formatCurrency(r.credit) : ''}</td>
+                            <td className="px-3 py-2 text-center">{r.is_reconciled ? <span className="text-green-600 font-bold">✓</span> : ''}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -2029,10 +2047,10 @@ export default function AccountingPage() {
               }}>+ New Template</Button>
             </div>
             <div className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
-              <table className="w-full text-sm">
+              <table className="w-full text-sm table-fixed">
                 <thead><tr className="bg-hsurface2">
-                  {['Template Name','Description','Frequency','Next Due','Active','Actions'].map(h => (
-                    <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide">{h}</th>
+                  {([['Template Name','w-[20%]'],['Description','w-[34%]'],['Frequency','w-[14%]'],['Next Due','w-[14%]'],['Active','w-[8%]'],['Actions','w-[10%]']] as const).map(([h, w]) => (
+                    <th key={h} className={cn('px-3 py-2.5 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide', w)}>{h}</th>
                   ))}
                 </tr></thead>
                 <tbody>
@@ -2040,16 +2058,16 @@ export default function AccountingPage() {
                     <tr><td colSpan={6} className="px-5 py-12 text-center text-hmuted">No recurring templates yet. Create one for monthly salary, rent, utilities, etc.</td></tr>
                   ) : recurring.map(rec => (
                     <tr key={rec.id} className={cn('border-t border-hborder hover:bg-hbg/40', !rec.is_active && 'opacity-50')}>
-                      <td className="px-4 py-2.5 font-medium text-htext">{rec.name}</td>
-                      <td className="px-4 py-2.5 text-xs text-hmuted max-w-[200px] truncate">{rec.description}</td>
-                      <td className="px-4 py-2.5 text-xs text-hmuted capitalize">{rec.frequency}</td>
-                      <td className="px-4 py-2.5 text-xs text-hmuted whitespace-nowrap">{formatDate(rec.next_due_date)}</td>
-                      <td className="px-4 py-2.5">
+                      <td className="px-3 py-2 font-medium text-htext truncate" title={rec.name}>{rec.name}</td>
+                      <td className="px-3 py-2 text-xs text-hmuted truncate">{rec.description}</td>
+                      <td className="px-3 py-2 text-xs text-hmuted capitalize truncate">{rec.frequency}</td>
+                      <td className="px-3 py-2 text-xs text-hmuted whitespace-nowrap">{formatDate(rec.next_due_date)}</td>
+                      <td className="px-3 py-2">
                         <span className={cn('text-[10px] px-2 py-0.5 rounded-full font-medium', rec.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500')}>
                           {rec.is_active ? 'Active' : 'Inactive'}
                         </span>
                       </td>
-                      <td className="px-4 py-2.5">
+                      <td className="px-3 py-2">
                         <div className="flex gap-3">
                           <button onClick={() => postRecurring(rec)} className="text-xs text-navy hover:underline font-medium">Post Now</button>
                           <button onClick={() => {
@@ -2069,34 +2087,34 @@ export default function AccountingPage() {
         )}
 
         {/* ══ ACCOUNTING PERIODS ════════════════════════════════════ */}
-        {tab === 'periods' && (
-          <div>
-            <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-5 text-sm text-amber-800">
-              <strong>Period Close:</strong> Closing a period blocks new journal entries dated in that month. Reopen to make corrections. Year-end close entries (transferring P&L to Retained Earnings) should be posted manually as a closing-type journal entry.
-            </div>
-            <div className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
-              <table className="w-full text-sm">
+        {tab === 'periods' && (() => {
+          const allMonths = Array.from({ length: 24 }, (_, i) => {
+            const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - i)
+            return { year: d.getFullYear(), month: d.getMonth() + 1 }
+          })
+          const columns = [allMonths.slice(0, 12), allMonths.slice(12, 24)]
+          const renderPeriodsTable = (months: { year: number; month: number }[], key: string) => (
+            <div key={key} className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
+              <table className="w-full text-sm table-fixed">
                 <thead><tr className="bg-hsurface2">
-                  {['Period','Status','Closed At','Action'].map(h => (
-                    <th key={h} className="px-5 py-3 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide">{h}</th>
+                  {([['Period','w-1/3'],['Status','w-1/4'],['Closed At','w-1/4'],['Action','w-1/6']] as const).map(([h, w]) => (
+                    <th key={h} className={cn('px-3 py-2.5 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide', w)}>{h}</th>
                   ))}
                 </tr></thead>
                 <tbody>
-                  {Array.from({ length: 24 }, (_, i) => {
-                    const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - i)
-                    const year = d.getFullYear(), month = d.getMonth() + 1
+                  {months.map(({ year, month }) => {
                     const period = periods.find(p => p.year === year && p.month === month)
                     const isClosed = period?.status === 'closed'
                     return (
                       <tr key={`${year}-${month}`} className={cn('border-t border-hborder', isClosed ? 'bg-gray-50/60' : 'hover:bg-hbg/40')}>
-                        <td className="px-5 py-3 font-medium text-htext">{MONTH_NAMES[month - 1]} {year}</td>
-                        <td className="px-5 py-3">
-                          <span className={cn('text-xs px-2 py-0.5 rounded-full font-medium', isClosed ? 'bg-gray-100 text-gray-600' : 'bg-green-100 text-green-700')}>
+                        <td className="px-3 py-2 font-medium text-htext whitespace-nowrap truncate">{MONTH_NAMES[month - 1]} {year}</td>
+                        <td className="px-3 py-2">
+                          <span className={cn('text-xs px-2 py-0.5 rounded-full font-medium whitespace-nowrap', isClosed ? 'bg-gray-100 text-gray-600' : 'bg-green-100 text-green-700')}>
                             {isClosed ? '🔒 Closed' : '🔓 Open'}
                           </span>
                         </td>
-                        <td className="px-5 py-3 text-xs text-hmuted">{period?.closed_at ? formatDate(period.closed_at) : '—'}</td>
-                        <td className="px-5 py-3">
+                        <td className="px-3 py-2 text-xs text-hmuted whitespace-nowrap">{period?.closed_at ? formatDate(period.closed_at) : '—'}</td>
+                        <td className="px-3 py-2">
                           {isClosed ? (
                             <button onClick={() => reopenPeriod(period!.id, year, month)} className="text-xs text-navy hover:underline">Reopen</button>
                           ) : (
@@ -2109,8 +2127,18 @@ export default function AccountingPage() {
                 </tbody>
               </table>
             </div>
-          </div>
-        )}
+          )
+          return (
+            <div>
+              <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-5 text-sm text-amber-800">
+                <strong>Period Close:</strong> Closing a period blocks new journal entries dated in that month. Reopen to make corrections. Year-end close entries (transferring P&L to Retained Earnings) should be posted manually as a closing-type journal entry.
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                {columns.map((months, i) => renderPeriodsTable(months, `col-${i}`))}
+              </div>
+            </div>
+          )
+        })()}
 
         {/* ══ CHART OF ACCOUNTS ═════════════════════════════════════ */}
         {tab === 'coa' && (
@@ -2132,24 +2160,24 @@ export default function AccountingPage() {
                       <span className={cn('text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide', TYPE_COLOR[type])}>{type}</span>
                       <span className="text-xs text-hmuted">{group.length} accounts</span>
                     </div>
-                    <table className="w-full text-sm">
+                    <table className="w-full text-sm table-fixed">
                       <thead><tr className="bg-hsurface2/50">
-                        {['Code', 'Name', 'Category', 'Status', 'Actions'].map(h => (
-                          <th key={h} className="px-4 py-2 text-left text-[10px] font-semibold text-hmuted uppercase tracking-wide">{h}</th>
+                        {([['Code', 'w-[12%]'], ['Name', 'w-[40%]'], ['Category', 'w-[24%]'], ['Status', 'w-[12%]'], ['Actions', 'w-[12%]']] as const).map(([h, w]) => (
+                          <th key={h} className={cn('px-3 py-2 text-left text-[10px] font-semibold text-hmuted uppercase tracking-wide', w)}>{h}</th>
                         ))}
                       </tr></thead>
                       <tbody>
                         {group.map(acct => (
                           <tr key={acct.id} className={cn('border-t border-hborder', !acct.is_active && 'opacity-50')}>
-                            <td className="px-4 py-2.5 font-mono text-xs font-semibold text-navy">{acct.code}</td>
-                            <td className="px-4 py-2.5 font-medium text-htext">{acct.name}</td>
-                            <td className="px-4 py-2.5 text-xs text-hmuted capitalize">{acct.category.replace(/_/g, ' ')}</td>
-                            <td className="px-4 py-2.5">
+                            <td className="px-3 py-2 font-mono text-xs font-semibold text-navy whitespace-nowrap truncate">{acct.code}</td>
+                            <td className="px-3 py-2 font-medium text-htext truncate" title={acct.name}>{acct.name}</td>
+                            <td className="px-3 py-2 text-xs text-hmuted capitalize whitespace-nowrap truncate">{acct.category.replace(/_/g, ' ')}</td>
+                            <td className="px-3 py-2">
                               <span className={cn('text-[10px] px-2 py-0.5 rounded-full font-medium', acct.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500')}>
                                 {acct.is_active ? 'Active' : 'Inactive'}
                               </span>
                             </td>
-                            <td className="px-4 py-2.5">
+                            <td className="px-3 py-2">
                               <div className="flex gap-2">
                                 <button onClick={() => openEditAccount(acct)} className="text-xs text-navy hover:underline">Edit</button>
                                 <button onClick={() => toggleAccountActive(acct)} className="text-xs text-hmuted hover:text-htext hover:underline">
@@ -2224,11 +2252,11 @@ export default function AccountingPage() {
 
             {/* ── Table ── */}
             <div className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
-              <table className="w-full text-sm">
+              <table className="w-full text-sm table-fixed">
                 <thead>
                   <tr className="bg-hsurface2 border-b border-hborder">
-                    {['Date', 'Description', 'Category', 'Type', 'Amount', 'Reference', 'Reservation', ''].map(h => (
-                      <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide">{h}</th>
+                    {([['Date', 'w-[10%]'], ['Description', 'w-[26%]'], ['Category', 'w-[13%]'], ['Type', 'w-[9%]'], ['Amount', 'w-[11%]'], ['Reference', 'w-[11%]'], ['Reservation', 'w-[13%]'], ['', 'w-[7%]']] as const).map(([h, w], i) => (
+                      <th key={i} className={cn('px-3 py-2.5 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide', w)}>{h}</th>
                     ))}
                   </tr>
                 </thead>
@@ -2240,28 +2268,28 @@ export default function AccountingPage() {
                     const res   = (t as any).reservation
                     return (
                       <tr key={t.id} className="border-t border-hborder hover:bg-hbg/50 transition-colors">
-                        <td className="px-4 py-3 text-xs text-hmuted whitespace-nowrap">{formatDate(t.transaction_date)}</td>
-                        <td className="px-4 py-3 text-htext font-medium">{t.description}</td>
-                        <td className="px-4 py-3">
-                          <span className="text-xs bg-hsurface2 text-hmuted px-2 py-0.5 rounded-full">{t.category}</span>
+                        <td className="px-3 py-2 text-xs text-hmuted whitespace-nowrap">{formatDate(t.transaction_date)}</td>
+                        <td className="px-3 py-2 text-htext font-medium truncate" title={t.description}>{t.description}</td>
+                        <td className="px-3 py-2">
+                          <span className="text-xs bg-hsurface2 text-hmuted px-2 py-0.5 rounded-full whitespace-nowrap">{t.category}</span>
                         </td>
-                        <td className="px-4 py-3">
-                          <span className={cn('inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full',
+                        <td className="px-3 py-2">
+                          <span className={cn('inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full whitespace-nowrap',
                             isIn ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'
                           )}>
                             {isIn ? '↑' : '↓'} {isIn ? 'In' : 'Out'}
                           </span>
                         </td>
-                        <td className={cn('px-4 py-3 font-semibold tabular-nums', isIn ? 'text-green-700' : 'text-red-600')}>
+                        <td className={cn('px-3 py-2 font-semibold tabular-nums whitespace-nowrap', isIn ? 'text-green-700' : 'text-red-600')}>
                           {isIn ? '+' : '−'}{formatCurrency(t.amount)}
                         </td>
-                        <td className="px-4 py-3 text-xs text-hmuted font-mono">{t.reference || '—'}</td>
-                        <td className="px-4 py-3 text-xs">
+                        <td className="px-3 py-2 text-xs text-hmuted font-mono whitespace-nowrap truncate">{t.reference || '—'}</td>
+                        <td className="px-3 py-2 text-xs">
                           {res ? (
                             <div>
-                              <span className="text-blue-600 font-medium">{res.reservation_number}</span>
+                              <span className="text-blue-600 font-medium truncate block">{res.reservation_number}</span>
                               {res.guest?.full_name && (
-                                <p className="text-hmuted mt-0.5">{res.guest.full_name}</p>
+                                <p className="text-hmuted mt-0.5 truncate">{res.guest.full_name}</p>
                               )}
                             </div>
                           ) : (
@@ -2369,7 +2397,7 @@ export default function AccountingPage() {
       />
 
       {/* ── Journal Entry Modal ── */}
-      <Modal open={jeFormOpen} onClose={() => setJeFormOpen(false)} title={editJeId ? 'Edit Journal Entry' : 'New Journal Entry'} size="lg">
+      <Modal open={jeFormOpen} onClose={() => setJeFormOpen(false)} title={editJeId ? 'Edit Journal Entry' : 'New Journal Entry'} size="xl">
         <div className="space-y-4">
           <div className="grid grid-cols-3 gap-3">
             <div>
@@ -2400,12 +2428,12 @@ export default function AccountingPage() {
             </div>
             <div className="space-y-2">
               <div className="grid grid-cols-12 gap-2 px-0.5 text-[10px] text-hmuted uppercase tracking-wide font-semibold">
-                <span className="col-span-4">Account</span><span className="col-span-3">Description</span>
+                <span className="col-span-6">Account</span><span className="col-span-2">Description</span>
                 <span className="col-span-2 text-right">Debit ($)</span><span className="col-span-2 text-right">Credit ($)</span>
               </div>
               {jeLines.map((line, idx) => (
                 <div key={idx} className="grid grid-cols-12 gap-2 items-center">
-                  <select value={line.account_id} onChange={e => updateJeLine(idx, 'account_id', e.target.value)} className="col-span-4 border border-hborder rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-navy bg-hbg">
+                  <select value={line.account_id} onChange={e => updateJeLine(idx, 'account_id', e.target.value)} className="col-span-6 border border-hborder rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-navy bg-hbg">
                     <option value="">Select account…</option>
                     {ACCOUNT_TYPES.map(type => (
                       <optgroup key={type} label={capitalize(type)}>
@@ -2415,7 +2443,7 @@ export default function AccountingPage() {
                       </optgroup>
                     ))}
                   </select>
-                  <input value={line.description} onChange={e => updateJeLine(idx, 'description', e.target.value)} placeholder="Note" className="col-span-3 border border-hborder rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-navy bg-hbg" />
+                  <input value={line.description} onChange={e => updateJeLine(idx, 'description', e.target.value)} placeholder="Note" className="col-span-2 border border-hborder rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-navy bg-hbg" />
                   <input type="number" min={0} step={0.01} value={line.debit}  onChange={e => updateJeLine(idx, 'debit',  e.target.value)} placeholder="0.00" className="col-span-2 border border-hborder rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-navy bg-hbg text-right" />
                   <input type="number" min={0} step={0.01} value={line.credit} onChange={e => updateJeLine(idx, 'credit', e.target.value)} placeholder="0.00" className="col-span-2 border border-hborder rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-navy bg-hbg text-right" />
                   {jeLines.length > 2
@@ -2444,21 +2472,21 @@ export default function AccountingPage() {
       {/* ── New Bill Modal ── */}
       <Modal open={billFormOpen} onClose={() => setBillFormOpen(false)} title="Record New Bill" size="md">
         <div className="space-y-3">
+          <div>
+            <label className="block text-xs text-hmuted mb-1">Vendor</label>
+            <select value={billForm.vendor_id} onChange={e => setBillForm(f => ({ ...f, vendor_id: e.target.value }))} className={input}>
+              <option value="">No vendor / one-off</option>
+              {vendors.filter(v => v.is_active).map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-hmuted mb-1">Expense Account *</label>
+            <select value={billForm.expense_account_id} onChange={e => setBillForm(f => ({ ...f, expense_account_id: e.target.value }))} className={input}>
+              <option value="">Select account…</option>
+              {expenseAccounts.map(a => <option key={a.id} value={a.id}>{a.code} — {a.name}</option>)}
+            </select>
+          </div>
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs text-hmuted mb-1">Vendor</label>
-              <select value={billForm.vendor_id} onChange={e => setBillForm(f => ({ ...f, vendor_id: e.target.value }))} className={input}>
-                <option value="">No vendor / one-off</option>
-                {vendors.filter(v => v.is_active).map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs text-hmuted mb-1">Expense Account *</label>
-              <select value={billForm.expense_account_id} onChange={e => setBillForm(f => ({ ...f, expense_account_id: e.target.value }))} className={input}>
-                <option value="">Select account…</option>
-                {expenseAccounts.map(a => <option key={a.id} value={a.id}>{a.code} — {a.name}</option>)}
-              </select>
-            </div>
             <div>
               <label className="block text-xs text-hmuted mb-1">Bill Date</label>
               <input type="date" value={billForm.bill_date} onChange={e => setBillForm(f => ({ ...f, bill_date: e.target.value }))} className={input} />
@@ -2592,7 +2620,7 @@ export default function AccountingPage() {
       </Modal>
 
       {/* ── Recurring Entry Modal ── */}
-      <Modal open={recurFormOpen} onClose={() => setRecurFormOpen(false)} title={editRecurId ? 'Edit Template' : 'New Recurring Template'} size="lg">
+      <Modal open={recurFormOpen} onClose={() => setRecurFormOpen(false)} title={editRecurId ? 'Edit Template' : 'New Recurring Template'} size="xl">
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <div className="col-span-2">
@@ -2623,13 +2651,13 @@ export default function AccountingPage() {
             </div>
             <div className="space-y-2">
               <div className="grid grid-cols-12 gap-2 px-0.5 text-[10px] text-hmuted uppercase tracking-wide font-semibold">
-                <span className="col-span-4">Account</span><span className="col-span-3">Note</span>
+                <span className="col-span-6">Account</span><span className="col-span-2">Note</span>
                 <span className="col-span-2 text-right">Debit ($)</span><span className="col-span-2 text-right">Credit ($)</span>
               </div>
               {recurLines.map((line, idx) => (
                 <div key={idx} className="grid grid-cols-12 gap-2 items-center">
                   <select value={line.account_id} onChange={e => setRecurLines(prev => prev.map((l, i) => i === idx ? { ...l, account_id: e.target.value } : l))}
-                    className="col-span-4 border border-hborder rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-navy bg-hbg">
+                    className="col-span-6 border border-hborder rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-navy bg-hbg">
                     <option value="">Select account…</option>
                     {ACCOUNT_TYPES.map(type => (
                       <optgroup key={type} label={capitalize(type)}>
@@ -2640,7 +2668,7 @@ export default function AccountingPage() {
                     ))}
                   </select>
                   <input value={line.description} onChange={e => setRecurLines(prev => prev.map((l, i) => i === idx ? { ...l, description: e.target.value } : l))}
-                    placeholder="Note" className="col-span-3 border border-hborder rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-navy bg-hbg" />
+                    placeholder="Note" className="col-span-2 border border-hborder rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-navy bg-hbg" />
                   <input type="number" min={0} step={0.01} value={line.debit} onChange={e => setRecurLines(prev => prev.map((l, i) => i === idx ? { ...l, debit: e.target.value } : l))}
                     placeholder="0.00" className="col-span-2 border border-hborder rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-navy bg-hbg text-right" />
                   <input type="number" min={0} step={0.01} value={line.credit} onChange={e => setRecurLines(prev => prev.map((l, i) => i === idx ? { ...l, credit: e.target.value } : l))}
@@ -2696,10 +2724,10 @@ export default function AccountingPage() {
               <div className="flex justify-end mb-3">
                 <Button variant="ghost" onClick={() => window.print()}>Print</Button>
               </div>
-              <table className="w-full text-sm">
+              <table className="w-full text-sm table-fixed">
                 <thead><tr className="bg-hsurface2">
-                  {['Customer','Current','1–30 days','31–60 days','60+ days','Total'].map(h => (
-                    <th key={h} className={cn('px-3 py-2.5 text-[11px] font-semibold text-hmuted uppercase tracking-wide', h === 'Customer' ? 'text-left' : 'text-right')}>{h}</th>
+                  {([['Customer',''],['Current','w-24'],['1–30 days','w-24'],['31–60 days','w-24'],['60+ days','w-24'],['Total','w-28']] as const).map(([h, w]) => (
+                    <th key={h} className={cn('px-3 py-2.5 text-[11px] font-semibold text-hmuted uppercase tracking-wide', h === 'Customer' ? 'text-left' : 'text-right', w)}>{h}</th>
                   ))}
                 </tr></thead>
                 <tbody>
@@ -2707,12 +2735,12 @@ export default function AccountingPage() {
                     const total = v.current + v.d30 + v.d60 + v.d60p
                     return (
                       <tr key={name} className="border-t border-hborder hover:bg-hbg/40">
-                        <td className="px-3 py-2 text-htext font-medium">{name}</td>
-                        <td className="px-3 py-2 text-right text-green-700">{v.current > 0 ? formatCurrency(v.current) : '—'}</td>
-                        <td className="px-3 py-2 text-right text-yellow-700">{v.d30 > 0 ? formatCurrency(v.d30) : '—'}</td>
-                        <td className="px-3 py-2 text-right text-orange-600">{v.d60 > 0 ? formatCurrency(v.d60) : '—'}</td>
-                        <td className="px-3 py-2 text-right text-red-600">{v.d60p > 0 ? formatCurrency(v.d60p) : '—'}</td>
-                        <td className="px-3 py-2 text-right font-bold text-dark-navy">{formatCurrency(total)}</td>
+                        <td className="px-3 py-2 text-htext font-medium truncate" title={name}>{name}</td>
+                        <td className="px-3 py-2 text-right text-green-700 whitespace-nowrap">{v.current > 0 ? formatCurrency(v.current) : '—'}</td>
+                        <td className="px-3 py-2 text-right text-yellow-700 whitespace-nowrap">{v.d30 > 0 ? formatCurrency(v.d30) : '—'}</td>
+                        <td className="px-3 py-2 text-right text-orange-600 whitespace-nowrap">{v.d60 > 0 ? formatCurrency(v.d60) : '—'}</td>
+                        <td className="px-3 py-2 text-right text-red-600 whitespace-nowrap">{v.d60p > 0 ? formatCurrency(v.d60p) : '—'}</td>
+                        <td className="px-3 py-2 text-right font-bold text-dark-navy whitespace-nowrap">{formatCurrency(total)}</td>
                       </tr>
                     )
                   })}

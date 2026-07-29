@@ -57,13 +57,13 @@ export default function FrontDeskPage() {
     const today = new Date().toISOString().split('T')[0]
     const [arrRes, depRes, houseRes, allResRes, allHouseRes] = await Promise.all([
       supabase.from('reservations')
-        .select('*, guest:guests(full_name, email, phone), house:houses(name, house_type, capacity)')
+        .select('*, guest:guests(full_name, email, phone), house:houses(name, code, house_type, capacity)')
         .eq('branch_id', activeBranch.id)
         .eq('check_in_date', today)
         .in('status', ['confirmed', 'pending'])
         .order('created_at'),
       supabase.from('reservations')
-        .select('*, guest:guests(full_name, email, phone), house:houses(name, house_type, capacity)')
+        .select('*, guest:guests(full_name, email, phone), house:houses(name, code, house_type, capacity)')
         .eq('branch_id', activeBranch.id)
         .eq('check_out_date', today)
         .in('status', ['confirmed', 'checked_in'])
@@ -74,7 +74,7 @@ export default function FrontDeskPage() {
         .eq('status', 'available')
         .order('name'),
       supabase.from('reservations')
-        .select('*, guest:guests(full_name, email, phone), house:houses(name, house_type, capacity)')
+        .select('*, guest:guests(full_name, email, phone), house:houses(name, code, house_type, capacity)')
         .eq('branch_id', activeBranch.id)
         .not('status', 'in', '("cancelled","no_show")')
         .order('check_in_date'),
@@ -552,7 +552,7 @@ export default function FrontDeskPage() {
                   <h3 className="font-serif text-lg text-dark-navy">Today's Arrivals</h3>
                   <p className="text-xs text-hmuted">{arrivals.length} guests expected</p>
                 </div>
-                <span className="bg-green-100 text-green-700 text-xs font-semibold px-2.5 py-1 rounded-full">
+                <span className="bg-green-100 text-green-700 text-xs font-semibold px-2.5 py-1 rounded-full whitespace-nowrap">
                   {arrivals.length} pending
                 </span>
               </div>
@@ -569,7 +569,7 @@ export default function FrontDeskPage() {
                         <div className="min-w-0 mr-3">
                           <p className="font-medium text-htext truncate">{(res.guest as any)?.full_name ?? '—'}</p>
                           <p className="text-xs text-hmuted">
-                            {(res.house as any)?.name ?? '?'} · {(res.guest as any)?.phone ?? 'No phone'}
+                            {(res.house as any)?.code || (res.house as any)?.name || '?'} · {(res.guest as any)?.phone ?? 'No phone'}
                           </p>
                           <p className="text-xs text-hmuted mt-0.5">
                             Until {formatDate(res.check_out_date)} · {pax} pax
@@ -594,7 +594,7 @@ export default function FrontDeskPage() {
                   <h3 className="font-serif text-lg text-dark-navy">Today's Departures</h3>
                   <p className="text-xs text-hmuted">{departures.length} guests checking out</p>
                 </div>
-                <span className="bg-blue-100 text-blue-700 text-xs font-semibold px-2.5 py-1 rounded-full">
+                <span className="bg-blue-100 text-blue-700 text-xs font-semibold px-2.5 py-1 rounded-full whitespace-nowrap">
                   {departures.length} active
                 </span>
               </div>
@@ -609,7 +609,7 @@ export default function FrontDeskPage() {
                       <div className="min-w-0 mr-3">
                         <p className="font-medium text-htext truncate">{(res.guest as any)?.full_name ?? '—'}</p>
                         <p className="text-xs text-hmuted">
-                          {(res.house as any)?.name ?? '?'} · {(res.guest as any)?.phone ?? 'No phone'}
+                          {(res.house as any)?.code || (res.house as any)?.name || '?'} · {(res.guest as any)?.phone ?? 'No phone'}
                         </p>
                         <p className="text-xs text-hmuted mt-0.5">
                           Checked in: {res.actual_check_in ? formatDate(res.actual_check_in) : 'Unknown'}
@@ -703,10 +703,10 @@ export default function FrontDeskPage() {
                 <div className="flex items-center gap-2">
                   <Badge status={res.status} />
                   {canCheckIn && (
-                    <span className="text-xs text-green-700 font-medium bg-green-50 px-2 py-0.5 rounded-full">Arriving today</span>
+                    <span className="text-xs text-green-700 font-medium bg-green-50 px-2 py-0.5 rounded-full whitespace-nowrap">Arriving today</span>
                   )}
                   {canCheckOut && (
-                    <span className="text-xs text-blue-700 font-medium bg-blue-50 px-2 py-0.5 rounded-full">Departing today</span>
+                    <span className="text-xs text-blue-700 font-medium bg-blue-50 px-2 py-0.5 rounded-full whitespace-nowrap">Departing today</span>
                   )}
                 </div>
 

@@ -10,7 +10,7 @@ import { formatCurrency, formatDate, capitalize } from '@/lib/utils'
 import { toast } from '@/components/ui/Toast'
 import { useBranch } from '@/context/BranchContext'
 import { cn } from '@/lib/utils'
-import type { House, HouseStatus, HouseType, Room, RoomStatus } from '@/types'
+import type { House, HouseStatus, HouseType, HousePromotion, Room, RoomStatus } from '@/types'
 
 const HOUSE_TYPES: HouseType[] = ['homestay', 'villa', 'bungalow', 'cottage', 'cabin', 'chalet']
 const HOUSE_STATUSES: HouseStatus[] = ['available', 'occupied', 'maintenance', 'closed']
@@ -32,7 +32,7 @@ const ROOM_DOT: Record<RoomStatus, string> = {
 }
 
 const emptyHouseForm = {
-  name: '', house_type: 'homestay' as HouseType,
+  name: '', house_type: 'homestay' as HouseType, code: '',
   capacity: 4, base_rate_per_night: 0, amenities: '', description: '',
 }
 
@@ -69,10 +69,18 @@ export default function PropertiesPage() {
 
   const [filterStatus, setFilterStatus] = useState<string>('all')
 
+  // Promotions
+  const [promotions, setPromotions] = useState<HousePromotion[]>([])
+  const [promoFormOpen, setPromoFormOpen] = useState(false)
+  const [editPromoId, setEditPromoId] = useState<string | null>(null)
+  const [promoForm, setPromoForm] = useState({ name: '', promo_rate: 0, start_date: '', end_date: '', is_active: true })
+  const [promoSaving, setPromoSaving] = useState(false)
+
   useEffect(() => { if (activeBranch) loadHouses() }, [activeBranch]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (!selectedHouseId) { setHouseBookings([]); return }
+    if (!selectedHouseId) { setHouseBookings([]); setPromotions([]); return }
+    loadPromotions(selectedHouseId)
     const today = new Date().toISOString().split('T')[0]
     supabase
       .from('reservations')
@@ -100,6 +108,74 @@ export default function PropertiesPage() {
     ? houses
     : houses.filter(h => h.status === filterStatus)
 
+  // ── Promotion CRUD ────────────────────────────────────────────
+
+  async function loadPromotions(houseId: string) {
+    const { data } = await supabase.from('house_promotions')
+      .select('*').eq('house_id', houseId).order('start_date', { ascending: false })
+    setPromotions((data ?? []) as HousePromotion[])
+  }
+
+  function openAddPromo() {
+    setEditPromoId(null)
+    setPromoForm({ name: '', promo_rate: 0, start_date: '', end_date: '', is_active: true })
+    setPromoFormOpen(true)
+  }
+
+  function openEditPromo(promo: HousePromotion) {
+    setEditPromoId(promo.id)
+    setPromoForm({ name: promo.name, promo_rate: promo.promo_rate, start_date: promo.start_date, end_date: promo.end_date, is_active: promo.is_active })
+    setPromoFormOpen(true)
+  }
+
+  async function savePromo() {
+    if (!selectedHouseId) return
+    if (!promoForm.name.trim()) { toast('Promotion name is required', 'error'); return }
+    if (!promoForm.start_date || !promoForm.end_date) { toast('Start and end dates are required', 'error'); return }
+    if (promoForm.end_date < promoForm.start_date) { toast('End date must be on or after start date', 'error'); return }
+    setPromoSaving(true)
+    const payload = {
+      name: promoForm.name.trim(),
+      promo_rate: Number(promoForm.promo_rate),
+      start_date: promoForm.start_date,
+      end_date: promoForm.end_date,
+      is_active: promoForm.is_active,
+      updated_at: new Date().toISOString(),
+    }
+    if (editPromoId) {
+      const { error } = await supabase.from('house_promotions').update(payload).eq('id', editPromoId)
+      if (error) { toast(error.message, 'error'); setPromoSaving(false); return }
+      toast('Promotion updated')
+    } else {
+      const { error } = await supabase.from('house_promotions').insert({ ...payload, house_id: selectedHouseId, branch_id: activeBranch?.id ?? null })
+      if (error) { toast(error.message, 'error'); setPromoSaving(false); return }
+      toast('Promotion added')
+    }
+    setPromoSaving(false)
+    setPromoFormOpen(false)
+    loadPromotions(selectedHouseId)
+  }
+
+  async function togglePromoActive(promo: HousePromotion) {
+    await supabase.from('house_promotions').update({ is_active: !promo.is_active, updated_at: new Date().toISOString() }).eq('id', promo.id)
+    loadPromotions(promo.house_id)
+  }
+
+  function deletePromo(promo: HousePromotion) {
+    setConfirmDialog({
+      title: `Delete "${promo.name}"?`,
+      message: 'This promotion will be permanently removed.',
+      confirmLabel: 'Delete Promotion',
+      variant: 'danger',
+      onConfirm: async () => {
+        setConfirmDialog(null)
+        await supabase.from('house_promotions').delete().eq('id', promo.id)
+        toast('Promotion deleted')
+        loadPromotions(promo.house_id)
+      },
+    })
+  }
+
   // ── House CRUD ────────────────────────────────────────────────
 
   function openAddHouse() {
@@ -114,6 +190,7 @@ export default function PropertiesPage() {
     setHouseForm({
       name: house.name,
       house_type: house.house_type,
+      code: house.code ?? '',
       capacity: house.capacity,
       base_rate_per_night: house.base_rate_per_night,
       amenities: house.amenities?.join(', ') ?? '',
@@ -129,6 +206,7 @@ export default function PropertiesPage() {
     const payload = {
       name: houseForm.name,
       house_type: houseForm.house_type,
+      code: houseForm.code.trim() || null,
       capacity: Number(houseForm.capacity),
       base_rate_per_night: Number(houseForm.base_rate_per_night),
       amenities: houseForm.amenities ? houseForm.amenities.split(',').map(a => a.trim()).filter(Boolean) : [],
@@ -348,12 +426,17 @@ export default function PropertiesPage() {
                   {/* Header */}
                   <div className="flex items-start justify-between gap-3 mb-3">
                     <div className="min-w-0">
-                      <h3 className="font-semibold text-dark-navy text-[15px] leading-snug">{house.name}</h3>
+                      <div className="flex items-center gap-1.5">
+                        <h3 className="font-semibold text-dark-navy text-[15px] leading-snug truncate">{house.name}</h3>
+                        {house.code && (
+                          <span className="flex-shrink-0 text-[10px] font-mono text-hmuted bg-white/70 px-1.5 py-0.5 rounded">{house.code}</span>
+                        )}
+                      </div>
                       <p className="text-xs text-hmuted mt-0.5">
                         {capitalize(house.house_type)} · {house.capacity} pax max · {formatCurrency(house.base_rate_per_night)}/night
                       </p>
                     </div>
-                    <span className={cn('flex-shrink-0 text-xs font-semibold px-2 py-0.5 rounded-full capitalize', c.badge)}>
+                    <span className={cn('flex-shrink-0 text-xs font-semibold px-2 py-0.5 rounded-full capitalize whitespace-nowrap', c.badge)}>
                       {house.status}
                     </span>
                   </div>
@@ -397,7 +480,7 @@ export default function PropertiesPage() {
         open={!!selectedHouse}
         onClose={() => setSelectedHouseId(null)}
         title={selectedHouse?.name ?? ''}
-        subtitle={selectedHouse ? `${capitalize(selectedHouse.house_type)} · ${selectedHouse.capacity} pax max` : ''}
+        subtitle={selectedHouse ? `${selectedHouse.code ? `${selectedHouse.code} · ` : ''}${capitalize(selectedHouse.house_type)} · ${selectedHouse.capacity} pax max` : ''}
         size="lg"
       >
         {selectedHouse && (() => {
@@ -409,7 +492,7 @@ export default function PropertiesPage() {
               <div className="grid grid-cols-3 gap-3">
                 <div className="bg-hsurface2 rounded-xl p-3 text-center">
                   <p className="text-xs text-hmuted mb-1">Status</p>
-                  <span className={cn('text-xs font-semibold px-2 py-0.5 rounded-full capitalize', c.badge)}>
+                  <span className={cn('text-xs font-semibold px-2 py-0.5 rounded-full capitalize whitespace-nowrap', c.badge)}>
                     {selectedHouse.status}
                   </span>
                 </div>
@@ -487,6 +570,63 @@ export default function PropertiesPage() {
                         >×</button>
                       </div>
                     ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Promotions */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs font-semibold text-hmuted uppercase tracking-wide">
+                    Promotions ({promotions.length})
+                  </p>
+                  <button onClick={openAddPromo} className="text-xs text-navy hover:underline font-medium">
+                    + Add Promo
+                  </button>
+                </div>
+                {promotions.length === 0 ? (
+                  <p className="text-xs text-hmuted py-3 text-center border border-dashed border-hborder rounded-xl">
+                    No promotions — add discounted rates for specific date windows
+                  </p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {promotions.map(promo => {
+                      const today = new Date().toISOString().split('T')[0]
+                      const isExpired = promo.end_date < today
+                      const isUpcoming = promo.start_date > today
+                      const isRunning = !isExpired && !isUpcoming
+                      const statusLabel = !promo.is_active ? 'inactive' : isRunning ? 'live' : isUpcoming ? 'upcoming' : 'expired'
+                      const statusClass = !promo.is_active || isExpired
+                        ? 'bg-gray-100 text-gray-500'
+                        : isRunning ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'
+                      return (
+                        <div key={promo.id} className={cn('flex items-center gap-3 rounded-lg px-3 py-2.5', promo.is_active && !isExpired ? 'bg-hsurface2' : 'bg-hsurface2/50')}>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-0.5">
+                              <p className={cn('text-sm font-medium truncate', promo.is_active && !isExpired ? 'text-htext' : 'text-hmuted line-through')}>{promo.name}</p>
+                              <span className={cn('text-[10px] px-1.5 py-0.5 rounded-full font-medium flex-shrink-0', statusClass)}>{statusLabel}</span>
+                            </div>
+                            <p className="text-xs text-hmuted">
+                              {formatCurrency(promo.promo_rate)}/night · {promo.start_date} → {promo.end_date}
+                            </p>
+                          </div>
+                          {!isExpired && (
+                            <button
+                              onClick={() => togglePromoActive(promo)}
+                              className={cn('text-[10px] px-2 py-1 rounded border font-medium transition-colors flex-shrink-0',
+                                promo.is_active
+                                  ? 'border-hborder text-hmuted hover:border-red-300 hover:text-red-500'
+                                  : 'border-green-300 text-green-600 hover:bg-green-50'
+                              )}
+                            >
+                              {promo.is_active ? 'Disable' : 'Enable'}
+                            </button>
+                          )}
+                          <button onClick={() => openEditPromo(promo)} className="text-xs text-navy hover:underline flex-shrink-0">Edit</button>
+                          <button onClick={() => deletePromo(promo)} className="text-xs text-red-500 hover:underline flex-shrink-0">×</button>
+                        </div>
+                      )
+                    })}
                   </div>
                 )}
               </div>
@@ -569,6 +709,15 @@ export default function PropertiesPage() {
               className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg"
             />
           </div>
+          <div>
+            <label className="block text-xs text-hmuted mb-1">Room Code</label>
+            <input
+              value={houseForm.code}
+              onChange={e => setHouseForm(f => ({ ...f, code: e.target.value.toUpperCase() }))}
+              placeholder="e.g. OHS-01, OPV-02"
+              className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg font-mono"
+            />
+          </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs text-hmuted mb-1">House Type</label>
@@ -621,6 +770,77 @@ export default function PropertiesPage() {
             <Button variant="ghost" onClick={() => setHouseFormOpen(false)}>Cancel</Button>
             <Button onClick={saveHouse} disabled={houseSaving}>
               {houseSaving ? 'Saving…' : editHouseId ? 'Update House' : 'Add House'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* ── Add / Edit Promo Modal ── */}
+      <Modal
+        open={promoFormOpen}
+        onClose={() => setPromoFormOpen(false)}
+        title={editPromoId ? 'Edit Promotion' : 'Add Promotion'}
+        subtitle={selectedHouse ? `For ${selectedHouse.name}` : undefined}
+        size="md"
+      >
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs text-hmuted mb-1">Promotion Name *</label>
+            <input
+              value={promoForm.name}
+              onChange={e => setPromoForm(f => ({ ...f, name: e.target.value }))}
+              placeholder="e.g. Khmer New Year, Low Season Special"
+              className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-hmuted mb-1">Promo Rate / Night ($)</label>
+            <input
+              type="number" min={0} step={0.01}
+              value={promoForm.promo_rate}
+              onChange={e => setPromoForm(f => ({ ...f, promo_rate: Number(e.target.value) }))}
+              className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg"
+            />
+            {selectedHouse && Number(promoForm.promo_rate) > 0 && (
+              <p className="text-xs text-hmuted mt-1">
+                {Math.round((1 - Number(promoForm.promo_rate) / selectedHouse.base_rate_per_night) * 100)}% off base rate of {formatCurrency(selectedHouse.base_rate_per_night)}/night
+              </p>
+            )}
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-hmuted mb-1">Start Date *</label>
+              <input
+                type="date"
+                value={promoForm.start_date}
+                onChange={e => setPromoForm(f => ({ ...f, start_date: e.target.value }))}
+                className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-hmuted mb-1">End Date *</label>
+              <input
+                type="date"
+                value={promoForm.end_date}
+                min={promoForm.start_date}
+                onChange={e => setPromoForm(f => ({ ...f, end_date: e.target.value }))}
+                className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg"
+              />
+            </div>
+          </div>
+          <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={promoForm.is_active}
+              onChange={e => setPromoForm(f => ({ ...f, is_active: e.target.checked }))}
+              className="rounded border-hborder"
+            />
+            <span className="text-htext">Active — apply to new reservations</span>
+          </label>
+          <div className="flex justify-end gap-3 pt-2">
+            <Button variant="ghost" onClick={() => setPromoFormOpen(false)}>Cancel</Button>
+            <Button onClick={savePromo} disabled={promoSaving}>
+              {promoSaving ? 'Saving…' : editPromoId ? 'Update Promotion' : 'Add Promotion'}
             </Button>
           </div>
         </div>

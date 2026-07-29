@@ -5,7 +5,8 @@ import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from '@/components/ui/Toast'
-import type { HotelSettings } from '@/types'
+import { formatCurrency } from '@/lib/utils'
+import type { HotelSettings, ServiceCatalogItem, ServiceCatalogCategory } from '@/types'
 import { useBranch } from '@/context/BranchContext'
 
 const NOTIFICATION_EVENTS = [
@@ -30,7 +31,7 @@ interface PaymentMethod {
 
 export default function SettingsPage() {
   const supabase = createClient()
-  const { activeBranch } = useBranch()
+  const { activeBranch, refreshHotelSettings } = useBranch()
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [testingTelegram, setTestingTelegram] = useState(false)
@@ -44,6 +45,20 @@ export default function SettingsPage() {
   const [pmForm, setPmForm] = useState({ name: '', value: '', account_code: '1020' })
   const [pmSaving, setPmSaving] = useState(false)
   const [coaAccounts, setCoaAccounts] = useState<{ id: string; code: string; name: string }[]>([])
+
+  // Service Catalog state
+  const [serviceCatalog, setServiceCatalog] = useState<ServiceCatalogItem[]>([])
+  const [scCategoryTab, setScCategoryTab] = useState<ServiceCatalogCategory>('activity')
+  const [scModalOpen, setScModalOpen] = useState(false)
+  const [editingSc, setEditingSc] = useState<ServiceCatalogItem | null>(null)
+  const [scForm, setScForm] = useState({
+    category: 'activity' as ServiceCatalogCategory,
+    code: '', name_en: '', name_kh: '', details: '',
+    unit_price: 0, revenue_account_code: '4300', cost_account_code: '6000',
+  })
+  const [scSaving, setScSaving] = useState(false)
+  const [revenueAccounts, setRevenueAccounts] = useState<{ id: string; code: string; name: string }[]>([])
+  const [expenseAccounts, setExpenseAccounts] = useState<{ id: string; code: string; name: string }[]>([])
   const [form, setForm] = useState({
     hotel_name: 'OnlyOne Homestay',
     hotel_address: '',
@@ -57,9 +72,92 @@ export default function SettingsPage() {
     currency: 'USD',
     check_in_time: '14:00',
     check_out_time: '12:00',
+    bank_name: '',
+    bank_account_name: '',
+    bank_account_number: '',
   })
 
-  useEffect(() => { if (activeBranch) { loadSettings(); loadPaymentMethods(); loadCoaAccounts() } }, [activeBranch]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (activeBranch) { loadSettings(); loadPaymentMethods(); loadCoaAccounts(); loadServiceCatalog(); loadRevenueExpenseAccounts() } }, [activeBranch]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function loadRevenueExpenseAccounts() {
+    if (!activeBranch) return
+    const [rev, exp] = await Promise.all([
+      supabase.from('chart_of_accounts').select('id, code, name').eq('branch_id', activeBranch.id).eq('is_active', true).eq('type', 'revenue').order('code'),
+      supabase.from('chart_of_accounts').select('id, code, name').eq('branch_id', activeBranch.id).eq('is_active', true).eq('type', 'expense').order('code'),
+    ])
+    setRevenueAccounts((rev.data ?? []) as { id: string; code: string; name: string }[])
+    setExpenseAccounts((exp.data ?? []) as { id: string; code: string; name: string }[])
+  }
+
+  async function loadServiceCatalog() {
+    if (!activeBranch) return
+    const { data } = await supabase.from('service_catalog_items').select('*').eq('branch_id', activeBranch.id).order('category').order('sort_order')
+    setServiceCatalog((data ?? []) as ServiceCatalogItem[])
+  }
+
+  function openAddSc() {
+    setEditingSc(null)
+    setScForm({ category: scCategoryTab, code: '', name_en: '', name_kh: '', details: '', unit_price: 0, revenue_account_code: scCategoryTab === 'fnb' ? '4100' : '4200', cost_account_code: scCategoryTab === 'fnb' ? '5300' : '5400' })
+    setScModalOpen(true)
+  }
+
+  function openEditSc(item: ServiceCatalogItem) {
+    setEditingSc(item)
+    setScForm({
+      category: item.category, code: item.code, name_en: item.name_en, name_kh: item.name_kh ?? '', details: item.details ?? '',
+      unit_price: item.unit_price, revenue_account_code: item.revenue_account_code, cost_account_code: item.cost_account_code,
+    })
+    setScModalOpen(true)
+  }
+
+  async function saveSc() {
+    if (!scForm.code.trim()) { toast('Code is required', 'error'); return }
+    if (!scForm.name_en.trim()) { toast('Name is required', 'error'); return }
+    if (!activeBranch) return
+    const codeConflict = serviceCatalog.find(i => i.code === scForm.code.trim() && i.id !== editingSc?.id)
+    if (codeConflict) { toast(`Code "${scForm.code.trim()}" is already used by "${codeConflict.name_en}"`, 'error'); return }
+    setScSaving(true)
+    const payload = {
+      category: scForm.category,
+      code: scForm.code.trim(),
+      name_en: scForm.name_en.trim(),
+      name_kh: scForm.name_kh.trim() || null,
+      details: scForm.details.trim() || null,
+      unit_price: Number(scForm.unit_price),
+      revenue_account_code: scForm.revenue_account_code,
+      cost_account_code: scForm.cost_account_code,
+      updated_at: new Date().toISOString(),
+    }
+    if (editingSc) {
+      const { error } = await supabase.from('service_catalog_items').update(payload).eq('id', editingSc.id)
+      if (error) { toast(error.message, 'error'); setScSaving(false); return }
+      toast('Catalog item updated')
+    } else {
+      const nextOrder = serviceCatalog.filter(i => i.category === scForm.category).length + 1
+      const { error } = await supabase.from('service_catalog_items').insert({
+        ...payload, branch_id: activeBranch.id, is_active: true, sort_order: nextOrder,
+      })
+      if (error) { toast(error.message, 'error'); setScSaving(false); return }
+      toast('Catalog item added')
+    }
+    setScSaving(false)
+    setScModalOpen(false)
+    loadServiceCatalog()
+  }
+
+  async function toggleScActive(item: ServiceCatalogItem) {
+    const { error } = await supabase.from('service_catalog_items').update({ is_active: !item.is_active, updated_at: new Date().toISOString() }).eq('id', item.id)
+    if (error) toast(`Failed to update: ${error.message}`, 'error')
+    loadServiceCatalog()
+  }
+
+  async function deleteSc(item: ServiceCatalogItem) {
+    if (!confirm(`Delete "${item.name_en}"? This cannot be undone.`)) return
+    const { error } = await supabase.from('service_catalog_items').delete().eq('id', item.id)
+    if (error) { toast(`Failed to delete: ${error.message}`, 'error'); return }
+    toast('Catalog item deleted', 'info')
+    loadServiceCatalog()
+  }
 
   async function loadCoaAccounts() {
     if (!activeBranch) return
@@ -175,6 +273,9 @@ export default function SettingsPage() {
         currency: data.currency ?? 'USD',
         check_in_time: data.check_in_time ?? '14:00',
         check_out_time: data.check_out_time ?? '12:00',
+        bank_name: data.bank_name ?? '',
+        bank_account_name: data.bank_account_name ?? '',
+        bank_account_number: data.bank_account_number ?? '',
       })
     }
     setLoading(false)
@@ -197,6 +298,9 @@ export default function SettingsPage() {
       currency: form.currency,
       check_in_time: form.check_in_time,
       check_out_time: form.check_out_time,
+      bank_name: form.bank_name || null,
+      bank_account_name: form.bank_account_name || null,
+      bank_account_number: form.bank_account_number || null,
       updated_at: new Date().toISOString(),
     }
     const { data, error } = await supabase
@@ -206,6 +310,7 @@ export default function SettingsPage() {
       .single()
     if (error) { toast(error.message, 'error'); setSaving(false); return }
     if (data?.id) setSettingsId(data.id)
+    await refreshHotelSettings()
     toast('Settings saved')
     setSaving(false)
   }
@@ -356,6 +461,41 @@ export default function SettingsPage() {
               </div>
             </div>
 
+            {/* Bank Transfer Details */}
+            <div className="bg-white border border-hborder rounded-2xl p-6 shadow-card">
+              <h3 className="font-serif text-lg text-dark-navy mb-1">Bank Transfer Details</h3>
+              <p className="text-xs text-hmuted mb-4">Printed on invoices/receipts paid by bank transfer</p>
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs text-hmuted mb-1">Bank Name</label>
+                  <input
+                    value={form.bank_name}
+                    onChange={e => setForm(f => ({ ...f, bank_name: e.target.value }))}
+                    placeholder="e.g. ABA Bank"
+                    className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs text-hmuted mb-1">Account Name</label>
+                    <input
+                      value={form.bank_account_name}
+                      onChange={e => setForm(f => ({ ...f, bank_account_name: e.target.value }))}
+                      className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-hmuted mb-1">Account Number</label>
+                    <input
+                      value={form.bank_account_number}
+                      onChange={e => setForm(f => ({ ...f, bank_account_number: e.target.value }))}
+                      className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg font-mono"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+
             {/* Operations */}
             <div className="bg-white border border-hborder rounded-2xl p-6 shadow-card">
               <h3 className="font-serif text-lg text-dark-navy mb-4">Operations</h3>
@@ -398,6 +538,11 @@ export default function SettingsPage() {
                       <option key={c} value={c}>{c}</option>
                     ))}
                   </select>
+                  {form.currency !== 'USD' && (
+                    <p className="text-[10px] text-amber-700 mt-1">
+                      ⚠ Changes the display symbol only — every amount already in the system is recorded in USD and will not be converted.
+                    </p>
+                  )}
                 </div>
               </div>
             </div>
@@ -419,7 +564,7 @@ export default function SettingsPage() {
                     onChange={e => setForm(f => ({ ...f, telegram_enabled: e.target.checked }))}
                     className="sr-only peer"
                   />
-                  <div className="w-11 h-6 bg-hsurface2 rounded-full peer peer-checked:bg-navy transition-colors after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-5"></div>
+                  <div className="w-11 h-6 bg-gray-300 rounded-full peer peer-checked:bg-navy transition-colors shadow-inner after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-5 after:w-5 after:shadow after:transition-all peer-checked:after:translate-x-5"></div>
                 </label>
               </div>
 
@@ -507,7 +652,7 @@ export default function SettingsPage() {
               <thead>
                 <tr className="bg-hsurface2">
                   {['Order', 'Name', 'Value / Slug', 'Maps to Account', 'Status', 'Actions'].map(h => (
-                    <th key={h} className="px-4 py-2.5 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide whitespace-nowrap">{h}</th>
+                    <th key={h} className="px-3 py-2.5 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -516,28 +661,30 @@ export default function SettingsPage() {
                   <tr><td colSpan={6} className="px-4 py-8 text-center text-hmuted text-sm">No payment methods yet — click "+ Add Method" to start.</td></tr>
                 ) : paymentMethods.map((pm, idx) => (
                   <tr key={pm.id} className="border-t border-hborder hover:bg-hbg/40 transition-colors">
-                    <td className="px-4 py-2.5">
+                    <td className="px-3 py-2">
                       <div className="flex gap-1">
                         <button onClick={() => movePm(pm, 'up')} disabled={idx === 0} className="text-hmuted hover:text-navy disabled:opacity-30 text-xs px-1">▲</button>
                         <button onClick={() => movePm(pm, 'down')} disabled={idx === paymentMethods.length - 1} className="text-hmuted hover:text-navy disabled:opacity-30 text-xs px-1">▼</button>
                       </div>
                     </td>
-                    <td className="px-4 py-2.5 font-medium text-htext">{pm.name}</td>
-                    <td className="px-4 py-2.5 font-mono text-xs text-hmuted">{pm.value}</td>
-                    <td className="px-4 py-2.5">
+                    <td className="px-3 py-2 font-medium text-htext max-w-[130px] truncate" title={pm.name}>{pm.name}</td>
+                    <td className="px-3 py-2 font-mono text-xs text-hmuted whitespace-nowrap">{pm.value}</td>
+                    <td className="px-3 py-2">
                       {(() => {
                         const code = (pm as any).account_code || (pm.is_cash ? '1010' : '1020')
                         const acct = coaAccounts.find(a => a.code === code)
-                        const label = acct ? `${acct.code} — ${acct.name}` : code
                         const isCash = code === '1010'
                         return (
-                          <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${isCash ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
-                            {label}
+                          <span
+                            className={`text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap ${isCash ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}
+                            title={acct?.name}
+                          >
+                            {code}
                           </span>
                         )
                       })()}
                     </td>
-                    <td className="px-4 py-2.5">
+                    <td className="px-3 py-2">
                       <button
                         onClick={() => togglePmActive(pm)}
                         className={`text-xs font-semibold px-2 py-0.5 rounded-full transition-colors ${pm.is_active ? 'bg-emerald-100 text-emerald-700 hover:bg-red-100 hover:text-red-600' : 'bg-gray-100 text-gray-500 hover:bg-emerald-100 hover:text-emerald-700'}`}
@@ -545,10 +692,89 @@ export default function SettingsPage() {
                         {pm.is_active ? 'Active' : 'Inactive'}
                       </button>
                     </td>
-                    <td className="px-4 py-2.5">
+                    <td className="px-3 py-2">
                       <div className="flex gap-3">
                         <button onClick={() => openEditPm(pm)} className="text-xs text-navy hover:underline">Edit</button>
                         <button onClick={() => deletePm(pm)} className="text-xs text-red-500 hover:underline">Delete</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* ── Service Catalog CRUD ── */}
+        <div className="mt-6 bg-white border border-hborder rounded-2xl p-6 shadow-card">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="font-serif text-lg text-dark-navy">Service Catalog</h3>
+              <p className="text-xs text-hmuted mt-0.5">Activities, services & F&amp;B items available as reservation add-ons for this branch</p>
+            </div>
+            <Button onClick={openAddSc} size="sm">+ Add Item</Button>
+          </div>
+          <div className="flex gap-2 mb-4">
+            {(['activity', 'fnb'] as ServiceCatalogCategory[]).map(cat => (
+              <button
+                key={cat}
+                onClick={() => setScCategoryTab(cat)}
+                className={`text-xs font-semibold px-3 py-1.5 rounded-full transition-colors ${scCategoryTab === cat ? 'bg-navy text-white' : 'bg-hsurface2 text-hmuted hover:text-navy'}`}
+              >
+                {cat === 'activity' ? 'Activities & Services' : 'Food & Beverage'}
+                <span className="ml-1.5 opacity-70">({serviceCatalog.filter(i => i.category === cat).length})</span>
+              </button>
+            ))}
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-hsurface2">
+                  {['Code', 'Name', 'Details', 'Price', 'Revenue Acct', 'Cost Acct', 'Status', 'Actions'].map(h => (
+                    <th key={h} className="px-3 py-2 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide whitespace-nowrap">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {serviceCatalog.filter(i => i.category === scCategoryTab).length === 0 ? (
+                  <tr><td colSpan={8} className="px-4 py-8 text-center text-hmuted text-sm">No items yet — click "+ Add Item" to start.</td></tr>
+                ) : serviceCatalog.filter(i => i.category === scCategoryTab).map(item => (
+                  <tr key={item.id} className="border-t border-hborder hover:bg-hbg/40 transition-colors">
+                    <td className="px-3 py-2 h-[52px] align-middle font-mono text-xs text-hmuted whitespace-nowrap">{item.code}</td>
+                    <td className="px-3 py-2 h-[52px] align-middle max-w-[170px]">
+                      <p className="font-medium text-htext truncate text-xs" title={item.name_en}>{item.name_en}</p>
+                      {item.name_kh && <p className="text-[11px] text-hmuted truncate" title={item.name_kh}>{item.name_kh}</p>}
+                    </td>
+                    <td className="px-3 py-2 h-[52px] align-middle text-xs text-hmuted max-w-[150px] truncate" title={item.details ?? undefined}>{item.details ?? '—'}</td>
+                    <td className="px-3 py-2 h-[52px] align-middle font-medium text-htext text-xs whitespace-nowrap">{formatCurrency(item.unit_price)}</td>
+                    <td className="px-3 py-2 h-[52px] align-middle">
+                      <span
+                        className="text-xs font-medium px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 whitespace-nowrap"
+                        title={revenueAccounts.find(a => a.code === item.revenue_account_code)?.name ?? undefined}
+                      >
+                        {item.revenue_account_code}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 h-[52px] align-middle">
+                      <span
+                        className="text-xs font-medium px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 whitespace-nowrap"
+                        title={expenseAccounts.find(a => a.code === item.cost_account_code)?.name ?? undefined}
+                      >
+                        {item.cost_account_code}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 h-[52px] align-middle">
+                      <button
+                        onClick={() => toggleScActive(item)}
+                        className={`text-xs font-semibold px-2 py-0.5 rounded-full transition-colors whitespace-nowrap ${item.is_active ? 'bg-emerald-100 text-emerald-700 hover:bg-red-100 hover:text-red-600' : 'bg-gray-100 text-gray-500 hover:bg-emerald-100 hover:text-emerald-700'}`}
+                      >
+                        {item.is_active ? 'Active' : 'Inactive'}
+                      </button>
+                    </td>
+                    <td className="px-3 py-2 h-[52px] align-middle">
+                      <div className="flex gap-3">
+                        <button onClick={() => openEditSc(item)} className="text-xs text-navy hover:underline">Edit</button>
+                        <button onClick={() => deleteSc(item)} className="text-xs text-red-500 hover:underline">Delete</button>
                       </div>
                     </td>
                   </tr>
@@ -608,6 +834,98 @@ export default function SettingsPage() {
           <div className="flex justify-end gap-3">
             <Button variant="ghost" onClick={() => setPmModalOpen(false)}>Cancel</Button>
             <Button onClick={savePm} disabled={pmSaving}>{pmSaving ? 'Saving…' : editingPm ? 'Update' : 'Add Method'}</Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* ── Service Catalog Item Modal ── */}
+      <Modal open={scModalOpen} onClose={() => setScModalOpen(false)} title={editingSc ? 'Edit Catalog Item' : 'Add Catalog Item'} size="md">
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs text-hmuted mb-1">Category *</label>
+            <div className="flex gap-2">
+              {(['activity', 'fnb'] as ServiceCatalogCategory[]).map(cat => (
+                <button
+                  key={cat}
+                  type="button"
+                  onClick={() => setScForm(f => ({ ...f, category: cat }))}
+                  className={`flex-1 text-xs font-semibold px-3 py-2 rounded-lg border transition-colors ${scForm.category === cat ? 'border-navy bg-navy/8 text-navy' : 'border-hborder text-hmuted hover:border-navy/40'}`}
+                >
+                  {cat === 'activity' ? 'Activity / Service' : 'Food & Beverage'}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-hmuted mb-1">Code *</label>
+              <input
+                value={scForm.code}
+                onChange={e => setScForm(f => ({ ...f, code: e.target.value.toUpperCase() }))}
+                placeholder="e.g. ACT-08"
+                className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg font-mono"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-hmuted mb-1">Price ($) *</label>
+              <input
+                type="number" min={0} step={0.01}
+                value={scForm.unit_price}
+                onChange={e => setScForm(f => ({ ...f, unit_price: Number(e.target.value) }))}
+                className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs text-hmuted mb-1">Name (English) *</label>
+            <input
+              value={scForm.name_en}
+              onChange={e => setScForm(f => ({ ...f, name_en: e.target.value }))}
+              placeholder="e.g. Jet Ski"
+              className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-hmuted mb-1">Name (Khmer)</label>
+            <input
+              value={scForm.name_kh}
+              onChange={e => setScForm(f => ({ ...f, name_kh: e.target.value }))}
+              placeholder="e.g. ម៉ូតូទឹក"
+              className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-hmuted mb-1">Details</label>
+            <input
+              value={scForm.details}
+              onChange={e => setScForm(f => ({ ...f, details: e.target.value }))}
+              placeholder="e.g. 1hr, or For 10-15 people"
+              className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-hmuted mb-1">Revenue Account *</label>
+            <select
+              value={scForm.revenue_account_code}
+              onChange={e => setScForm(f => ({ ...f, revenue_account_code: e.target.value }))}
+              className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg"
+            >
+              {revenueAccounts.map(a => <option key={a.id} value={a.code}>{a.code} — {a.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-hmuted mb-1">Cost Account *</label>
+            <select
+              value={scForm.cost_account_code}
+              onChange={e => setScForm(f => ({ ...f, cost_account_code: e.target.value }))}
+              className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg"
+            >
+              {expenseAccounts.map(a => <option key={a.id} value={a.code}>{a.code} — {a.name}</option>)}
+            </select>
+          </div>
+          <div className="flex justify-end gap-3">
+            <Button variant="ghost" onClick={() => setScModalOpen(false)}>Cancel</Button>
+            <Button onClick={saveSc} disabled={scSaving}>{scSaving ? 'Saving…' : editingSc ? 'Update' : 'Add Item'}</Button>
           </div>
         </div>
       </Modal>

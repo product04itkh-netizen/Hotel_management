@@ -47,7 +47,7 @@ export default function DashboardPage() {
       supabase.from('reservations').select('id').eq('branch_id', activeBranch.id).eq('check_out_date', today).eq('status', 'checked_in'),
       supabase.from('invoices').select('total').eq('branch_id', activeBranch.id).eq('status', 'paid').gte('paid_at', today + 'T00:00:00').lte('paid_at', today + 'T23:59:59'),
       supabase.from('housekeeping_tasks').select('id').eq('branch_id', activeBranch.id).in('status', ['pending', 'in_progress']),
-      supabase.from('reservations').select('*, guest:guests(full_name, phone), house:houses(name, house_type)').eq('branch_id', activeBranch.id).order('created_at', { ascending: false }).limit(6),
+      supabase.from('reservations').select('*, guest:guests(full_name, phone), house:houses(name, code, house_type)').eq('branch_id', activeBranch.id).order('created_at', { ascending: false }).limit(6),
     ])
 
     const houseRows = housesRes.data ?? []
@@ -168,12 +168,12 @@ export default function DashboardPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-hsurface2 text-left">
-                  <th className="px-5 py-3 text-[11px] font-semibold text-hmuted uppercase tracking-wide">Ref</th>
-                  <th className="px-5 py-3 text-[11px] font-semibold text-hmuted uppercase tracking-wide">Guest</th>
-                  <th className="px-5 py-3 text-[11px] font-semibold text-hmuted uppercase tracking-wide">House</th>
-                  <th className="px-5 py-3 text-[11px] font-semibold text-hmuted uppercase tracking-wide">Check-in</th>
-                  <th className="px-5 py-3 text-[11px] font-semibold text-hmuted uppercase tracking-wide">Check-out</th>
-                  <th className="px-5 py-3 text-[11px] font-semibold text-hmuted uppercase tracking-wide">Status</th>
+                  <th className="px-3 py-2.5 text-[11px] font-semibold text-hmuted uppercase tracking-wide">Ref</th>
+                  <th className="px-3 py-2.5 text-[11px] font-semibold text-hmuted uppercase tracking-wide">Guest</th>
+                  <th className="px-3 py-2.5 text-[11px] font-semibold text-hmuted uppercase tracking-wide">House</th>
+                  <th className="px-3 py-2.5 text-[11px] font-semibold text-hmuted uppercase tracking-wide">Check-in</th>
+                  <th className="px-3 py-2.5 text-[11px] font-semibold text-hmuted uppercase tracking-wide">Check-out</th>
+                  <th className="px-3 py-2.5 text-[11px] font-semibold text-hmuted uppercase tracking-wide">Status</th>
                 </tr>
               </thead>
               <tbody>
@@ -187,12 +187,12 @@ export default function DashboardPage() {
                   </tr>
                 ) : recentReservations.map(res => (
                   <tr key={res.id} className="border-t border-hborder hover:bg-hbg/50 transition-colors">
-                    <td className="px-5 py-3 font-mono text-xs text-hmuted">{res.reservation_number}</td>
-                    <td className="px-5 py-3 font-medium text-htext">{(res.guest as any)?.full_name ?? '—'}</td>
-                    <td className="px-5 py-3 text-hmuted">{(res.house as any)?.name ?? '—'}</td>
-                    <td className="px-5 py-3 text-hmuted">{formatDate(res.check_in_date)}</td>
-                    <td className="px-5 py-3 text-hmuted">{formatDate(res.check_out_date)}</td>
-                    <td className="px-5 py-3"><Badge status={res.status} /></td>
+                    <td className="px-3 py-2 font-mono text-xs text-hmuted whitespace-nowrap">{res.reservation_number}</td>
+                    <td className="px-3 py-2 font-medium text-htext max-w-[160px] truncate" title={(res.guest as any)?.full_name ?? undefined}>{(res.guest as any)?.full_name ?? '—'}</td>
+                    <td className="px-3 py-2 text-hmuted font-mono text-xs whitespace-nowrap" title={(res.house as any)?.name ?? undefined}>{(res.house as any)?.code || (res.house as any)?.name || '—'}</td>
+                    <td className="px-3 py-2 text-hmuted text-xs whitespace-nowrap">{formatDate(res.check_in_date)}</td>
+                    <td className="px-3 py-2 text-hmuted text-xs whitespace-nowrap">{formatDate(res.check_out_date)}</td>
+                    <td className="px-3 py-2"><Badge status={res.status} /></td>
                   </tr>
                 ))}
               </tbody>

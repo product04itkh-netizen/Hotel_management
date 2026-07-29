@@ -363,10 +363,10 @@ export default function AssetsPage() {
                 <thead>
                   <tr className="border-b border-hborder bg-hsurface2">
                     <th className="text-left px-6 py-3 text-xs font-semibold text-hmuted uppercase tracking-wide">Category</th>
-                    <th className="text-right px-4 py-3 text-xs font-semibold text-hmuted uppercase tracking-wide">Assets</th>
-                    <th className="text-right px-4 py-3 text-xs font-semibold text-hmuted uppercase tracking-wide">Total Cost</th>
-                    <th className="text-right px-4 py-3 text-xs font-semibold text-hmuted uppercase tracking-wide">Dep Rate</th>
-                    <th className="text-right px-4 py-3 text-xs font-semibold text-hmuted uppercase tracking-wide">Annual Dep</th>
+                    <th className="text-right px-3 py-2.5 text-xs font-semibold text-hmuted uppercase tracking-wide">Assets</th>
+                    <th className="text-right px-3 py-2.5 text-xs font-semibold text-hmuted uppercase tracking-wide">Total Cost</th>
+                    <th className="text-right px-3 py-2.5 text-xs font-semibold text-hmuted uppercase tracking-wide">Dep Rate</th>
+                    <th className="text-right px-3 py-2.5 text-xs font-semibold text-hmuted uppercase tracking-wide">Annual Dep</th>
                     <th className="text-right px-6 py-3 text-xs font-semibold text-hmuted uppercase tracking-wide">NBV</th>
                   </tr>
                 </thead>
@@ -384,12 +384,12 @@ export default function AssetsPage() {
                           <span className="font-medium text-htext">{c.label}</span>
                         </div>
                       </td>
-                      <td className="text-right px-4 py-3.5 text-hmuted">{c.count}</td>
-                      <td className="text-right px-4 py-3.5 font-medium text-htext">{formatCurrency(c.cost)}</td>
-                      <td className="text-right px-4 py-3.5 text-hmuted">
+                      <td className="text-right px-3 py-2 text-hmuted">{c.count}</td>
+                      <td className="text-right px-3 py-2 font-medium text-htext">{formatCurrency(c.cost)}</td>
+                      <td className="text-right px-3 py-2 text-hmuted">
                         {c.rate === 0 ? '—' : `${(c.rate * 100).toFixed(0)}%`}
                       </td>
-                      <td className="text-right px-4 py-3.5 text-red-600">{c.dep > 0 ? formatCurrency(c.dep) : '—'}</td>
+                      <td className="text-right px-3 py-2 text-red-600">{c.dep > 0 ? formatCurrency(c.dep) : '—'}</td>
                       <td className="text-right px-6 py-3.5 font-semibold text-dark-navy">{formatCurrency(c.nbv)}</td>
                     </tr>
                   ))}
@@ -397,10 +397,10 @@ export default function AssetsPage() {
                 <tfoot>
                   <tr className="bg-dark-navy/5 border-t-2 border-hborder">
                     <td className="px-6 py-3.5 font-bold text-dark-navy">Total</td>
-                    <td className="text-right px-4 py-3.5 font-bold text-dark-navy">{assets.length}</td>
-                    <td className="text-right px-4 py-3.5 font-bold text-dark-navy">{formatCurrency(totalFA)}</td>
-                    <td className="text-right px-4 py-3.5" />
-                    <td className="text-right px-4 py-3.5 font-bold text-red-600">{formatCurrency(totalDepAnnual)}</td>
+                    <td className="text-right px-3 py-2 font-bold text-dark-navy">{assets.length}</td>
+                    <td className="text-right px-3 py-2 font-bold text-dark-navy">{formatCurrency(totalFA)}</td>
+                    <td className="text-right px-3 py-2" />
+                    <td className="text-right px-3 py-2 font-bold text-red-600">{formatCurrency(totalDepAnnual)}</td>
                     <td className="text-right px-6 py-3.5 font-bold text-dark-navy">{formatCurrency(nbv)}</td>
                   </tr>
                 </tfoot>
@@ -456,15 +456,15 @@ export default function AssetsPage() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-hborder bg-hsurface2">
-                      <th className="text-left px-5 py-3 text-xs font-semibold text-hmuted uppercase tracking-wide">Description</th>
-                      <th className="text-left px-4 py-3 text-xs font-semibold text-hmuted uppercase tracking-wide">Category</th>
-                      <th className="text-right px-4 py-3 text-xs font-semibold text-hmuted uppercase tracking-wide">Qty</th>
-                      <th className="text-right px-4 py-3 text-xs font-semibold text-hmuted uppercase tracking-wide">Unit $</th>
-                      <th className="text-right px-4 py-3 text-xs font-semibold text-hmuted uppercase tracking-wide">Total $</th>
-                      <th className="text-right px-4 py-3 text-xs font-semibold text-hmuted uppercase tracking-wide">Dep%</th>
-                      <th className="text-left px-4 py-3 text-xs font-semibold text-hmuted uppercase tracking-wide">Purchased</th>
-                      <th className="text-left px-4 py-3 text-xs font-semibold text-hmuted uppercase tracking-wide">Status</th>
-                      <th className="px-4 py-3" />
+                      <th className="text-left px-3 py-2.5 text-xs font-semibold text-hmuted uppercase tracking-wide">Description</th>
+                      <th className="text-left px-3 py-2.5 text-xs font-semibold text-hmuted uppercase tracking-wide">Category</th>
+                      <th className="text-right px-3 py-2.5 text-xs font-semibold text-hmuted uppercase tracking-wide">Qty</th>
+                      <th className="text-right px-3 py-2.5 text-xs font-semibold text-hmuted uppercase tracking-wide">Unit $</th>
+                      <th className="text-right px-3 py-2.5 text-xs font-semibold text-hmuted uppercase tracking-wide">Total $</th>
+                      <th className="text-right px-3 py-2.5 text-xs font-semibold text-hmuted uppercase tracking-wide">Dep%</th>
+                      <th className="text-left px-3 py-2.5 text-xs font-semibold text-hmuted uppercase tracking-wide">Purchased</th>
+                      <th className="text-left px-3 py-2.5 text-xs font-semibold text-hmuted uppercase tracking-wide">Status</th>
+                      <th className="px-3 py-2.5" />
                     </tr>
                   </thead>
                   <tbody>
@@ -472,29 +472,29 @@ export default function AssetsPage() {
                       const cat = catInfo(a.category)
                       return (
                         <tr key={a.id} className={cn('border-b border-hborder/60 hover:bg-hsurface2 transition-colors', i % 2 === 0 ? '' : 'bg-gray-50/30')}>
-                          <td className="px-5 py-3">
+                          <td className="px-3 py-2">
                             <p className="font-medium text-htext leading-snug max-w-[260px]">{a.description}</p>
                             {a.type_brand && <p className="text-xs text-hmuted">{a.type_brand}</p>}
                             {a.asset_code && <p className="text-[10px] text-hmuted/70 font-mono">{a.asset_code}</p>}
                           </td>
-                          <td className="px-4 py-3">
+                          <td className="px-3 py-2">
                             <div className="flex items-center gap-1.5">
                               <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: cat.dot }} />
                               <span className="text-xs text-hmuted">{cat.label}</span>
                             </div>
                           </td>
-                          <td className="text-right px-4 py-3 text-hmuted">{a.quantity}</td>
-                          <td className="text-right px-4 py-3 text-hmuted">{Number(a.unit_cost) > 0 ? formatCurrency(a.unit_cost) : '—'}</td>
-                          <td className="text-right px-4 py-3 font-semibold text-dark-navy">{formatCurrency(a.total_cost)}</td>
-                          <td className="text-right px-4 py-3 text-hmuted">
+                          <td className="text-right px-3 py-2 text-hmuted">{a.quantity}</td>
+                          <td className="text-right px-3 py-2 text-hmuted">{Number(a.unit_cost) > 0 ? formatCurrency(a.unit_cost) : '—'}</td>
+                          <td className="text-right px-3 py-2 font-semibold text-dark-navy">{formatCurrency(a.total_cost)}</td>
+                          <td className="text-right px-3 py-2 text-hmuted">
                             {a.is_depreciable ? `${(Number(a.depreciation_rate) * 100).toFixed(0)}%` : <span className="text-xs italic">N/A</span>}
                           </td>
-                          <td className="px-4 py-3 text-hmuted text-xs">
+                          <td className="px-3 py-2 text-hmuted text-xs whitespace-nowrap">
                             {a.purchased_date ? formatDate(a.purchased_date) : '—'}
                           </td>
-                          <td className="px-4 py-3">
+                          <td className="px-3 py-2">
                             <span className={cn(
-                              'text-xs font-medium px-2 py-0.5 rounded-full',
+                              'text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap',
                               a.status === 'active'      && 'bg-green-100 text-green-700',
                               a.status === 'disposed'    && 'bg-gray-100 text-gray-500',
                               a.status === 'maintenance' && 'bg-yellow-100 text-yellow-700',
@@ -502,7 +502,7 @@ export default function AssetsPage() {
                               {capitalize(a.status)}
                             </span>
                           </td>
-                          <td className="px-4 py-3">
+                          <td className="px-3 py-2">
                             <div className="flex items-center gap-2">
                               <button onClick={() => openEdit(a)} className="text-xs text-navy hover:underline">Edit</button>
                               {a.status === 'active' && (
@@ -516,10 +516,10 @@ export default function AssetsPage() {
                   </tbody>
                   <tfoot>
                     <tr className="bg-dark-navy/5 border-t-2 border-hborder">
-                      <td className="px-5 py-3 font-bold text-dark-navy text-sm" colSpan={4}>
+                      <td className="px-3 py-2 font-bold text-dark-navy text-sm" colSpan={4}>
                         Subtotal ({filteredAssets.length} items)
                       </td>
-                      <td className="text-right px-4 py-3 font-bold text-dark-navy">
+                      <td className="text-right px-3 py-2 font-bold text-dark-navy">
                         {formatCurrency(filteredAssets.reduce((s, a) => s + Number(a.total_cost), 0))}
                       </td>
                       <td colSpan={4} />
@@ -600,14 +600,14 @@ export default function AssetsPage() {
               <table className="text-xs whitespace-nowrap">
                 <thead>
                   <tr className="border-b border-hborder bg-hsurface2">
-                    <th className="text-left px-4 py-3 text-xs font-semibold text-hmuted uppercase tracking-wide sticky left-0 bg-hsurface2 min-w-[220px]">Description</th>
+                    <th className="text-left px-3 py-2.5 text-xs font-semibold text-hmuted uppercase tracking-wide sticky left-0 bg-hsurface2 min-w-[220px]">Description</th>
                     <th className="text-left px-3 py-3 text-xs font-semibold text-hmuted uppercase tracking-wide min-w-[60px]">Cat.</th>
                     <th className="text-right px-3 py-3 text-xs font-semibold text-hmuted uppercase tracking-wide min-w-[80px]">Total</th>
                     <th className="text-right px-3 py-3 text-xs font-semibold text-hmuted uppercase tracking-wide min-w-[60px]">Rate</th>
                     {MONTHS.map(m => (
                       <th key={m} className="text-right px-3 py-3 text-xs font-semibold text-hmuted uppercase tracking-wide min-w-[80px]">{m}</th>
                     ))}
-                    <th className="text-right px-4 py-3 text-xs font-semibold text-hmuted uppercase tracking-wide min-w-[90px]">Annual</th>
+                    <th className="text-right px-3 py-2.5 text-xs font-semibold text-hmuted uppercase tracking-wide min-w-[90px]">Annual</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -624,7 +624,7 @@ export default function AssetsPage() {
                       <React.Fragment key={cat.value}>
                         {/* Category header */}
                         <tr className="bg-dark-navy/5 border-b border-hborder">
-                          <td className="px-4 py-2 font-semibold text-dark-navy sticky left-0 bg-dark-navy/5" colSpan={4}>
+                          <td className="px-3 py-2 font-semibold text-dark-navy sticky left-0 bg-dark-navy/5" colSpan={4}>
                             <div className="flex items-center gap-2">
                               <span className="w-2 h-2 rounded-full" style={{ background: cat.dot }} />
                               {cat.label}
@@ -638,12 +638,12 @@ export default function AssetsPage() {
                               </td>
                             )
                           })}
-                          <td className="text-right px-4 py-2 font-bold text-dark-navy">{formatCurrency(subtotal)}</td>
+                          <td className="text-right px-3 py-2 font-bold text-dark-navy">{formatCurrency(subtotal)}</td>
                         </tr>
                         {/* Asset rows */}
                         {rows.map(({ a, months, annual }, i) => (
                           <tr key={a.id} className={cn('border-b border-hborder/50 hover:bg-hsurface2', i % 2 === 0 ? '' : 'bg-gray-50/30')}>
-                            <td className="px-4 py-2.5 sticky left-0 bg-inherit">
+                            <td className="px-3 py-2 sticky left-0 bg-inherit">
                               <p className="font-medium text-htext max-w-[210px] truncate">{a.description}</p>
                             </td>
                             <td className="px-3 py-2.5 text-hmuted">{(Number(a.depreciation_rate) * 100).toFixed(0)}%</td>
@@ -654,7 +654,7 @@ export default function AssetsPage() {
                                 {m > 0 ? formatCurrency(m) : <span className="text-hborder">—</span>}
                               </td>
                             ))}
-                            <td className="text-right px-4 py-2.5 font-semibold text-dark-navy">{annual > 0 ? formatCurrency(annual) : '—'}</td>
+                            <td className="text-right px-3 py-2 font-semibold text-dark-navy">{annual > 0 ? formatCurrency(annual) : '—'}</td>
                           </tr>
                         ))}
                       </React.Fragment>
@@ -663,7 +663,7 @@ export default function AssetsPage() {
                 </tbody>
                 <tfoot>
                   <tr className="bg-dark-navy text-white border-t-2 border-dark-navy">
-                    <td className="px-4 py-3 font-bold sticky left-0 bg-dark-navy" colSpan={4}>Grand Total</td>
+                    <td className="px-3 py-2 font-bold sticky left-0 bg-dark-navy" colSpan={4}>Grand Total</td>
                     {MONTHS.map((_, idx) => {
                       const total = depAssets.reduce((s, a) => s + monthlyDep(a, idx), 0)
                       return (
@@ -672,7 +672,7 @@ export default function AssetsPage() {
                         </td>
                       )
                     })}
-                    <td className="text-right px-4 py-3 font-bold">{formatCurrency(totalDepAnnual)}</td>
+                    <td className="text-right px-3 py-2 font-bold">{formatCurrency(totalDepAnnual)}</td>
                   </tr>
                 </tfoot>
               </table>

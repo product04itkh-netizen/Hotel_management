@@ -4,6 +4,9 @@ import { sendTelegramNotification, type TelegramEvent } from '@/lib/telegram'
 
 export async function POST(request: NextRequest) {
   try {
+    const { data: { user } } = await createClient().auth.getUser()
+    if (!user) return NextResponse.json({ ok: false, error: 'Not authenticated' }, { status: 401 })
+
     const body = await request.json()
     const { event, data, branch_id, override_token, override_chat_id } = body as {
       event: TelegramEvent

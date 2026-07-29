@@ -1,7 +1,8 @@
 'use client'
 import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import type { Branch } from '@/types'
+import { setAppCurrency } from '@/lib/utils'
+import type { Branch, HotelSettings } from '@/types'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -14,6 +15,10 @@ interface BranchContextValue {
   setActiveBranch: (branch: Branch) => void
   /** True while branches are being fetched */
   loading: boolean
+  /** hotel_settings row for the active branch (check-in/out times, currency, bank details, etc.) */
+  hotelSettings: HotelSettings | null
+  /** Re-fetch hotel_settings for the active branch — call after saving Settings so changes apply immediately */
+  refreshHotelSettings: () => Promise<void>
 }
 
 // ─── Context ─────────────────────────────────────────────────────────────────
@@ -23,6 +28,8 @@ const BranchContext = createContext<BranchContextValue>({
   activeBranch: null,
   setActiveBranch: () => {},
   loading: true,
+  hotelSettings: null,
+  refreshHotelSettings: async () => {},
 })
 
 // ─── Provider ─────────────────────────────────────────────────────────────────
@@ -34,6 +41,7 @@ export function BranchProvider({ children }: { children: ReactNode }) {
   const [branches, setBranches] = useState<Branch[]>([])
   const [activeBranch, setActiveBranchState] = useState<Branch | null>(null)
   const [loading, setLoading] = useState(true)
+  const [hotelSettings, setHotelSettings] = useState<HotelSettings | null>(null)
 
   useEffect(() => {
     async function loadBranches() {
@@ -65,8 +73,24 @@ export function BranchProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  const refreshHotelSettings = useCallback(async () => {
+    if (!activeBranch) { setHotelSettings(null); setAppCurrency('USD'); return }
+    const { data } = await supabase
+      .from('hotel_settings')
+      .select('*')
+      .eq('branch_id', activeBranch.id)
+      .single()
+    const settings = (data as HotelSettings) ?? null
+    setHotelSettings(settings)
+    setAppCurrency(settings?.currency)
+  }, [activeBranch]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    refreshHotelSettings()
+  }, [activeBranch?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
-    <BranchContext.Provider value={{ branches, activeBranch, setActiveBranch, loading }}>
+    <BranchContext.Provider value={{ branches, activeBranch, setActiveBranch, loading, hotelSettings, refreshHotelSettings }}>
       {children}
     </BranchContext.Provider>
   )

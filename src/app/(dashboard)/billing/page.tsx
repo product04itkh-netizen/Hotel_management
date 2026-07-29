@@ -73,11 +73,11 @@ export default function BillingPage() {
     if (!activeBranch) return
     const [invRes, resRes, settingsRes, coaRes] = await Promise.all([
       supabase.from('invoices')
-        .select('*, reservation:reservations(reservation_number, check_in_date, check_out_date), guest:guests(full_name, phone), house:houses(name)')
+        .select('*, reservation:reservations(reservation_number, check_in_date, check_out_date), guest:guests(full_name, phone), house:houses(name, code)')
         .eq('branch_id', activeBranch.id)
         .order('created_at', { ascending: false }),
       supabase.from('reservations')
-        .select('*, guest:guests(full_name), house:houses(name, base_rate_per_night), line_items:reservation_line_items(id, label, amount, discount, revenue_account_code, cost_amount, cost_account_code, sort_order)')
+        .select('*, guest:guests(full_name), house:houses(name, base_rate_per_night), line_items:reservation_line_items(id, label, qty, unit_price, amount, discount, revenue_account_code, cost_amount, cost_account_code, sort_order)')
         .eq('branch_id', activeBranch.id)
         .in('status', ['confirmed', 'checked_in', 'checked_out'])
         .order('created_at', { ascending: false }),
@@ -172,7 +172,10 @@ export default function BillingPage() {
         if (item.label) {
           const code = (item as any).revenue_account_code || '4300'
           const itemDisc = Math.max(0, Number(item.discount ?? 0))
-          items.push({ description: item.label, quantity: 1, unit_price: Number(item.amount), discount: itemDisc || undefined, total: Math.max(0, Number(item.amount) - itemDisc), account_code: code })
+          const qty = Math.max(1, Number((item as any).qty) || 1)
+          const rawUnitPrice = (item as any).unit_price
+          const unitPrice = rawUnitPrice != null ? Number(rawUnitPrice) : Math.round((Number(item.amount) / qty) * 100) / 100
+          items.push({ description: item.label, quantity: qty, unit_price: unitPrice, discount: itemDisc || undefined, total: Math.max(0, Number(item.amount) - itemDisc), account_code: code })
         }
       })
 
@@ -547,17 +550,15 @@ export default function BillingPage() {
       if (resErr) toast(`Warning: failed to sync reservation deposit: ${resErr.message}`, 'error')
     }
 
-    if (newStatus === 'paid') {
-      fetch('/api/telegram/notify', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ event: 'payment', branch_id: activeBranch?.id, data: {
-          guest_name: (selectedInvoice.guest as any)?.full_name ?? 'Guest',
-          amount: formatCurrency(selectedInvoice.total),
-          method: capitalize(payForm.payment_method),
-          invoice_number: selectedInvoice.invoice_number,
-        }}),
-      }).catch(() => {})
-    }
+    fetch('/api/telegram/notify', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ event: 'payment', branch_id: activeBranch?.id, data: {
+        guest_name: (selectedInvoice.guest as any)?.full_name ?? 'Guest',
+        amount: formatCurrency(amountReceived),
+        method: capitalize(payForm.payment_method),
+        invoice_number: selectedInvoice.invoice_number,
+      }}),
+    }).catch(() => {})
 
     toast(newStatus === 'paid' ? 'Invoice fully paid' : 'Partial payment recorded')
     setSaving(false)
@@ -613,7 +614,7 @@ export default function BillingPage() {
             <thead>
               <tr className="bg-hsurface2">
                 {['Invoice #', 'Guest', 'House', 'Subtotal', 'Tax', 'Total', 'Deposit', 'Paid', 'Balance', 'Status', 'Date Issued', 'Actions'].map(h => (
-                  <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide whitespace-nowrap">{h}</th>
+                  <th key={h} className="px-3 py-2.5 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide whitespace-nowrap">{h}</th>
                 ))}
               </tr>
             </thead>
@@ -626,27 +627,27 @@ export default function BillingPage() {
                 const balance = Number(inv.total) - Number(inv.amount_paid)
                 return (
                   <tr key={inv.id} className="border-t border-hborder hover:bg-hbg/40">
-                    <td className="px-4 py-3 font-mono text-xs text-hmuted whitespace-nowrap">{inv.invoice_number}</td>
-                    <td className="px-4 py-3">
-                      <p className="font-medium text-htext">{(inv.guest as any)?.full_name ?? '—'}</p>
-                      <p className="text-xs text-hmuted">{(inv.guest as any)?.phone ?? ''}</p>
+                    <td className="px-3 py-2 h-[52px] align-middle font-mono text-xs text-hmuted whitespace-nowrap">{inv.invoice_number}</td>
+                    <td className="px-3 py-2 h-[52px] align-middle max-w-[150px]">
+                      <p className="font-medium text-htext truncate text-xs" title={(inv.guest as any)?.full_name ?? undefined}>{(inv.guest as any)?.full_name ?? '—'}</p>
+                      <p className="text-[11px] text-hmuted truncate">{(inv.guest as any)?.phone ?? ''}</p>
                     </td>
-                    <td className="px-4 py-3 text-hmuted text-xs">{(inv as any).house?.name ?? (inv.reservation as any)?.reservation_number ?? '—'}</td>
-                    <td className="px-4 py-3 text-hmuted">{formatCurrency(inv.subtotal)}</td>
-                    <td className="px-4 py-3 text-hmuted">{formatCurrency(inv.tax_amount ?? 0)}</td>
-                    <td className="px-4 py-3 font-semibold text-dark-navy whitespace-nowrap">{formatCurrency(inv.total)}</td>
-                    <td className="px-4 py-3 text-blue-600 font-medium">
+                    <td className="px-3 py-2 h-[52px] align-middle text-hmuted text-xs font-mono whitespace-nowrap" title={(inv as any).house?.name ?? undefined}>{(inv as any).house?.code || (inv as any).house?.name || (inv.reservation as any)?.reservation_number || '—'}</td>
+                    <td className="px-3 py-2 h-[52px] align-middle text-hmuted text-xs whitespace-nowrap">{formatCurrency(inv.subtotal)}</td>
+                    <td className="px-3 py-2 h-[52px] align-middle text-hmuted text-xs whitespace-nowrap">{formatCurrency(inv.tax_amount ?? 0)}</td>
+                    <td className="px-3 py-2 h-[52px] align-middle font-semibold text-dark-navy text-xs whitespace-nowrap">{formatCurrency(inv.total)}</td>
+                    <td className="px-3 py-2 h-[52px] align-middle text-blue-600 font-medium text-xs whitespace-nowrap">
                       {Number((inv as any).deposit_amount) > 0 ? formatCurrency((inv as any).deposit_amount) : <span className="text-hmuted">—</span>}
                     </td>
-                    <td className="px-4 py-3 text-green-700 font-medium">{formatCurrency(inv.amount_paid)}</td>
-                    <td className="px-4 py-3">
+                    <td className="px-3 py-2 h-[52px] align-middle text-green-700 font-medium text-xs whitespace-nowrap">{formatCurrency(inv.amount_paid)}</td>
+                    <td className="px-3 py-2 h-[52px] align-middle text-xs whitespace-nowrap">
                       {balance > 0
                         ? <span className="text-red-600 font-semibold">{formatCurrency(balance)}</span>
                         : <span className="text-green-600">—</span>}
                     </td>
-                    <td className="px-4 py-3"><Badge status={inv.status} /></td>
-                    <td className="px-4 py-3 text-xs text-hmuted whitespace-nowrap">{formatDate(inv.invoice_date ?? inv.created_at)}</td>
-                    <td className="px-4 py-3">
+                    <td className="px-3 py-2 h-[52px] align-middle"><Badge status={inv.status} /></td>
+                    <td className="px-3 py-2 h-[52px] align-middle text-xs text-hmuted whitespace-nowrap">{formatDate(inv.invoice_date ?? inv.created_at)}</td>
+                    <td className="px-3 py-2 h-[52px] align-middle">
                       <div className="flex items-center gap-2 flex-nowrap">
                         {!['paid', 'refunded', 'void'].includes(inv.status) && (
                           <Button size="sm" onClick={() => openPayment(inv)}>Record Payment</Button>
@@ -1113,6 +1114,9 @@ export default function BillingPage() {
                       <p style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: 2, color: '#9ca3af', marginBottom: 6 }}>Stay Details</p>
                       {house?.name && <p style={{ fontSize: 13, fontWeight: 600, color: '#1a1a2e' }}>{house.name}</p>}
                       <p style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>{formatDate(res.check_in_date)} → {formatDate(res.check_out_date)}</p>
+                      {res.reservation_number && (
+                        <p style={{ fontSize: 11, color: '#9ca3af', marginTop: 2, fontFamily: 'monospace' }}>Reservation {res.reservation_number}</p>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1127,14 +1131,31 @@ export default function BillingPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {items.length > 0 ? items.map((item, i) => (
-                      <tr key={i} style={{ borderBottom: '1px solid #f0f4f8' }}>
-                        <td style={{ padding: '12px 0', fontSize: 13, color: '#374151' }}>{item.description}</td>
-                        <td style={{ padding: '12px 0', fontSize: 13, color: '#374151', textAlign: 'right' }}>{formatCurrency(item.unit_price)}</td>
-                        <td style={{ padding: '12px 0', fontSize: 13, color: '#374151', textAlign: 'right' }}>{item.quantity}</td>
-                        <td style={{ padding: '12px 0', fontSize: 13, fontWeight: 600, color: '#1a1a2e', textAlign: 'right' }}>{formatCurrency(item.total)}</td>
-                      </tr>
-                    )) : (
+                    {items.length > 0 ? (() => {
+                      const propertyItems = items.filter((it: any) => it.account_code === '4000')
+                      const fnbItems = items.filter((it: any) => it.account_code === '4100')
+                      const activityItems = items.filter((it: any) => it.account_code !== '4000' && it.account_code !== '4100')
+                      const sectionRow = (label: string) => (
+                        <tr key={`hdr-${label}`}>
+                          <td colSpan={4} style={{ padding: '10px 0 4px', fontSize: 10, textTransform: 'uppercase', letterSpacing: 1.5, color: '#9ca3af', fontWeight: 700 }}>{label}</td>
+                        </tr>
+                      )
+                      const itemRow = (item: InvoiceItem, sectionKey: string, i: number) => (
+                        <tr key={`${sectionKey}-${i}`} style={{ borderBottom: '1px solid #f0f4f8' }}>
+                          <td style={{ padding: '8px 0', fontSize: 13, color: '#374151' }}>{item.description}</td>
+                          <td style={{ padding: '8px 0', fontSize: 13, color: '#374151', textAlign: 'right' }}>{formatCurrency(item.unit_price)}</td>
+                          <td style={{ padding: '8px 0', fontSize: 13, color: '#374151', textAlign: 'right' }}>{item.quantity}</td>
+                          <td style={{ padding: '8px 0', fontSize: 13, fontWeight: 600, color: '#1a1a2e', textAlign: 'right' }}>{formatCurrency(item.total)}</td>
+                        </tr>
+                      )
+                      return (
+                        <>
+                          {propertyItems.length > 0 && <>{sectionRow('Property')}{propertyItems.map((it, i) => itemRow(it, 'property', i))}</>}
+                          {activityItems.length > 0 && <>{sectionRow('Activities & Services')}{activityItems.map((it, i) => itemRow(it, 'activity', i))}</>}
+                          {fnbItems.length > 0 && <>{sectionRow('Food & Beverage')}{fnbItems.map((it, i) => itemRow(it, 'fnb', i))}</>}
+                        </>
+                      )
+                    })() : (
                       <tr><td colSpan={4} style={{ padding: '12px 0', fontSize: 13, color: '#9ca3af' }}>House charge</td></tr>
                     )}
                   </tbody>
@@ -1171,6 +1192,39 @@ export default function BillingPage() {
                     </div>
                   )}
                 </div>
+
+                {/* Bank Transfer Details */}
+                {(() => {
+                  const pm = paymentMethods.find(m => m.value === inv.payment_method)
+                  const isBankPayment = inv.payment_method && pm && !pm.is_cash
+                  const hasBankInfo = settings?.bank_name || settings?.bank_account_name || settings?.bank_account_number
+                  if (!isBankPayment || !hasBankInfo) return null
+                  return (
+                    <div style={{ marginTop: 20, padding: '14px 16px', background: '#f7f9fc', borderRadius: 10, border: '1px solid #e8edf3' }}>
+                      <p style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: 1.5, color: '#9ca3af', fontWeight: 600, marginBottom: 6 }}>Payment Information</p>
+                      <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
+                        {settings?.bank_name && (
+                          <div>
+                            <p style={{ fontSize: 10, color: '#9ca3af' }}>Bank</p>
+                            <p style={{ fontSize: 13, fontWeight: 600, color: '#1a1a2e' }}>{settings.bank_name}</p>
+                          </div>
+                        )}
+                        {settings?.bank_account_name && (
+                          <div>
+                            <p style={{ fontSize: 10, color: '#9ca3af' }}>Account Name</p>
+                            <p style={{ fontSize: 13, fontWeight: 600, color: '#1a1a2e' }}>{settings.bank_account_name}</p>
+                          </div>
+                        )}
+                        {settings?.bank_account_number && (
+                          <div>
+                            <p style={{ fontSize: 10, color: '#9ca3af' }}>Account Number</p>
+                            <p style={{ fontSize: 13, fontWeight: 600, color: '#1a1a2e' }}>{settings.bank_account_number}</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })()}
 
                 {/* Footer */}
                 <div style={{ marginTop: 28, paddingTop: 20, borderTop: '1px dashed #e8edf3', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>

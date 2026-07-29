@@ -1,15 +1,15 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { TopBar } from '@/components/layout/TopBar'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { createClient } from '@/lib/supabase/client'
-import { formatDate, calculateNights, generateReservationNumber, formatCurrency, capitalize, generateJournalEntryNumber } from '@/lib/utils'
+import { formatDate, calculateNights, calculateNightlyTotal, generateReservationNumber, formatCurrency, capitalize, generateJournalEntryNumber, formatTime12h } from '@/lib/utils'
 import { toast } from '@/components/ui/Toast'
 import { useBranch } from '@/context/BranchContext'
-import type { Reservation, House, DepositReceipt } from '@/types'
+import type { Reservation, House, HousePromotion, DepositReceipt, ServiceCatalogItem } from '@/types'
 
 interface PaymentMethod {
   id: string
@@ -24,23 +24,13 @@ const STATUSES = ['all', 'pending', 'confirmed', 'checked_in', 'checked_out', 'c
 const SOURCES = ['walk_in', 'phone', 'online', 'ota', 'referral']
 
 
-const PRESET_ADDONS = [
-  { label: 'Car Rental (4WD)', icon: '🚙', code: '4200', costCode: '5500' },
-  { label: 'Food & Cooking',   icon: '🍳', code: '4100', costCode: '5300' },
-  { label: 'BBQ / Grilling',  icon: '🔥', code: '4100', costCode: '5600' },
-  { label: 'Ice',              icon: '🧊', code: '4100', costCode: '5300' },
-  { label: 'Tent Rental',      icon: '⛺', code: '4200', costCode: '6000' },
-  { label: 'Bedding Set',      icon: '🛏', code: '4300', costCode: '6000' },
-  { label: 'Extra Cleaning',   icon: '🧹', code: '4300', costCode: '6000' },
-  { label: 'Transport',        icon: '🚌', code: '4200', costCode: '5500' },
-  { label: 'Kayak Rental',     icon: '🚣', code: '4200', costCode: '5400' },
-  { label: 'Bike Rental',      icon: '🚲', code: '4200', costCode: '5400' },
-]
 
 
 interface LineItemForm {
   id?: string
   label: string
+  qty: number | string
+  unit_price: number | string
   amount: number | string
   discount: number | string
   revenue_account_code: string
@@ -56,7 +46,7 @@ const emptyForm = {
 
 export default function ReservationsPage() {
   const supabase = createClient()
-  const { activeBranch } = useBranch()
+  const { activeBranch, hotelSettings } = useBranch()
   const [reservations, setReservations] = useState<Reservation[]>([])
   const [houses, setHouses] = useState<House[]>([])
   const [loading, setLoading] = useState(true)
@@ -89,6 +79,10 @@ export default function ReservationsPage() {
   const [linkedPettyCash, setLinkedPettyCash] = useState<any[]>([])
   const [revenueAccounts, setRevenueAccounts] = useState<{code: string, name: string}[]>([])
   const [costAccounts, setCostAccounts] = useState<{code: string, name: string}[]>([])
+  const [housePromotions, setHousePromotions] = useState<HousePromotion[]>([])
+  const [serviceCatalog, setServiceCatalog] = useState<ServiceCatalogItem[]>([])
+  const [chargesModalRes, setChargesModalRes] = useState<Reservation | null>(null)
+  const [originalTotalAmount, setOriginalTotalAmount] = useState<number | null>(null)
 
   useEffect(() => {
     if (activeBranch) { loadData(); loadPaymentMethods() }
@@ -109,6 +103,13 @@ export default function ReservationsPage() {
       .order('transaction_date')
     setLinkedPettyCash((data ?? []) as any[])
   }
+
+  useEffect(() => {
+    if (!form.house_id || !activeBranch) { setHousePromotions([]); return }
+    supabase.from('house_promotions').select('*')
+      .eq('house_id', form.house_id).eq('is_active', true)
+      .then(({ data }) => setHousePromotions((data ?? []) as HousePromotion[]))
+  }, [form.house_id, activeBranch]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch Cambodian public holidays from Calendarific (once per year, cached 90 days)
   useEffect(() => {
@@ -135,9 +136,9 @@ export default function ReservationsPage() {
 
   async function loadData() {
     if (!activeBranch) return
-    const [resRes, houseRes, revAcctRes, costAcctRes] = await Promise.all([
+    const [resRes, houseRes, revAcctRes, costAcctRes, catalogRes] = await Promise.all([
       supabase.from('reservations')
-        .select('*, guest:guests(full_name, email, phone), house:houses(name, house_type, base_rate_per_night), line_items:reservation_line_items(id, label, amount, discount, revenue_account_code, cost_amount, cost_account_code, sort_order), deposit_receipts(id, receipt_number, amount, payment_method, receipt_date, status)')
+        .select('*, guest:guests(full_name, email, phone), house:houses(name, code, house_type, base_rate_per_night), line_items:reservation_line_items(id, label, qty, unit_price, amount, discount, revenue_account_code, cost_amount, cost_account_code, sort_order), deposit_receipts(id, receipt_number, amount, payment_method, receipt_date, status)')
         .eq('branch_id', activeBranch.id)
         .order('check_in_date', { ascending: false }),
       supabase.from('houses')
@@ -146,11 +147,13 @@ export default function ReservationsPage() {
         .order('name'),
       supabase.from('chart_of_accounts').select('code, name').eq('branch_id', activeBranch.id).eq('is_active', true).eq('type', 'revenue').order('code'),
       supabase.from('chart_of_accounts').select('code, name').eq('branch_id', activeBranch.id).eq('is_active', true).eq('type', 'expense').order('code'),
+      supabase.from('service_catalog_items').select('*').eq('branch_id', activeBranch.id).eq('is_active', true).order('category').order('sort_order'),
     ])
     setReservations((resRes.data ?? []) as unknown as Reservation[])
     setHouses((houseRes.data ?? []) as unknown as House[])
     setRevenueAccounts((revAcctRes.data ?? []) as {code: string, name: string}[])
     setCostAccounts((costAcctRes.data ?? []) as {code: string, name: string}[])
+    setServiceCatalog((catalogRes.data ?? []) as ServiceCatalogItem[])
     setLoading(false)
   }
 
@@ -176,8 +179,9 @@ export default function ReservationsPage() {
     setDiscountLabel('')
     setHouseDiscount(0)
     setPaxCount('')
-    setArrivalTime('')
+    setArrivalTime(hotelSettings?.check_in_time ?? '')
     setLinkedPettyCash([])
+    setOriginalTotalAmount(null)
     setModalOpen(true)
   }
 
@@ -202,7 +206,7 @@ export default function ReservationsPage() {
     setLineItems(
       [...existing]
         .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
-        .map(i => ({ id: i.id, label: i.label, amount: i.amount, discount: i.discount ?? 0, revenue_account_code: i.revenue_account_code ?? '4300', cost_amount: i.cost_amount ?? '', cost_account_code: i.cost_account_code ?? '6000' }))
+        .map(i => ({ id: i.id, label: i.label, qty: i.qty ?? 1, unit_price: i.unit_price ?? '', amount: i.amount, discount: i.discount ?? 0, revenue_account_code: i.revenue_account_code ?? '4300', cost_amount: i.cost_amount ?? '', cost_account_code: i.cost_account_code ?? '6000' }))
     )
     setDeposit(res.deposit ?? 0)
     setDepositMethod((res as any).deposit_method ?? 'cash')
@@ -212,23 +216,29 @@ export default function ReservationsPage() {
     setPaxCount(res.pax_count ?? '')
     setArrivalTime(res.arrival_time ?? '')
     setLinkedPettyCash([])
+    setOriginalTotalAmount(res.total_amount ?? null)
     if (res.id) loadLinkedPettyCash(res.id)
     setModalOpen(true)
   }
 
-  function addPreset(preset: { label: string; icon: string; code: string; costCode: string }) {
-    if (lineItems.some(i => i.label === preset.label)) {
-      toast(`${preset.label} already added`, 'info'); return
+  function addPreset(item: ServiceCatalogItem) {
+    if (lineItems.some(i => i.label === item.name_en)) {
+      toast(`${item.name_en} already added`, 'info'); return
     }
-    setLineItems(prev => [...prev, { label: preset.label, amount: '', discount: 0, revenue_account_code: preset.code, cost_amount: '', cost_account_code: preset.costCode }])
-  }
-
-  function addCustom() {
-    setLineItems(prev => [...prev, { label: '', amount: '', discount: 0, revenue_account_code: '4300', cost_amount: '', cost_account_code: '6000' }])
+    setLineItems(prev => [...prev, { label: item.name_en, qty: 1, unit_price: item.unit_price, amount: item.unit_price, discount: 0, revenue_account_code: item.revenue_account_code, cost_amount: '', cost_account_code: item.cost_account_code }])
   }
 
   function updateItem(idx: number, field: 'label' | 'amount' | 'discount' | 'revenue_account_code' | 'cost_amount' | 'cost_account_code', value: string | number) {
     setLineItems(prev => prev.map((item, i) => i === idx ? { ...item, [field]: value } : item))
+  }
+
+  function updateQty(idx: number, qty: number) {
+    setLineItems(prev => prev.map((item, i) => {
+      if (i !== idx) return item
+      const q = Math.max(1, Math.round(qty) || 1)
+      const unitPrice = item.unit_price !== '' && item.unit_price != null ? Number(item.unit_price) : null
+      return { ...item, qty: q, amount: unitPrice != null ? Math.round(unitPrice * q * 100) / 100 : item.amount }
+    }))
   }
 
   function removeItem(idx: number) {
@@ -338,7 +348,10 @@ export default function ReservationsPage() {
     ? calculateNights(form.check_in_date, form.check_out_date)
     : 0
   const selectedHouse = houses.find(h => h.id === form.house_id)
-  const houseGross = selectedHouse && nights > 0 ? selectedHouse.base_rate_per_night * nights : 0
+  const nightlyResult = selectedHouse && form.check_in_date && form.check_out_date && nights > 0
+    ? calculateNightlyTotal(form.check_in_date, form.check_out_date, selectedHouse.base_rate_per_night, housePromotions)
+    : null
+  const houseGross = nightlyResult?.total ?? 0
   const houseDiscountNum = Math.max(0, Number(houseDiscount || 0))
   const houseBase = Math.max(0, houseGross - houseDiscountNum)
   const addOnsGross = lineItems.reduce((s, i) => s + Number(i.amount || 0), 0)
@@ -517,6 +530,8 @@ export default function ReservationsPage() {
           validItems.map((item, i) => ({
             reservation_id: reservationId,
             label: item.label.trim(),
+            qty: Math.max(1, Number(item.qty) || 1),
+            unit_price: item.unit_price !== '' && item.unit_price != null ? Number(item.unit_price) : null,
             amount: Number(item.amount) || 0,
             discount: Math.max(0, Number(item.discount) || 0),
             revenue_account_code: item.revenue_account_code || '4300',
@@ -577,33 +592,77 @@ export default function ReservationsPage() {
     setNotifyingId(null)
   }
 
-  function handleCancel(res: any) {
-    const guestName = (res.guest as any)?.full_name ?? res.guest_name ?? 'this reservation'
+  async function handleCancelAndVoid(res: any) {
+    if (!activeBranch) return
+    const guestName = (res.guest as any)?.full_name ?? res.guest_name ?? 'Guest'
+
+    const [{ data: invoices }, { data: heldReceipt }, { data: pettyCash }] = await Promise.all([
+      supabase.from('invoices').select('id, invoice_number, total, status').eq('reservation_id', res.id),
+      supabase.from('deposit_receipts').select('*').eq('reservation_id', res.id).eq('status', 'held').maybeSingle(),
+      supabase.from('petty_cash_transactions').select('id').eq('reservation_id', res.id),
+    ])
+
+    const activeInvoices = (invoices ?? []).filter((inv: any) => !['void', 'refunded'].includes(inv.status))
+    const pcCount = (pettyCash ?? []).length
+
+    const lines: string[] = [
+      `Reservation ${res.reservation_number} — ${guestName} will be cancelled.`,
+    ]
+    if (heldReceipt) lines.push(`Deposit ${formatCurrency(heldReceipt.amount)} will be refunded with a reversing JE.`)
+    for (const inv of activeInvoices) {
+      lines.push(`Invoice ${inv.invoice_number} (${formatCurrency(inv.total)}) will be voided.`)
+    }
+    if (pcCount > 0) lines.push(`${pcCount} petty cash transaction${pcCount > 1 ? 's' : ''} will be unlinked.`)
+    if (res.status === 'checked_in') lines.push('⚠️  Guest is currently checked in — confirm this is intentional.')
+    lines.push('\nThis action cannot be undone.')
+
     setConfirmDialog({
-      title: 'Cancel Reservation',
-      message: `Cancel ${guestName}'s reservation (${res.reservation_number})? Any held deposit will be marked for refund.`,
-      confirmLabel: 'Cancel Reservation',
+      title: 'Cancel & Void Reservation',
+      message: lines.join('\n'),
+      confirmLabel: 'Confirm Cancel & Void',
       variant: 'danger',
       onConfirm: async () => {
         setConfirmDialog(null)
-        await supabase.from('reservations').update({ status: 'cancelled', updated_at: new Date().toISOString() }).eq('id', res.id)
-        // Find existing held receipt to know exact amount and method
-        const { data: heldReceipt } = await supabase.from('deposit_receipts').select('*').eq('reservation_id', res.id).eq('status', 'held').maybeSingle()
+
+        await supabase.from('reservations')
+          .update({ status: 'cancelled', updated_at: new Date().toISOString() })
+          .eq('id', res.id)
+
         if (heldReceipt) {
-          await supabase.from('deposit_receipts').update({
-            status: 'refunded', updated_at: new Date().toISOString(),
-          }).eq('id', heldReceipt.id)
+          await supabase.from('deposit_receipts')
+            .update({ status: 'refunded', updated_at: new Date().toISOString() })
+            .eq('id', heldReceipt.id)
           await createRefundJournalEntry(res.reservation_number, guestName, heldReceipt.amount, heldReceipt.payment_method)
         }
+
+        for (const inv of activeInvoices) {
+          await supabase.from('invoices')
+            .update({ status: 'void', updated_at: new Date().toISOString() })
+            .eq('id', inv.id)
+          await supabase.from('journal_entries')
+            .update({ is_void: true, voided_at: new Date().toISOString() })
+            .eq('reference', inv.invoice_number)
+            .eq('reference_type', 'invoice')
+            .eq('branch_id', activeBranch.id)
+            .eq('is_void', false)
+        }
+
+        if (pcCount > 0) {
+          await supabase.from('petty_cash_transactions')
+            .update({ reservation_id: null, reservation_line_item_id: null })
+            .eq('reservation_id', res.id)
+        }
+
         fetch('/api/telegram/notify', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ event: 'cancellation', branch_id: activeBranch?.id, data: {
-            guest_name: (res.guest as any)?.full_name ?? res.guest_name,
+            guest_name: guestName,
             house_name: (res.house as any)?.name,
             reservation_number: res.reservation_number,
           }}),
         }).catch(() => {})
-        toast('Reservation cancelled', 'info')
+
+        toast('Reservation cancelled & voided', 'info')
         loadData()
       },
     })
@@ -709,8 +768,8 @@ export default function ReservationsPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-hsurface2">
-                    {['Ref', 'Guest', 'House', 'Check-in', 'Check-out', 'Pax', 'Add-ons', 'Total', 'Deposit', 'Remaining', 'Status', 'Actions'].map(h => (
-                      <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide whitespace-nowrap">{h}</th>
+                    {['Ref', 'Guest', 'House', 'Check-in', 'Check-out', 'Pax', 'Total', 'Discount', 'Deposit', 'Due', 'Status', 'Actions'].map(h => (
+                      <th key={h} className={`px-2.5 py-2.5 text-[11px] font-semibold text-hmuted uppercase tracking-wide whitespace-nowrap ${['Total', 'Discount', 'Deposit', 'Due'].includes(h) ? 'text-right' : 'text-left'}`}>{h}</th>
                     ))}
                   </tr>
                 </thead>
@@ -720,78 +779,100 @@ export default function ReservationsPage() {
                   ) : filtered.length === 0 ? (
                     <tr><td colSpan={12} className="px-5 py-10 text-center text-hmuted">No reservations found</td></tr>
                   ) : filtered.map(res => {
-                    const itemCount = (res.line_items ?? []).length
+                    const items = res.line_items ?? []
                     const dep = res.deposit ?? 0
                     const pax = res.pax_count
+                    const netOf = (li: typeof items[number]) => Number(li.amount || 0) - Number(li.discount || 0)
+                    const addOnsNet = items.reduce((s, li) => s + netOf(li), 0)
+                    const houseDiscount = Number((res as any).house_discount || 0)
+                    const itemDiscounts = items.reduce((s, li) => s + Number(li.discount || 0), 0)
+                    const overallDiscount = Number(res.discount_amount || 0)
+                    const totalDiscount = houseDiscount + itemDiscounts + overallDiscount
                     return (
                       <tr key={res.id} className="border-t border-hborder hover:bg-hbg/40 transition-colors">
-                        <td className="px-4 py-3 font-mono text-xs text-hmuted whitespace-nowrap">{res.reservation_number}</td>
-                        <td className="px-4 py-3">
-                          <p className="font-medium text-htext">{(res.guest as any)?.full_name ?? '—'}</p>
-                          <p className="text-xs text-hmuted">{(res.guest as any)?.phone ?? ''}</p>
+                        <td className="px-2.5 py-2 h-[52px] align-middle font-mono text-xs text-hmuted whitespace-nowrap">{res.reservation_number}</td>
+                        <td className="px-2.5 py-2 h-[52px] align-middle max-w-[150px]">
+                          <p className="font-medium text-htext truncate text-xs" title={(res.guest as any)?.full_name ?? undefined}>{(res.guest as any)?.full_name ?? '—'}</p>
+                          <p className="text-[11px] text-hmuted truncate">{(res.guest as any)?.phone ?? ''}</p>
                         </td>
-                        <td className="px-4 py-3 text-hmuted">{(res.house as any)?.name ?? '—'}</td>
-                        <td className="px-4 py-3 text-hmuted whitespace-nowrap">{formatDate(res.check_in_date)}</td>
-                        <td className="px-4 py-3 text-hmuted whitespace-nowrap">{formatDate(res.check_out_date)}</td>
-                        <td className="px-4 py-3 text-hmuted">{pax != null ? `${pax} pax` : `${res.adults}A`}</td>
-                        <td className="px-4 py-3">
-                          {itemCount > 0 ? (
-                            <span className="inline-flex items-center gap-1 bg-navy/10 text-navy text-xs px-2 py-0.5 rounded-full font-medium">
-                              +{itemCount}
-                            </span>
-                          ) : <span className="text-hmuted text-xs">—</span>}
+                        <td className="px-2.5 py-2 h-[52px] align-middle text-hmuted text-xs font-mono whitespace-nowrap" title={(res.house as any)?.name ?? undefined}>{(res.house as any)?.code || (res.house as any)?.name || '—'}</td>
+                        <td className="px-2.5 py-2 h-[52px] align-middle text-hmuted text-xs whitespace-nowrap">{formatDate(res.check_in_date)}</td>
+                        <td className="px-2.5 py-2 h-[52px] align-middle text-hmuted text-xs whitespace-nowrap">{formatDate(res.check_out_date)}</td>
+                        <td className="px-2.5 py-2 h-[52px] align-middle text-hmuted text-xs whitespace-nowrap">{pax != null ? pax : res.adults}</td>
+                        <td className="px-2.5 py-2 h-[52px] align-middle text-right text-xs font-semibold tabular-nums text-htext whitespace-nowrap">
+                          {res.total_amount == null ? '—' : formatCurrency(res.total_amount)}
                         </td>
-                        <td className="px-4 py-3 font-medium text-htext whitespace-nowrap">
-                          {res.total_amount ? formatCurrency(res.total_amount) : '—'}
+                        <td className="px-2.5 py-2 h-[52px] align-middle text-right text-xs tabular-nums whitespace-nowrap">
+                          {totalDiscount > 0 ? <span className="text-orange-600">−{formatCurrency(totalDiscount)}</span> : <span className="text-hmuted">—</span>}
                         </td>
-                        <td className="px-4 py-3 text-hmuted whitespace-nowrap">
-                          {dep > 0 ? (
-                            <span className="text-green-700 font-medium">{formatCurrency(dep)}</span>
-                          ) : '—'}
+                        <td className="px-2.5 py-2 h-[52px] align-middle text-right text-xs tabular-nums whitespace-nowrap">
+                          {dep > 0 ? <span className="text-green-700 font-medium">{formatCurrency(dep)}</span> : <span className="text-hmuted">—</span>}
                         </td>
-                        <td className="px-4 py-3 whitespace-nowrap">
+                        <td className="px-2.5 py-2 h-[52px] align-middle text-right text-xs whitespace-nowrap">
                           {res.total_amount != null ? (() => {
                             const remaining = (res.total_amount ?? 0) - dep
-                            return remaining > 0
-                              ? <span className="text-red-600 font-medium">{formatCurrency(remaining)}</span>
-                              : remaining === 0
-                                ? <span className="text-green-700 font-medium">Paid</span>
-                                : '—'
+                            if (res.total_amount === 0 && dep === 0) return <span className="text-hmuted">—</span>
+                            if (remaining <= 0) return <span className="font-medium text-green-700">Paid</span>
+                            return <span className="text-red-600 font-medium">{formatCurrency(remaining)}</span>
                           })() : '—'}
                         </td>
-                        <td className="px-4 py-3"><Badge status={res.status} /></td>
-                        <td className="px-4 py-3">
-                          <div className="flex gap-2 items-center">
-                            <button onClick={() => openEdit(res)} className="text-xs text-navy hover:underline">Edit</button>
-                            {!['cancelled', 'checked_out', 'no_show'].includes(res.status) && (
-                              <button onClick={() => handleCancel(res)} className="text-xs text-red-500 hover:underline">Cancel</button>
-                            )}
-                            {/* Deposit receipt — shown only if a receipt exists */}
-                            {((res as any).deposit_receipts ?? []).length > 0 && (
-                              <button
-                                onClick={() => setReceiptModalRes(res)}
-                                title="View deposit receipt"
-                                className="text-hmuted hover:text-green-600 transition-colors"
-                              >
+                        <td className="px-2.5 py-2 h-[52px] align-middle"><Badge status={res.status} /></td>
+                        <td className="px-2.5 py-2 h-[52px] align-middle whitespace-nowrap">
+                          <div className="flex gap-3 items-center">
+                            <div className="flex gap-2.5 items-center flex-shrink-0">
+                              <button onClick={() => openEdit(res)} title="Edit reservation" className="text-hmuted hover:text-navy transition-colors">
                                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-                                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
                                 </svg>
                               </button>
-                            )}
-                            <button
-                              onClick={() => handleNotify(res)}
-                              disabled={notifyingId === res.id}
-                              title="Resend Telegram notification"
-                              className="text-hmuted hover:text-[#229ED9] disabled:opacity-40 transition-colors"
-                            >
-                              {notifyingId === res.id ? (
-                                <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" strokeOpacity=".25"/><path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round"/></svg>
-                              ) : (
-                                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-                                  <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221-1.97 9.289c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12l-6.871 4.326-2.962-.924c-.643-.204-.657-.643.136-.953l11.57-4.461c.537-.194 1.006.131.833.932z"/>
-                                </svg>
+                              {!['cancelled', 'checked_out', 'no_show'].includes(res.status) && (
+                                <button onClick={() => handleCancelAndVoid(res)} title="Cancel & void reservation" className="text-hmuted hover:text-red-600 transition-colors">
+                                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 105.636 5.636a9 9 0 0012.728 12.728zM5.636 5.636l12.728 12.728" />
+                                  </svg>
+                                </button>
                               )}
-                            </button>
+                            </div>
+                            <div className="w-px h-4 bg-hborder flex-shrink-0" />
+                            <div className="flex gap-2.5 items-center flex-shrink-0">
+                              {(items.length > 0 || addOnsNet > 0) && (
+                                <button
+                                  onClick={() => setChargesModalRes(res)}
+                                  title="View charges breakdown"
+                                  className="text-hmuted hover:text-navy transition-colors"
+                                >
+                                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 6h11M9 12h11M9 18h11M5 6h.01M5 12h.01M5 18h.01" />
+                                  </svg>
+                                </button>
+                              )}
+                              {/* Deposit receipt — shown only if a receipt exists */}
+                              {((res as any).deposit_receipts ?? []).length > 0 && (
+                                <button
+                                  onClick={() => setReceiptModalRes(res)}
+                                  title="View deposit receipt"
+                                  className="text-hmuted hover:text-green-600 transition-colors"
+                                >
+                                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                  </svg>
+                                </button>
+                              )}
+                              <button
+                                onClick={() => handleNotify(res)}
+                                disabled={notifyingId === res.id}
+                                title="Resend Telegram notification"
+                                className="text-hmuted hover:text-[#229ED9] disabled:opacity-40 transition-colors"
+                              >
+                                {notifyingId === res.id ? (
+                                  <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" strokeOpacity=".25"/><path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round"/></svg>
+                                ) : (
+                                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+                                    <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221-1.97 9.289c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12l-6.871 4.326-2.962-.924c-.643-.204-.657-.643.136-.953l11.57-4.461c.537-.194 1.006.131.833.932z"/>
+                                  </svg>
+                                )}
+                              </button>
+                            </div>
                           </div>
                         </td>
                       </tr>
@@ -1082,7 +1163,7 @@ export default function ReservationsPage() {
           <div className="border border-hborder rounded-xl p-4 space-y-3">
             <p className="text-xs font-semibold text-hmuted uppercase tracking-wide">Booking Details</p>
             <div className="grid grid-cols-3 gap-3">
-              <div>
+              <div className="col-span-3">
                 <label className="block text-xs text-hmuted mb-1">House *</label>
                 <select
                   value={form.house_id}
@@ -1143,6 +1224,11 @@ export default function ReservationsPage() {
                   onChange={e => setArrivalTime(e.target.value)}
                   className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg"
                 />
+                {(hotelSettings?.check_in_time || hotelSettings?.check_out_time) && (
+                  <p className="text-[10px] text-hmuted mt-1">
+                    Standard: check-in {formatTime12h(hotelSettings?.check_in_time)} · check-out {formatTime12h(hotelSettings?.check_out_time)}
+                  </p>
+                )}
               </div>
               <div>
                 <label className="block text-xs text-hmuted mb-1">Adults</label>
@@ -1198,36 +1284,42 @@ export default function ReservationsPage() {
               )}
             </div>
 
-            {/* Quick-add preset chips */}
-            <div className="flex flex-wrap gap-1.5">
-              {PRESET_ADDONS.map(p => {
-                const added = lineItems.some(i => i.label === p.label)
-                return (
-                  <button
-                    key={p.label}
-                    type="button"
-                    onClick={() => addPreset(p)}
-                    className={[
-                      'flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs transition-all',
-                      added
-                        ? 'border-navy/40 bg-navy/8 text-navy cursor-default'
-                        : 'border-hborder bg-hsurface2 text-htext hover:bg-white hover:border-navy/50',
-                    ].join(' ')}
-                  >
-                    <span>{p.icon}</span>
-                    <span>{p.label}</span>
-                    {added && <span className="text-navy/60">✓</span>}
-                  </button>
-                )
-              })}
-              <button
-                type="button"
-                onClick={addCustom}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-dashed border-navy/50 text-navy text-xs hover:bg-navy/5 transition-colors font-medium"
-              >
-                + Custom Item
-              </button>
-            </div>
+            {/* Quick-add catalog chips */}
+            {(['activity', 'fnb'] as const).map(cat => {
+              const items = serviceCatalog.filter(i => i.category === cat)
+              if (items.length === 0) return null
+              return (
+                <div key={cat} className="space-y-1">
+                  <p className="text-[10px] font-semibold text-hmuted/80 uppercase tracking-wide">
+                    {cat === 'activity' ? 'Activities & Services' : 'Food & Beverage'}
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {items.map(p => {
+                      const added = lineItems.some(i => i.label === p.name_en)
+                      return (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => addPreset(p)}
+                          title={[p.name_kh, p.details].filter(Boolean).join(' · ') || undefined}
+                          className={[
+                            'flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs transition-all',
+                            added
+                              ? 'border-navy/40 bg-navy/8 text-navy cursor-default'
+                              : 'border-hborder bg-hsurface2 text-htext hover:bg-white hover:border-navy/50',
+                          ].join(' ')}
+                        >
+                          <span>{cat === 'activity' ? '🎯' : '🍽️'}</span>
+                          <span>{p.name_en}</span>
+                          <span className="text-hmuted/70">{formatCurrency(p.unit_price)}</span>
+                          {added && <span className="text-navy/60">✓</span>}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )
+            })}
 
             {/* Line items list */}
             {lineItems.length > 0 && (
@@ -1242,6 +1334,16 @@ export default function ReservationsPage() {
                         placeholder="Service description…"
                         className="flex-1 bg-hsurface2 border border-transparent rounded-lg px-3 py-1.5 text-sm font-medium focus:outline-none focus:border-navy focus:bg-white transition-colors"
                       />
+                      <div className="relative flex-shrink-0 w-16">
+                        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-hmuted text-[10px] pointer-events-none select-none">Qty</span>
+                        <input
+                          type="number" min={1} step={1}
+                          value={item.qty}
+                          onChange={e => updateQty(idx, Number(e.target.value))}
+                          title="Quantity"
+                          className="w-full pl-8 pr-2 py-1.5 border border-hborder rounded-lg text-sm focus:outline-none focus:border-navy bg-hsurface2 focus:bg-white text-right transition-colors"
+                        />
+                      </div>
                       <div className="relative flex-shrink-0 w-28">
                         <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-hmuted text-sm pointer-events-none select-none">$</span>
                         <input
@@ -1312,12 +1414,21 @@ export default function ReservationsPage() {
               <div className="px-4 py-2.5 bg-hsurface2 border-b border-hborder">
                 <p className="text-xs font-semibold text-hmuted uppercase tracking-wide">Cost Summary</p>
               </div>
+              {editId && originalTotalAmount != null && Math.abs(netTotal - originalTotalAmount) > 0.01 && (
+                <div className="px-4 py-2.5 bg-amber-50 border-b border-amber-200 text-xs text-amber-800">
+                  ⚠ Saved total for this booking is <strong>{formatCurrency(originalTotalAmount)}</strong>, but recalculates to <strong>{formatCurrency(netTotal)}</strong> at today's rates — the house rate (or a promo) has changed since this reservation was made. Saving will overwrite the total to {formatCurrency(netTotal)} unless you adjust the discount below to preserve the original price.
+                </div>
+              )}
               <div className="px-4 py-3 space-y-1.5 bg-white">
-                {selectedHouse && nights > 0 && (
+                {selectedHouse && nights > 0 && nightlyResult && (
                   <>
                     <div className="flex justify-between items-center text-sm">
                       <span className="text-hmuted">
-                        House — {nights} night{nights !== 1 ? 's' : ''} × {formatCurrency(selectedHouse.base_rate_per_night)}
+                        House — {nights} night{nights !== 1 ? 's' : ''}
+                        {!nightlyResult.hasPromo && ` × ${formatCurrency(selectedHouse.base_rate_per_night)}`}
+                        {nightlyResult.hasPromo && (
+                          <span className="ml-1.5 text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-medium">promo</span>
+                        )}
                       </span>
                       <div className="flex items-center gap-2">
                         <div className="flex items-center gap-1">
@@ -1333,6 +1444,19 @@ export default function ReservationsPage() {
                         <span className="font-medium text-htext w-20 text-right">{formatCurrency(houseBase)}</span>
                       </div>
                     </div>
+                    {nightlyResult.hasPromo && (
+                      <div className="pl-2 border-l-2 border-amber-200 ml-1 space-y-0.5">
+                        {nightlyResult.groups.map((g, i) => (
+                          <div key={i} className="flex justify-between items-center text-xs text-hmuted">
+                            <span>
+                              {g.nights}n × {formatCurrency(g.rate)}
+                              {g.promoName && <span className="ml-1 text-amber-600 font-medium">({g.promoName})</span>}
+                            </span>
+                            <span className="tabular-nums">{formatCurrency(g.nights * g.rate)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </>
                 )}
                 {lineItems.filter(i => i.label.trim()).map((item, idx) => {
@@ -1570,6 +1694,59 @@ export default function ReservationsPage() {
                     <span style={{ fontWeight: 600 }}>{v}</span>
                   </div>
                 ))}
+                {/* Charges Detail */}
+                {(() => {
+                  const items = ((receiptModalRes as any).line_items ?? []) as any[]
+                  const fnbItems = items.filter(li => li.revenue_account_code === '4100')
+                  const activityItems = items.filter(li => li.revenue_account_code !== '4100')
+                  const netOf = (li: any) => Number(li.amount || 0) - Number(li.discount || 0)
+                  const nights = calculateNights(receiptModalRes.check_in_date, receiptModalRes.check_out_date)
+                  const addOnsNet = items.reduce((s, li) => s + netOf(li), 0)
+                  const propertyNet = Number(receiptModalRes.total_amount ?? 0) + Number((receiptModalRes as any).discount_amount ?? 0) - addOnsNet
+                  const houseDiscount = Number((receiptModalRes as any).house_discount || 0)
+
+                  const sectionHeadStyle: React.CSSProperties = { fontSize: 10, textTransform: 'uppercase', letterSpacing: 1.5, color: '#9ca3af', fontWeight: 700, marginTop: 14, marginBottom: 4 }
+                  const gridStyle: React.CSSProperties = { display: 'grid', gridTemplateColumns: '1fr 40px 64px 74px', gap: 8, fontSize: 12, padding: '3px 0', alignItems: 'center' }
+                  const gridHeadStyle: React.CSSProperties = { ...gridStyle, fontSize: 10, textTransform: 'uppercase', color: '#9ca3af', fontWeight: 600, padding: '2px 0' }
+
+                  const renderRows = (list: any[]) => list.map((li, i) => (
+                    <div key={li.id ?? i} style={gridStyle}>
+                      <span style={{ color: '#374151' }}>{li.label}</span>
+                      <span style={{ textAlign: 'right', color: '#6b7280' }}>{li.qty ?? 1}</span>
+                      <span style={{ textAlign: 'right', color: '#dc2626' }}>{Number(li.discount || 0) > 0 ? `−${formatCurrency(Number(li.discount))}` : '—'}</span>
+                      <span style={{ textAlign: 'right', fontWeight: 600, color: '#1a1a2e' }}>{formatCurrency(netOf(li))}</span>
+                    </div>
+                  ))
+
+                  return (
+                    <div style={{ margin: '14px 0', borderTop: '1px solid #f0f4f8', paddingTop: 2 }}>
+                      <p style={sectionHeadStyle}>Property</p>
+                      <div style={gridHeadStyle}><span>Item</span><span style={{ textAlign: 'right' }}>Qty</span><span style={{ textAlign: 'right' }}>Disc.</span><span style={{ textAlign: 'right' }}>Amount</span></div>
+                      <div style={gridStyle}>
+                        <span style={{ color: '#374151' }}>{house?.name ?? '—'}</span>
+                        <span style={{ textAlign: 'right', color: '#6b7280' }}>{nights || '—'}</span>
+                        <span style={{ textAlign: 'right', color: '#dc2626' }}>{houseDiscount > 0 ? `−${formatCurrency(houseDiscount)}` : '—'}</span>
+                        <span style={{ textAlign: 'right', fontWeight: 600, color: '#1a1a2e' }}>{formatCurrency(propertyNet)}</span>
+                      </div>
+
+                      {activityItems.length > 0 && (
+                        <>
+                          <p style={sectionHeadStyle}>Activities &amp; Services</p>
+                          <div style={gridHeadStyle}><span>Item</span><span style={{ textAlign: 'right' }}>Qty</span><span style={{ textAlign: 'right' }}>Disc.</span><span style={{ textAlign: 'right' }}>Amount</span></div>
+                          {renderRows(activityItems)}
+                        </>
+                      )}
+
+                      {fnbItems.length > 0 && (
+                        <>
+                          <p style={sectionHeadStyle}>Food &amp; Beverage</p>
+                          <div style={gridHeadStyle}><span>Item</span><span style={{ textAlign: 'right' }}>Qty</span><span style={{ textAlign: 'right' }}>Disc.</span><span style={{ textAlign: 'right' }}>Amount</span></div>
+                          {renderRows(fnbItems)}
+                        </>
+                      )}
+                    </div>
+                  )
+                })()}
                 {/* Financial summary */}
                 {(() => {
                   const netTotal = Number(receiptModalRes.total_amount ?? 0)
@@ -1614,7 +1791,7 @@ export default function ReservationsPage() {
                 {/* Status */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, paddingTop: 4, borderTop: '1px solid #f0f4f8' }}>
                   <span style={{ fontSize: 12, color: '#6b7280' }}>Deposit Status</span>
-                  <span className={`text-xs px-2.5 py-1 rounded-full font-semibold ${statusColor[receipt.status] ?? 'bg-gray-100 text-gray-600'}`}>
+                  <span className={`text-xs px-2.5 py-1 rounded-full font-semibold whitespace-nowrap ${statusColor[receipt.status] ?? 'bg-gray-100 text-gray-600'}`}>
                     {receipt.status === 'held' ? '🟡 Held — pending checkout' : receipt.status === 'applied' ? '✅ Applied to invoice' : '↩ Refunded'}
                   </span>
                 </div>
@@ -1625,6 +1802,101 @@ export default function ReservationsPage() {
                     ? 'This deposit has been marked for refund due to cancellation.'
                     : 'This deposit has been applied to the final invoice.'}
                 </p>
+              </div>
+            </div>
+          </Modal>
+        )
+      })()}
+
+      {/* ── Charges Breakdown Modal ── */}
+      {chargesModalRes && (() => {
+        const res = chargesModalRes
+        const items = (res.line_items ?? []) as any[]
+        const fnbItems = items.filter(li => li.revenue_account_code === '4100')
+        const activityItems = items.filter(li => li.revenue_account_code !== '4100')
+        const netOf = (li: any) => Number(li.amount || 0) - Number(li.discount || 0)
+        const addOnsNet = items.reduce((s, li) => s + netOf(li), 0)
+        const propertyNet = (res.total_amount ?? 0) + Number(res.discount_amount || 0) - addOnsNet
+        const houseDiscount = Number((res as any).house_discount || 0)
+        const overallDiscount = Number(res.discount_amount || 0)
+        const nights = calculateNights(res.check_in_date, res.check_out_date)
+        const grossBeforeOverallDiscount = propertyNet + addOnsNet
+        const colHead = (
+          <>
+            <div className="text-[10px] text-hmuted/70 uppercase tracking-wide">Item</div>
+            <div className="text-[10px] text-hmuted/70 uppercase tracking-wide text-right">Qty</div>
+            <div className="text-[10px] text-hmuted/70 uppercase tracking-wide text-right">Discount</div>
+            <div className="text-[10px] text-hmuted/70 uppercase tracking-wide text-right">Amount</div>
+          </>
+        )
+        return (
+          <Modal
+            open={true}
+            onClose={() => setChargesModalRes(null)}
+            title="Charges Breakdown"
+            subtitle={`${res.reservation_number} — ${(res.guest as any)?.full_name ?? 'Guest'}`}
+            size="md"
+          >
+            <div className="grid grid-cols-[minmax(0,1fr)_50px_80px_90px] gap-x-4 gap-y-1 text-xs">
+              {/* Property */}
+              <div className="col-span-4 text-[10px] font-semibold text-hmuted uppercase tracking-wide">Property</div>
+              {colHead}
+              <div className="text-hmuted truncate">{(res.house as any)?.name ?? '—'}</div>
+              <div className="text-right text-hmuted tabular-nums">{nights || '—'}</div>
+              <div className="text-right text-orange-600 tabular-nums">{houseDiscount > 0 ? `−${formatCurrency(houseDiscount)}` : '—'}</div>
+              <div className="text-right font-medium text-htext tabular-nums">{formatCurrency(propertyNet)}</div>
+
+              {/* Activities & Services */}
+              <div className="col-span-4 text-[10px] font-semibold text-hmuted uppercase tracking-wide mt-3">Activities &amp; Services</div>
+              {activityItems.length === 0 ? (
+                <div className="col-span-4 text-hmuted">—</div>
+              ) : (
+                <>
+                  {colHead}
+                  {activityItems.map(li => (
+                    <Fragment key={li.id}>
+                      <div className="text-hmuted truncate">{li.label}</div>
+                      <div className="text-right text-hmuted tabular-nums">{li.qty ?? 1}</div>
+                      <div className="text-right text-orange-600 tabular-nums">{Number(li.discount || 0) > 0 ? `−${formatCurrency(Number(li.discount))}` : '—'}</div>
+                      <div className="text-right text-htext tabular-nums">{formatCurrency(netOf(li))}</div>
+                    </Fragment>
+                  ))}
+                </>
+              )}
+
+              {/* Food & Beverage */}
+              <div className="col-span-4 text-[10px] font-semibold text-hmuted uppercase tracking-wide mt-3">Food &amp; Beverage</div>
+              {fnbItems.length === 0 ? (
+                <div className="col-span-4 text-hmuted">—</div>
+              ) : (
+                <>
+                  {colHead}
+                  {fnbItems.map(li => (
+                    <Fragment key={li.id}>
+                      <div className="text-hmuted truncate">{li.label}</div>
+                      <div className="text-right text-hmuted tabular-nums">{li.qty ?? 1}</div>
+                      <div className="text-right text-orange-600 tabular-nums">{Number(li.discount || 0) > 0 ? `−${formatCurrency(Number(li.discount))}` : '—'}</div>
+                      <div className="text-right text-htext tabular-nums">{formatCurrency(netOf(li))}</div>
+                    </Fragment>
+                  ))}
+                </>
+              )}
+            </div>
+
+            <div className="mt-4 pt-3 border-t border-hborder space-y-1.5 text-xs">
+              <div className="flex justify-between">
+                <span className="text-hmuted">Subtotal</span>
+                <span className="tabular-nums text-htext">{formatCurrency(grossBeforeOverallDiscount)}</span>
+              </div>
+              {overallDiscount > 0 && (
+                <div className="flex justify-between">
+                  <span className="text-orange-600 truncate">{(res as any).discount_label || 'Discount'}</span>
+                  <span className="tabular-nums text-orange-600 flex-shrink-0">−{formatCurrency(overallDiscount)}</span>
+                </div>
+              )}
+              <div className="flex justify-between pt-1.5 mt-1 border-t border-hborder/60">
+                <span className="font-semibold text-htext">Total</span>
+                <span className="font-semibold text-htext tabular-nums">{res.total_amount == null ? '—' : formatCurrency(res.total_amount)}</span>
               </div>
             </div>
           </Modal>

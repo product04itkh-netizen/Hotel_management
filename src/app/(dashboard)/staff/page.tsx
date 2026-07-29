@@ -32,6 +32,14 @@ export default function StaffPage() {
   const [form, setForm] = useState({ ...emptyForm })
   const [saving, setSaving] = useState(false)
 
+  const [creatingLoginId, setCreatingLoginId] = useState<string | null>(null)
+  const [tempPasswordResult, setTempPasswordResult] = useState<{ name: string; email: string; password: string } | null>(null)
+
+  const [passwordModalStaff, setPasswordModalStaff] = useState<Staff | null>(null)
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [settingPassword, setSettingPassword] = useState(false)
+
   useEffect(() => { if (activeBranch) loadStaff() }, [activeBranch]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadStaff() {
@@ -73,34 +81,47 @@ export default function StaffPage() {
   async function handleSave() {
     if (!form.full_name || !form.role) { toast('Name and role are required', 'error'); return }
     setSaving(true)
-    const payload = {
-      full_name: form.full_name,
-      role: form.role,
-      email: form.email || null,
-      phone: form.phone || null,
-      status: form.status,
-      department: form.department || null,
-      hire_date: form.hire_date || null,
-      updated_at: new Date().toISOString(),
-    }
+
     if (editId) {
+      const payload = {
+        full_name: form.full_name,
+        role: form.role,
+        email: form.email || null,
+        phone: form.phone || null,
+        status: form.status,
+        department: form.department || null,
+        hire_date: form.hire_date || null,
+        updated_at: new Date().toISOString(),
+      }
       const { error } = await supabase.from('staff').update(payload).eq('id', editId)
       if (error) { toast(error.message, 'error'); setSaving(false); return }
       toast('Staff member updated')
-    } else {
-      const { error } = await supabase.from('staff').insert({ ...payload, branch_id: activeBranch?.id ?? null })
-      if (error) { toast(error.message, 'error'); setSaving(false); return }
-      toast('Staff member added')
+      setSaving(false)
+      setModalOpen(false)
+      loadStaff()
+      return
     }
+
+    if (!form.email) { toast('Email is required — it becomes their login', 'error'); setSaving(false); return }
+
+    const res = await fetch('/api/staff/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...form, branch_id: activeBranch?.id ?? null }),
+    })
+    const json = await res.json()
+    if (!json.ok) { toast(json.error ?? 'Failed to add staff member', 'error'); setSaving(false); return }
+
     setSaving(false)
     setModalOpen(false)
     loadStaff()
+    setTempPasswordResult({ name: form.full_name, email: form.email, password: json.tempPassword })
   }
 
   function handleDelete(id: string) {
     setConfirmDialog({
       title: 'Remove Staff Member',
-      message: 'This will permanently remove the staff member from the system.',
+      message: 'This will permanently remove the staff member from the system. Past reservations, journal entries, and check-ins they were attributed to will keep their record but show no staff name. Their login (if any) is not automatically revoked.',
       confirmLabel: 'Remove',
       variant: 'danger',
       onConfirm: async () => {
@@ -111,6 +132,44 @@ export default function StaffPage() {
         loadStaff()
       },
     })
+  }
+
+  async function handleCreateLogin(member: Staff) {
+    if (!member.email) { toast('Add an email address first — it becomes their login', 'error'); return }
+    setCreatingLoginId(member.id)
+    const res = await fetch('/api/staff/create-login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ staffId: member.id }),
+    })
+    const json = await res.json()
+    setCreatingLoginId(null)
+    if (!json.ok) { toast(json.error ?? 'Failed to create login', 'error'); return }
+    loadStaff()
+    setTempPasswordResult({ name: member.full_name, email: member.email, password: json.tempPassword })
+  }
+
+  function openSetPassword(member: Staff) {
+    setPasswordModalStaff(member)
+    setNewPassword('')
+    setConfirmPassword('')
+  }
+
+  async function handleSetPassword() {
+    if (!passwordModalStaff) return
+    if (newPassword.length < 8) { toast('Password must be at least 8 characters', 'error'); return }
+    if (newPassword !== confirmPassword) { toast('Passwords do not match', 'error'); return }
+    setSettingPassword(true)
+    const res = await fetch('/api/staff/set-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ staffId: passwordModalStaff.id, password: newPassword }),
+    })
+    const json = await res.json()
+    setSettingPassword(false)
+    if (!json.ok) { toast(json.error ?? 'Failed to set password', 'error'); return }
+    toast(`Password updated for ${passwordModalStaff.full_name}`)
+    setPasswordModalStaff(null)
   }
 
   const roleColors: Record<string, string> = {
@@ -157,26 +216,22 @@ export default function StaffPage() {
         </div>
 
         <div className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
-          <table className="w-full text-sm">
+          <table className="w-full text-sm table-fixed">
             <thead>
               <tr className="bg-hsurface2">
-                <th className="px-5 py-3 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide">Name</th>
-                <th className="px-5 py-3 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide">Role</th>
-                <th className="px-5 py-3 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide">Department</th>
-                <th className="px-5 py-3 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide">Contact</th>
-                <th className="px-5 py-3 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide">Hire Date</th>
-                <th className="px-5 py-3 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide">Status</th>
-                <th className="px-5 py-3 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide">Actions</th>
+                {([['Name', 'w-[22%]'], ['Role', 'w-[11%]'], ['Department', 'w-[12%]'], ['Contact', 'w-[12%]'], ['Hire Date', 'w-[10%]'], ['Status', 'w-[8%]'], ['Login', 'w-[10%]'], ['Actions', 'w-[15%]']] as const).map(([h, w]) => (
+                  <th key={h} className={cnHeader(w)}>{h}</th>
+                ))}
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={7} className="px-5 py-10 text-center text-hmuted">Loading…</td></tr>
+                <tr><td colSpan={8} className="px-5 py-10 text-center text-hmuted">Loading…</td></tr>
               ) : filtered.length === 0 ? (
-                <tr><td colSpan={7} className="px-5 py-10 text-center text-hmuted">No staff found</td></tr>
+                <tr><td colSpan={8} className="px-5 py-10 text-center text-hmuted">No staff found</td></tr>
               ) : filtered.map(member => (
                 <tr key={member.id} className="border-t border-hborder hover:bg-hbg/40">
-                  <td className="px-5 py-3">
+                  <td className="px-3 py-2">
                     <div className="flex items-center gap-3">
                       <div
                         className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
@@ -184,27 +239,43 @@ export default function StaffPage() {
                       >
                         {member.full_name.split(' ').map(n => n[0]).join('').slice(0, 2)}
                       </div>
-                      <div>
-                        <p className="font-medium text-htext">{member.full_name}</p>
-                        <p className="text-xs text-hmuted">{member.email ?? 'No email'}</p>
+                      <div className="min-w-0">
+                        <p className="font-medium text-htext truncate" title={member.full_name}>{member.full_name}</p>
+                        <p className="text-xs text-hmuted truncate">{member.email ?? 'No email'}</p>
                       </div>
                     </div>
                   </td>
-                  <td className="px-5 py-3">
+                  <td className="px-3 py-2">
                     <span
-                      className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium text-white"
+                      className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium text-white whitespace-nowrap"
                       style={{ background: roleColors[member.role] ?? '#888' }}
                     >
                       {capitalize(member.role)}
                     </span>
                   </td>
-                  <td className="px-5 py-3 text-hmuted">{member.department ?? '—'}</td>
-                  <td className="px-5 py-3 text-hmuted">{member.phone ?? '—'}</td>
-                  <td className="px-5 py-3 text-hmuted text-xs">{member.hire_date ? formatDate(member.hire_date) : '—'}</td>
-                  <td className="px-5 py-3"><Badge status={member.status} /></td>
-                  <td className="px-5 py-3">
-                    <div className="flex gap-1.5">
+                  <td className="px-3 py-2 text-hmuted text-xs whitespace-nowrap truncate">{member.department ?? '—'}</td>
+                  <td className="px-3 py-2 text-hmuted text-xs whitespace-nowrap truncate">{member.phone ?? '—'}</td>
+                  <td className="px-3 py-2 text-hmuted text-xs whitespace-nowrap">{member.hire_date ? formatDate(member.hire_date) : '—'}</td>
+                  <td className="px-3 py-2"><Badge status={member.status} /></td>
+                  <td className="px-3 py-2">
+                    {member.auth_user_id ? (
+                      <span className="text-[10px] px-2 py-0.5 rounded-full font-medium bg-green-100 text-green-700 whitespace-nowrap">Active</span>
+                    ) : (
+                      <span className="text-[10px] px-2 py-0.5 rounded-full font-medium bg-gray-100 text-gray-500 whitespace-nowrap">No login</span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2">
+                    <div className="flex flex-wrap gap-x-2 gap-y-0.5">
                       <button onClick={() => openEdit(member)} className="text-xs text-navy hover:underline">Edit</button>
+                      {member.auth_user_id ? (
+                        <button onClick={() => openSetPassword(member)} className="text-xs text-navy hover:underline">Set Password</button>
+                      ) : (
+                        <button
+                          onClick={() => handleCreateLogin(member)}
+                          disabled={creatingLoginId === member.id}
+                          className="text-xs text-navy hover:underline disabled:opacity-50"
+                        >{creatingLoginId === member.id ? 'Creating…' : 'Create Login'}</button>
+                      )}
                       <button onClick={() => handleDelete(member.id)} className="text-xs text-red-600 hover:underline">Remove</button>
                     </div>
                   </td>
@@ -257,13 +328,14 @@ export default function StaffPage() {
               </select>
             </div>
             <div>
-              <label className="block text-xs text-hmuted mb-1">Email</label>
+              <label className="block text-xs text-hmuted mb-1">Email {!editId && '*'}</label>
               <input
                 type="email"
                 value={form.email}
                 onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
                 className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg"
               />
+              {!editId && <p className="text-[11px] text-hlight mt-1">Used to automatically create their login.</p>}
             </div>
             <div>
               <label className="block text-xs text-hmuted mb-1">Phone</label>
@@ -298,6 +370,70 @@ export default function StaffPage() {
           </div>
         </div>
       </Modal>
+
+      {/* ── Temp password reveal (shown once, right after a login is created) ── */}
+      <Modal open={!!tempPasswordResult} onClose={() => setTempPasswordResult(null)} title="Login Created" size="sm">
+        {tempPasswordResult && (
+          <div className="space-y-3">
+            <p className="text-sm text-htext">
+              A login was created for <span className="font-semibold">{tempPasswordResult.name}</span>. Share these credentials with them directly — this password will not be shown again.
+            </p>
+            <div className="bg-hbg border border-hborder rounded-lg p-3 space-y-2">
+              <div>
+                <p className="text-[11px] text-hmuted uppercase tracking-wide">Email</p>
+                <p className="font-mono text-sm text-htext">{tempPasswordResult.email}</p>
+              </div>
+              <div>
+                <p className="text-[11px] text-hmuted uppercase tracking-wide">Temporary Password</p>
+                <p className="font-mono text-sm text-htext">{tempPasswordResult.password}</p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-1">
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  navigator.clipboard.writeText(`${tempPasswordResult.email} / ${tempPasswordResult.password}`)
+                  toast('Copied to clipboard')
+                }}
+              >Copy</Button>
+              <Button onClick={() => setTempPasswordResult(null)}>Done</Button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* ── Set / reset password ── */}
+      <Modal open={!!passwordModalStaff} onClose={() => setPasswordModalStaff(null)} title={`Set Password — ${passwordModalStaff?.full_name ?? ''}`} size="sm">
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs text-hmuted mb-1">New Password</label>
+            <input
+              type="password"
+              value={newPassword}
+              onChange={e => setNewPassword(e.target.value)}
+              placeholder="At least 8 characters"
+              className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-hmuted mb-1">Confirm Password</label>
+            <input
+              type="password"
+              value={confirmPassword}
+              onChange={e => setConfirmPassword(e.target.value)}
+              className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg"
+            />
+          </div>
+          <div className="flex justify-end gap-3 pt-2">
+            <Button variant="ghost" onClick={() => setPasswordModalStaff(null)}>Cancel</Button>
+            <Button onClick={handleSetPassword} disabled={settingPassword}>{settingPassword ? 'Saving…' : 'Set Password'}</Button>
+          </div>
+        </div>
+      </Modal>
     </>
   )
+}
+
+function cnHeader(w: string) {
+  return `px-3 py-2.5 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide ${w}`
 }
