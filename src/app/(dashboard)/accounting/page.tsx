@@ -122,6 +122,7 @@ export default function AccountingPage() {
   const [jeFrom, setJeFrom] = useState('')
   const [jeTo, setJeTo] = useState('')
   const [jeSearch, setJeSearch] = useState('')
+  const [jeStatus, setJeStatus] = useState<'all' | 'draft' | 'posted' | 'void'>('all')
 
   // Correct Entry Date (for auto-generated JEs — historical backfill corrections)
   const [correctDateOpen, setCorrectDateOpen] = useState(false)
@@ -130,6 +131,12 @@ export default function AccountingPage() {
   const [correctDateSiblings, setCorrectDateSiblings] = useState<JournalEntry[]>([])
   const [correctDateSelected, setCorrectDateSelected] = useState<Set<string>>(new Set())
   const [correctDateSaving, setCorrectDateSaving] = useState(false)
+
+  // Correct COA (for auto-generated JEs — fixes a wrong account picked at posting time)
+  const [correctCoaOpen, setCorrectCoaOpen] = useState(false)
+  const [correctCoaEntry, setCorrectCoaEntry] = useState<JournalEntry | null>(null)
+  const [correctCoaLines, setCorrectCoaLines] = useState<any[]>([])
+  const [correctCoaSaving, setCorrectCoaSaving] = useState(false)
 
   // General Ledger
   const [ledgerAccountFilter, setLedgerAccountFilter] = useState('')
@@ -206,6 +213,7 @@ export default function AccountingPage() {
   const [expandedReportAccts, setExpandedReportAccts] = useState<Set<string>>(new Set())
   const [reportAcctLines, setReportAcctLines] = useState<Record<string, any[]>>({})
   const [reportAcctLoading, setReportAcctLoading] = useState<Set<string>>(new Set())
+  const [discountDetailsOpen, setDiscountDetailsOpen] = useState(false)
 
   // Bank Reconciliation
   const [reconLines,     setReconLines]     = useState<any[]>([])
@@ -734,6 +742,69 @@ export default function AccountingPage() {
     loadEntries()
   }
 
+  // Correct COA — for auto-generated JEs, where a user picked the wrong
+  // account at posting time. Only lets each line move to another account of
+  // the SAME type (revenue↔revenue, expense↔expense, etc.) so the entry's
+  // debit/credit structure can't be broken by the correction. For revenue
+  // lines on invoice-linked JEs, also re-points the invoice's item(s) that
+  // drove that line so buildRevenueLines() stays consistent on future
+  // payments instead of silently reverting to the old account.
+
+  async function openCorrectCoa(entry: JournalEntry) {
+    setCorrectCoaEntry(entry)
+    let lines: any[] = entryLines[entry.id] ?? []
+    if (lines.length === 0) {
+      const { data } = await supabase.from('journal_entry_lines')
+        .select('*, account:chart_of_accounts(id, code, name, type)')
+        .eq('entry_id', entry.id).order('debit', { ascending: false })
+      lines = data ?? []
+    }
+    setCorrectCoaLines(lines.map(l => ({ ...l, newAccountId: l.account_id })))
+    setCorrectCoaOpen(true)
+  }
+
+  function setCorrectCoaLineAccount(lineId: string, accountId: string) {
+    setCorrectCoaLines(prev => prev.map(l => l.id === lineId ? { ...l, newAccountId: accountId } : l))
+  }
+
+  async function saveCorrectCoa() {
+    if (!correctCoaEntry || !activeBranch) return
+    const changed = correctCoaLines.filter(l => l.newAccountId && l.newAccountId !== l.account_id)
+    if (changed.length === 0) { setCorrectCoaOpen(false); return }
+    setCorrectCoaSaving(true)
+
+    for (const line of changed) {
+      const { error } = await supabase.from('journal_entry_lines').update({ account_id: line.newAccountId }).eq('id', line.id)
+      if (error) { toast(error.message, 'error'); setCorrectCoaSaving(false); return }
+    }
+
+    const isInvoiceLinked = ['invoice', 'deposit_applied', 'invoice_correction'].includes(correctCoaEntry.reference_type ?? '')
+    const revenueChanges = changed.filter(l => l.account?.type === 'revenue')
+    if (isInvoiceLinked && revenueChanges.length > 0 && correctCoaEntry.reference) {
+      const { data: inv } = await supabase.from('invoices').select('id, items').eq('invoice_number', correctCoaEntry.reference).eq('branch_id', activeBranch.id).maybeSingle()
+      if (inv?.items) {
+        const newAccounts = accounts.filter(a => revenueChanges.some(l => l.newAccountId === a.id))
+        const oldCodes = new Set(revenueChanges.map(l => l.account?.code).filter(Boolean))
+        const items = (inv.items as any[]).map(item => {
+          if (oldCodes.has(item.account_code)) {
+            const line = revenueChanges.find(l => l.account?.code === item.account_code)
+            const newAcc = newAccounts.find(a => a.id === line?.newAccountId)
+            if (newAcc) return { ...item, account_code: newAcc.code }
+          }
+          return item
+        })
+        await supabase.from('invoices').update({ items, updated_at: new Date().toISOString() }).eq('id', inv.id)
+      }
+    }
+
+    setEntryLines(prev => { const next = { ...prev }; delete next[correctCoaEntry.id]; return next })
+    toast(`Account corrected for ${changed.length} line${changed.length > 1 ? 's' : ''} on ${correctCoaEntry.entry_number}`)
+    setCorrectCoaSaving(false)
+    setCorrectCoaOpen(false)
+    setCorrectCoaEntry(null)
+    loadEntries()
+  }
+
   // ── Bills ──────────────────────────────────────────────────────
 
   async function saveBill() {
@@ -1174,6 +1245,7 @@ export default function AccountingPage() {
     setReportLoading(true)
     setExpandedReportAccts(new Set())
     setReportAcctLines({})
+    setDiscountDetailsOpen(false)
     let q = supabase.from('journal_entries').select('id, reference, reference_type').eq('branch_id', activeBranch.id).eq('status', 'posted').eq('is_void', false)
     if (reportType === 'pl' && reportFrom) q = q.gte('entry_date', reportFrom)
     if (reportTo) q = q.lte('entry_date', reportTo)
@@ -1207,12 +1279,19 @@ export default function AccountingPage() {
           .filter(Boolean)
       )] as string[]
       let totalDiscounts = 0
+      let discountDetails: { invoice_number: string; guest_name: string; discount_amount: number }[] = []
       if (invoiceNumbers.length > 0) {
-        const { data: invRows } = await supabase.from('invoices').select('invoice_number, discount_amount').eq('branch_id', activeBranch.id).in('invoice_number', invoiceNumbers)
-        totalDiscounts = (invRows ?? []).reduce((s, i) => s + Number(i.discount_amount || 0), 0)
+        const { data: invRows } = await supabase.from('invoices')
+          .select('invoice_number, discount_amount, guest:guests(full_name)')
+          .eq('branch_id', activeBranch.id).in('invoice_number', invoiceNumbers)
+        discountDetails = (invRows ?? [])
+          .filter((i: any) => Number(i.discount_amount) > 0)
+          .map((i: any) => ({ invoice_number: i.invoice_number, guest_name: i.guest?.full_name ?? 'Guest', discount_amount: Number(i.discount_amount) }))
+          .sort((a, b) => a.invoice_number.localeCompare(b.invoice_number))
+        totalDiscounts = discountDetails.reduce((s, i) => s + i.discount_amount, 0)
       }
 
-      setReportData({ type: 'pl', revenue, expenses, totalRev: revenue.reduce((s, a) => s + a.balance, 0), totalExp: expenses.reduce((s, a) => s + a.balance, 0), totalDiscounts })
+      setReportData({ type: 'pl', revenue, expenses, totalRev: revenue.reduce((s, a) => s + a.balance, 0), totalExp: expenses.reduce((s, a) => s + a.balance, 0), totalDiscounts, discountDetails })
     } else {
       const revAccts = withBal.filter(a => a.type === 'revenue')
       const expAccts = withBal.filter(a => a.type === 'expense')
@@ -1708,6 +1787,9 @@ export default function AccountingPage() {
           const filteredEntries = entries.filter(e => {
             if (jeFrom && e.entry_date < jeFrom) return false
             if (jeTo   && e.entry_date > jeTo)   return false
+            if (jeStatus === 'void'   && !e.is_void) return false
+            if (jeStatus === 'draft'  && (e.is_void || e.status !== 'draft'))  return false
+            if (jeStatus === 'posted' && (e.is_void || e.status !== 'posted')) return false
             if (jeSearch) {
               const q = jeSearch.toLowerCase()
               if (
@@ -1725,6 +1807,12 @@ export default function AccountingPage() {
               <input type="date" value={jeFrom} onChange={e => setJeFrom(e.target.value)} className={cn(input, 'w-auto')} />
               <span className="text-hmuted text-sm">–</span>
               <input type="date" value={jeTo} onChange={e => setJeTo(e.target.value)} className={cn(input, 'w-auto')} />
+              <select value={jeStatus} onChange={e => setJeStatus(e.target.value as typeof jeStatus)} className={cn(input, 'w-auto')}>
+                <option value="all">All Statuses</option>
+                <option value="draft">Draft</option>
+                <option value="posted">Posted</option>
+                <option value="void">Void</option>
+              </select>
               <div className="relative flex-1 min-w-[200px]">
                 <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-hmuted pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z"/></svg>
                 <input type="text" placeholder="Search entries…" value={jeSearch} onChange={e => setJeSearch(e.target.value)}
@@ -1803,12 +1891,14 @@ export default function AccountingPage() {
                                   className="text-[11px] font-medium text-amber-700 border border-amber-200 bg-amber-50 hover:bg-amber-100 px-2 py-1 rounded transition-colors"
                                 >Unpost</button>
                               )}
-                              {e.reference_type && AUTO_JE_REFERENCE_TYPES.includes(e.reference_type) && (
-                                <button
-                                  onClick={() => openCorrectDate(e)}
-                                  className="text-[11px] font-medium text-navy border border-blue-200 bg-blue-50 hover:bg-blue-100 px-2 py-1 rounded transition-colors"
-                                >Correct Date</button>
-                              )}
+                              <button
+                                onClick={() => openCorrectDate(e)}
+                                className="text-[11px] font-medium text-navy border border-blue-200 bg-blue-50 hover:bg-blue-100 px-2 py-1 rounded transition-colors"
+                              >Correct Date</button>
+                              <button
+                                onClick={() => openCorrectCoa(e)}
+                                className="text-[11px] font-medium text-purple-700 border border-purple-200 bg-purple-50 hover:bg-purple-100 px-2 py-1 rounded transition-colors"
+                              >Correct COA</button>
                             </div>
                           )}
                         </td>
@@ -2056,9 +2146,27 @@ export default function AccountingPage() {
                       <span>Total Revenue</span><span>{formatCurrency(reportData.totalRev)}</span>
                     </div>
                     {reportData.totalDiscounts > 0 && (
-                      <p className="text-[11px] text-hmuted -mt-1">
-                        Already net of {formatCurrency(reportData.totalDiscounts)} in discounts given this period — revenue lines above reflect what was actually recognized, not the pre-discount amount.
-                      </p>
+                      <div className="-mt-1">
+                        <p
+                          className="text-[11px] text-hmuted cursor-pointer hover:text-navy inline"
+                          onClick={() => setDiscountDetailsOpen(o => !o)}
+                        >
+                          {discountDetailsOpen ? '▾' : '▸'} Already net of {formatCurrency(reportData.totalDiscounts)} in discounts given this period — revenue lines above reflect what was actually recognized, not the pre-discount amount.
+                        </p>
+                        {discountDetailsOpen && (
+                          <div className="mt-2 bg-hbg/60 rounded-lg p-2 space-y-1">
+                            {reportData.discountDetails.map((d: any) => (
+                              <div key={d.invoice_number} className="flex items-center justify-between text-xs py-0.5">
+                                <span className="text-htext">
+                                  <span className="font-mono text-hmuted">{d.invoice_number}</span>
+                                  <span className="ml-2">{d.guest_name}</span>
+                                </span>
+                                <span className="text-hmuted tabular-nums">{formatCurrency(d.discount_amount)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     )}
                   </div>
                   <div>
@@ -2588,6 +2696,46 @@ export default function AccountingPage() {
           <div className="flex justify-end gap-3 pt-1">
             <Button variant="ghost" onClick={() => setCorrectDateOpen(false)}>Cancel</Button>
             <Button onClick={saveCorrectDate} disabled={correctDateSaving || !correctDateValue}>{correctDateSaving ? 'Saving…' : 'Save Date'}</Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* ── Correct COA ── */}
+      <Modal open={correctCoaOpen} onClose={() => setCorrectCoaOpen(false)} title={`Correct Account — ${correctCoaEntry?.entry_number ?? ''}`} size="sm">
+        <div className="space-y-3">
+          <p className="text-sm text-htext">
+            Reassign a line to a different account. Only accounts of the same type are offered, so debit/credit and reporting stay valid.
+          </p>
+          <div className="space-y-2.5">
+            {correctCoaLines.map(l => {
+              const sameTypeAccounts = accounts.filter(a => a.is_active && a.type === l.account?.type)
+              return (
+                <div key={l.id} className="border border-hborder rounded-lg p-2.5 space-y-1.5">
+                  <div className="flex items-center justify-between text-xs text-hmuted">
+                    <span>{l.description || '—'}</span>
+                    <span className="font-semibold tabular-nums">{Number(l.debit) > 0 ? `Dr ${formatCurrency(l.debit)}` : `Cr ${formatCurrency(l.credit)}`}</span>
+                  </div>
+                  <select
+                    value={l.newAccountId}
+                    onChange={ev => setCorrectCoaLineAccount(l.id, ev.target.value)}
+                    className={input}
+                  >
+                    {sameTypeAccounts.map(a => (
+                      <option key={a.id} value={a.id}>{a.code} — {a.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )
+            })}
+          </div>
+          <p className="text-[10px] text-hmuted border-t border-hborder pt-3">
+            {correctCoaEntry?.reference_type && ['invoice', 'deposit_applied', 'invoice_correction'].includes(correctCoaEntry.reference_type)
+              ? `Revenue-account changes also update ${correctCoaEntry.reference}'s line item(s), so future payments stay consistent.`
+              : 'Only this entry\'s line account(s) will change.'}
+          </p>
+          <div className="flex justify-end gap-3 pt-1">
+            <Button variant="ghost" onClick={() => setCorrectCoaOpen(false)}>Cancel</Button>
+            <Button onClick={saveCorrectCoa} disabled={correctCoaSaving}>{correctCoaSaving ? 'Saving…' : 'Save Account'}</Button>
           </div>
         </div>
       </Modal>

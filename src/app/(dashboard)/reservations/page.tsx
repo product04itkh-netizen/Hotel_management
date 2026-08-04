@@ -596,24 +596,36 @@ export default function ReservationsPage() {
     if (!activeBranch) return
     const guestName = (res.guest as any)?.full_name ?? res.guest_name ?? 'Guest'
 
-    const [{ data: invoices }, { data: heldReceipt }, { data: pettyCash }] = await Promise.all([
+    const [{ data: invoices }, { data: activeReceipt }, { data: pettyCash }, { data: checkInJes }] = await Promise.all([
       supabase.from('invoices').select('id, invoice_number, total, status').eq('reservation_id', res.id),
-      supabase.from('deposit_receipts').select('*').eq('reservation_id', res.id).eq('status', 'held').maybeSingle(),
+      // 'held' means never applied to an invoice yet — needs a refund on cancel.
+      // 'applied' means it WAS consumed by an invoice, but that invoice is about
+      // to be voided below, so the deposit is effectively un-applied too and
+      // needs the same refund — this was previously only handled for 'held',
+      // leaving an applied-then-voided deposit's liability stuck on the books
+      // forever with no refund ever recorded.
+      supabase.from('deposit_receipts').select('*').eq('reservation_id', res.id).in('status', ['held', 'applied']).maybeSingle(),
       supabase.from('petty_cash_transactions').select('id').eq('reservation_id', res.id),
+      // Check-in posts a revenue-recognition JE (DR Accounts Receivable / CR
+      // Revenue) keyed to the reservation number, not the invoice number —
+      // the invoice-voiding loop below never sees it, so it was never reversed.
+      supabase.from('journal_entries').select('id').eq('reference', res.reservation_number).eq('reference_type', 'check_in').eq('branch_id', activeBranch.id).eq('is_void', false),
     ])
 
     const activeInvoices = (invoices ?? []).filter((inv: any) => !['void', 'refunded'].includes(inv.status))
     const pcCount = (pettyCash ?? []).length
+    const checkInJeIds = (checkInJes ?? []).map((j: any) => j.id)
 
     const lines: string[] = [
       `Reservation ${res.reservation_number} — ${guestName} will be cancelled.`,
     ]
-    if (heldReceipt) lines.push(`Deposit ${formatCurrency(heldReceipt.amount)} will be refunded with a reversing JE.`)
+    if (activeReceipt) lines.push(`Deposit ${formatCurrency(activeReceipt.amount)} will be refunded with a reversing JE.`)
     for (const inv of activeInvoices) {
       lines.push(`Invoice ${inv.invoice_number} (${formatCurrency(inv.total)}) will be voided.`)
     }
     if (pcCount > 0) lines.push(`${pcCount} petty cash transaction${pcCount > 1 ? 's' : ''} will be unlinked.`)
-    if (res.status === 'checked_in') lines.push('⚠️  Guest is currently checked in — confirm this is intentional.')
+    if (checkInJeIds.length > 0) lines.push('Check-in revenue recognition will be reversed.')
+    if (res.status === 'checked_in') lines.push(`⚠️  Guest is currently checked in — the house will be released back to available.`)
     lines.push('\nThis action cannot be undone.')
 
     setConfirmDialog({
@@ -628,11 +640,11 @@ export default function ReservationsPage() {
           .update({ status: 'cancelled', updated_at: new Date().toISOString() })
           .eq('id', res.id)
 
-        if (heldReceipt) {
+        if (activeReceipt) {
           await supabase.from('deposit_receipts')
             .update({ status: 'refunded', updated_at: new Date().toISOString() })
-            .eq('id', heldReceipt.id)
-          await createRefundJournalEntry(res.reservation_number, guestName, heldReceipt.amount, heldReceipt.payment_method)
+            .eq('id', activeReceipt.id)
+          await createRefundJournalEntry(res.reservation_number, guestName, activeReceipt.amount, activeReceipt.payment_method)
         }
 
         for (const inv of activeInvoices) {
@@ -651,10 +663,26 @@ export default function ReservationsPage() {
             .eq('is_void', false)
         }
 
+        if (checkInJeIds.length > 0) {
+          await supabase.from('journal_entries')
+            .update({ is_void: true, voided_at: new Date().toISOString() })
+            .in('id', checkInJeIds)
+        }
+
         if (pcCount > 0) {
           await supabase.from('petty_cash_transactions')
             .update({ reservation_id: null, reservation_line_item_id: null })
             .eq('reservation_id', res.id)
+        }
+
+        // Release the house — but only if no OTHER checked-in reservation is
+        // also currently claiming it (guards against a double-booking edge case).
+        if (res.status === 'checked_in' && res.house_id) {
+          const { data: otherActive } = await supabase.from('reservations')
+            .select('id').eq('house_id', res.house_id).eq('status', 'checked_in').neq('id', res.id).limit(1)
+          if (!otherActive || otherActive.length === 0) {
+            await supabase.from('houses').update({ status: 'available', updated_at: new Date().toISOString() }).eq('id', res.house_id)
+          }
         }
 
         fetch('/api/telegram/notify', {
