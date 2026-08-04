@@ -123,6 +123,14 @@ export default function AccountingPage() {
   const [jeTo, setJeTo] = useState('')
   const [jeSearch, setJeSearch] = useState('')
 
+  // Correct Entry Date (for auto-generated JEs — historical backfill corrections)
+  const [correctDateOpen, setCorrectDateOpen] = useState(false)
+  const [correctDateEntry, setCorrectDateEntry] = useState<JournalEntry | null>(null)
+  const [correctDateValue, setCorrectDateValue] = useState('')
+  const [correctDateSiblings, setCorrectDateSiblings] = useState<JournalEntry[]>([])
+  const [correctDateSelected, setCorrectDateSelected] = useState<Set<string>>(new Set())
+  const [correctDateSaving, setCorrectDateSaving] = useState(false)
+
   // General Ledger
   const [ledgerAccountFilter, setLedgerAccountFilter] = useState('')
   const [ledgerFrom, setLedgerFrom] = useState('')
@@ -631,7 +639,7 @@ export default function AccountingPage() {
   async function unpostJournalEntry(entry: JournalEntry) {
     if (entry.reference_type && AUTO_JE_REFERENCE_TYPES.includes(entry.reference_type)) {
       toast(
-        `This entry was generated automatically from a ${entry.reference_type.replace(/_/g, ' ')} and is linked to an invoice or reservation record. Editing it here would desync the ledger from that record — void or correct the invoice/reservation instead, which reverses both together.`,
+        `This entry was generated automatically from a ${entry.reference_type.replace(/_/g, ' ')} and is linked to an invoice or reservation record. To fix amounts/accounts, void or correct the invoice/reservation instead — that reverses both together. To fix just the date, use "Correct Date" instead of Unpost.`,
         'error'
       )
       return
@@ -648,6 +656,76 @@ export default function AccountingPage() {
         toast(`${entry.entry_number} unposted — now editable`)
       },
     })
+  }
+
+  // ── Correct Entry Date ────────────────────────────────────────
+  // For auto-generated JEs, where Unpost+Edit is blocked. A pure date
+  // correction (historical backfill) doesn't touch amounts/accounts, so it
+  // doesn't need to go through void — but it does need to keep the linked
+  // invoice/payment/deposit records' dates in sync, or we'd introduce the
+  // exact desync the guardrail exists to prevent.
+
+  async function openCorrectDate(entry: JournalEntry) {
+    setCorrectDateEntry(entry)
+    setCorrectDateValue(entry.entry_date)
+    if (entry.reference && activeBranch) {
+      const { data } = await supabase.from('journal_entries').select('*')
+        .eq('reference', entry.reference).eq('branch_id', activeBranch.id).neq('id', entry.id)
+      const siblings = (data ?? []) as JournalEntry[]
+      setCorrectDateSiblings(siblings)
+      setCorrectDateSelected(new Set(siblings.map(s => s.id)))
+    } else {
+      setCorrectDateSiblings([])
+      setCorrectDateSelected(new Set())
+    }
+    setCorrectDateOpen(true)
+  }
+
+  function toggleCorrectDateSibling(id: string) {
+    setCorrectDateSelected(prev => {
+      const s = new Set(prev)
+      if (s.has(id)) s.delete(id); else s.add(id)
+      return s
+    })
+  }
+
+  async function saveCorrectDate() {
+    if (!correctDateEntry || !correctDateValue || !activeBranch) return
+    setCorrectDateSaving(true)
+
+    const targetEntries = [correctDateEntry, ...correctDateSiblings.filter(s => correctDateSelected.has(s.id))]
+    const targetIds = targetEntries.map(e => e.id)
+
+    const { error: jeErr } = await supabase.from('journal_entries')
+      .update({ entry_date: correctDateValue, updated_at: new Date().toISOString() })
+      .in('id', targetIds)
+    if (jeErr) { toast(jeErr.message, 'error'); setCorrectDateSaving(false); return }
+
+    const isoTimestamp = `${correctDateValue}T12:00:00Z`
+    const invoiceNumbers = new Set(
+      targetEntries.filter(e => ['invoice', 'deposit_applied', 'invoice_correction'].includes(e.reference_type ?? '')).map(e => e.reference).filter(Boolean) as string[]
+    )
+    const reservationNumbers = new Set(
+      targetEntries.filter(e => ['deposit', 'deposit_refund'].includes(e.reference_type ?? '')).map(e => e.reference).filter(Boolean) as string[]
+    )
+
+    for (const invNumber of invoiceNumbers) {
+      const { data: inv } = await supabase.from('invoices').select('id, paid_at').eq('invoice_number', invNumber).eq('branch_id', activeBranch.id).maybeSingle()
+      if (inv) {
+        if (inv.paid_at) await supabase.from('invoices').update({ paid_at: isoTimestamp, updated_at: new Date().toISOString() }).eq('id', inv.id)
+        await supabase.from('payment_transactions').update({ payment_date: isoTimestamp }).eq('invoice_id', inv.id)
+      }
+    }
+    for (const resNumber of reservationNumbers) {
+      const { data: res } = await supabase.from('reservations').select('id').eq('reservation_number', resNumber).eq('branch_id', activeBranch.id).maybeSingle()
+      if (res) await supabase.from('deposit_receipts').update({ receipt_date: correctDateValue, updated_at: new Date().toISOString() }).eq('reservation_id', res.id)
+    }
+
+    toast(`Date corrected to ${correctDateValue}${targetIds.length > 1 ? ` for ${targetIds.length} linked entries` : ''}`)
+    setCorrectDateSaving(false)
+    setCorrectDateOpen(false)
+    setCorrectDateEntry(null)
+    loadEntries()
   }
 
   // ── Bills ──────────────────────────────────────────────────────
@@ -1583,7 +1661,7 @@ export default function AccountingPage() {
             <div className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
               <table className="w-full text-sm table-fixed">
                 <thead><tr className="bg-hsurface2">
-                  {([['', 'w-[3%]'], ['Entry #', 'w-[12%]'], ['Date', 'w-[8%]'], ['Description', 'w-[36%]'], ['Reference', 'w-[12%]'], ['Type', 'w-[11%]'], ['Status', 'w-[9%]'], ['', 'w-[9%]']] as const).map(([h, w], i) => (
+                  {([['', 'w-[3%]'], ['Entry #', 'w-[11%]'], ['Date', 'w-[7%]'], ['Description', 'w-[26%]'], ['Reference', 'w-[10%]'], ['Type', 'w-[9%]'], ['Status', 'w-[8%]'], ['', 'w-[26%]']] as const).map(([h, w], i) => (
                     <th key={i} className={cn('px-3 py-2.5 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide', w)}>{h}</th>
                   ))}
                 </tr></thead>
@@ -1625,7 +1703,7 @@ export default function AccountingPage() {
                               : <span className="text-[10px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-bold uppercase">Posted</span>
                           }
                         </td>
-                        <td className="px-3 py-2" onClick={ev => ev.stopPropagation()}>
+                        <td className="px-3 py-2 whitespace-nowrap" onClick={ev => ev.stopPropagation()}>
                           {!e.is_void && (
                             <div className="flex items-center gap-1.5">
                               {e.status === 'draft' && (
@@ -1647,6 +1725,12 @@ export default function AccountingPage() {
                                   onClick={() => unpostJournalEntry(e)}
                                   className="text-[11px] font-medium text-amber-700 border border-amber-200 bg-amber-50 hover:bg-amber-100 px-2 py-1 rounded transition-colors"
                                 >Unpost</button>
+                              )}
+                              {e.reference_type && AUTO_JE_REFERENCE_TYPES.includes(e.reference_type) && (
+                                <button
+                                  onClick={() => openCorrectDate(e)}
+                                  className="text-[11px] font-medium text-navy border border-blue-200 bg-blue-50 hover:bg-blue-100 px-2 py-1 rounded transition-colors"
+                                >Correct Date</button>
                               )}
                             </div>
                           )}
@@ -2338,6 +2422,51 @@ export default function AccountingPage() {
           </div>
         )})()}
       </div>
+
+      {/* ── Correct Entry Date ── */}
+      <Modal open={correctDateOpen} onClose={() => setCorrectDateOpen(false)} title={`Correct Date — ${correctDateEntry?.entry_number ?? ''}`} size="sm">
+        <div className="space-y-3">
+          <p className="text-sm text-htext">
+            For historical data entry — moves when this transaction actually happened, not the amounts or accounts. Currently dated <strong>{correctDateEntry?.entry_date}</strong>.
+          </p>
+          <div>
+            <label className="block text-xs text-hmuted mb-1">Correct Date</label>
+            <input type="date" value={correctDateValue} onChange={e => setCorrectDateValue(e.target.value)} className={input} />
+          </div>
+          {correctDateSiblings.length > 0 && (
+            <div className="border-t border-hborder pt-3 space-y-2">
+              <p className="text-[10px] font-semibold text-hmuted uppercase tracking-wide">
+                Also linked to {correctDateEntry?.reference} — move these together too?
+              </p>
+              {correctDateSiblings.map(s => (
+                <label key={s.id} className="flex items-start gap-2.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={correctDateSelected.has(s.id)}
+                    onChange={() => toggleCorrectDateSibling(s.id)}
+                    className="w-4 h-4 mt-0.5 rounded border-hborder text-navy focus:ring-navy"
+                  />
+                  <span className="text-sm text-htext">
+                    {s.entry_number} — {(s.reference_type ?? '').replace(/_/g, ' ')}
+                    <span className="block text-xs text-hmuted">{s.description}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+          )}
+          <p className="text-[10px] text-hmuted border-t border-hborder pt-3">
+            {correctDateEntry?.reference_type && ['invoice', 'deposit_applied', 'invoice_correction'].includes(correctDateEntry.reference_type)
+              ? `Also updates ${correctDateEntry.reference}'s Paid At and payment record date(s), so nothing goes out of sync with the ledger.`
+              : correctDateEntry?.reference_type && ['deposit', 'deposit_refund'].includes(correctDateEntry.reference_type)
+                ? `Also updates the deposit receipt date for ${correctDateEntry.reference}, so nothing goes out of sync with the ledger.`
+                : 'Only this entry\'s date will change.'}
+          </p>
+          <div className="flex justify-end gap-3 pt-1">
+            <Button variant="ghost" onClick={() => setCorrectDateOpen(false)}>Cancel</Button>
+            <Button onClick={saveCorrectDate} disabled={correctDateSaving || !correctDateValue}>{correctDateSaving ? 'Saving…' : 'Save Date'}</Button>
+          </div>
+        </div>
+      </Modal>
 
       {/* ── COA Modal ── */}
       <Modal open={coaFormOpen} onClose={() => setCoaFormOpen(false)} title={editAccountId ? 'Edit Account' : 'Add Account'} size="sm">
