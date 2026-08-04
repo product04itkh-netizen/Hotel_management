@@ -272,6 +272,60 @@ export default function BillingPage() {
     return `${prefix}${String(seq).padStart(3, '0')}`
   }
 
+  // Credits each revenue account for its actual item price rather than a
+  // proportional ratio of the payment — item prices are fixed (set in
+  // Settings/reservation), so there's nothing to estimate. Waterfalls a
+  // partial payment through items in a stable order, checking what's
+  // already been credited to this invoice's revenue accounts by prior
+  // payments so nothing gets double-recognized.
+  async function buildRevenueLines(
+    entryId: string,
+    invoiceNumber: string,
+    items: { account_code?: string; total: number }[],
+    paymentAmount: number,
+  ): Promise<{ entry_id: string; account_id: string; debit: number; credit: number; description: string }[]> {
+    if (!activeBranch || paymentAmount <= 0) return []
+
+    const accountTotals: Record<string, number> = {}
+    items.forEach(item => {
+      const code = (item as any).account_code || '4300'
+      accountTotals[code] = (accountTotals[code] || 0) + Number(item.total)
+    })
+    const codes = Object.keys(accountTotals).sort()
+    if (codes.length === 0) return []
+
+    const { data: accts } = await supabase.from('chart_of_accounts').select('id, code').eq('branch_id', activeBranch.id).in('code', codes)
+
+    const { data: priorJes } = await supabase.from('journal_entries').select('id').eq('branch_id', activeBranch.id).eq('reference', invoiceNumber).eq('is_void', false)
+    const priorJeIds = (priorJes ?? []).map(j => j.id)
+    const alreadyCredited: Record<string, number> = {}
+    if (priorJeIds.length > 0) {
+      const { data: priorLines } = await supabase.from('journal_entry_lines').select('account_id, credit').in('entry_id', priorJeIds)
+      for (const l of priorLines ?? []) alreadyCredited[l.account_id] = (alreadyCredited[l.account_id] || 0) + Number(l.credit)
+    }
+
+    let remainingPayment = paymentAmount
+    const lines: { entry_id: string; account_id: string; debit: number; credit: number; description: string }[] = []
+    for (const code of codes) {
+      if (remainingPayment <= 0.001) break
+      const acc = accts?.find(a => a.code === code)
+      if (!acc) continue
+      const already = alreadyCredited[acc.id] || 0
+      const remainingForItem = Math.max(0, Math.round((accountTotals[code] - already) * 100) / 100)
+      const amount = Math.min(remainingForItem, remainingPayment)
+      if (amount > 0.001) {
+        lines.push({ entry_id: entryId, account_id: acc.id, debit: 0, credit: Math.round(amount * 100) / 100, description: `Revenue — ${invoiceNumber}` })
+        remainingPayment = Math.round((remainingPayment - amount) * 100) / 100
+      }
+    }
+    // Safety net: items exhausted but payment still exceeds their sum (shouldn't
+    // happen if payments never exceed invoice total) — don't drop the remainder.
+    if (remainingPayment > 0.001 && lines.length > 0) {
+      lines[lines.length - 1].credit = Math.round((lines[lines.length - 1].credit + remainingPayment) * 100) / 100
+    }
+    return lines
+  }
+
   async function handleCreate() {
     const today = new Date().toISOString().split('T')[0]
     const selectedRes = reservations.find(r => r.id === form.reservation_id) ?? null
@@ -352,29 +406,8 @@ export default function BillingPage() {
 
           if (jeErr) { toast(`Invoice created but JE failed: ${jeErr.message}`, 'error') }
           else if (je) {
-            const lines = [{ entry_id: je.id, account_id: depositLiabilityAcc.id, debit: initialPaid, credit: 0, description: 'Deposit Applied — Liability Cleared' }]
-            
-            const accountTotals: Record<string, number> = {}
-            form.items.forEach(item => {
-              const code = item.account_code || '4300'
-              accountTotals[code] = (accountTotals[code] || 0) + Number(item.total)
-            })
-            const invoiceSubtotal = Object.values(accountTotals).reduce((a,b) => a+b, 0)
-            
-            let remainingPaid = initialPaid
-            for (const [code, itemTotal] of Object.entries(accountTotals)) {
-              const acc = accounts?.find(a => a.code === code)
-              if (!acc) continue
-              const ratio = invoiceSubtotal > 0 ? itemTotal / invoiceSubtotal : (1 / Object.keys(accountTotals).length)
-              const amount = Math.round((initialPaid * ratio) * 100) / 100
-              if (amount > 0) {
-                lines.push({ entry_id: je.id, account_id: acc.id, debit: 0, credit: amount, description: `Revenue — ${inv.invoice_number}` })
-                remainingPaid -= amount
-              }
-            }
-            if (Math.abs(remainingPaid) > 0.001 && lines.length > 1) {
-              lines[1].credit = Math.round((lines[1].credit + remainingPaid) * 100) / 100
-            }
+            const revenueLines = await buildRevenueLines(je.id, inv.invoice_number, form.items, initialPaid)
+            const lines = [{ entry_id: je.id, account_id: depositLiabilityAcc.id, debit: initialPaid, credit: 0, description: 'Deposit Applied — Liability Cleared' }, ...revenueLines]
 
             const { error: lineErr } = await supabase.from('journal_entry_lines').insert(lines)
             if (lineErr) {
@@ -495,27 +528,7 @@ export default function BillingPage() {
         toast(`Invoice created but JE failed: ${jeErr.message}`, 'error')
       } else if (je) {
         const debitLines = carriedForwardLines.map(l => ({ entry_id: je.id, account_id: l.account_id, debit: l.amount, credit: 0, description: 'Carried forward — unchanged' }))
-
-        const accountTotals: Record<string, number> = {}
-        form.items.forEach(item => {
-          const code = (item as any).account_code || '4300'
-          accountTotals[code] = (accountTotals[code] || 0) + Number(item.total)
-        })
-        const invoiceSubtotal = Object.values(accountTotals).reduce((a, b) => a + b, 0)
-        const { data: accts } = await supabase.from('chart_of_accounts').select('id, code').eq('branch_id', activeBranch.id).in('code', Object.keys(accountTotals))
-
-        let remaining = carriedTotal
-        const revenueLines: any[] = []
-        for (const [code, itemTotal] of Object.entries(accountTotals)) {
-          const acc = accts?.find(a => a.code === code)
-          if (!acc) continue
-          const ratio = invoiceSubtotal > 0 ? itemTotal / invoiceSubtotal : (1 / Object.keys(accountTotals).length)
-          const amount = Math.round((carriedTotal * ratio) * 100) / 100
-          if (amount > 0) { revenueLines.push({ entry_id: je.id, account_id: acc.id, debit: 0, credit: amount, description: `Revenue — ${inv.invoice_number}` }); remaining -= amount }
-        }
-        if (Math.abs(remaining) > 0.001 && revenueLines.length > 0) {
-          revenueLines[0].credit = Math.round((revenueLines[0].credit + remaining) * 100) / 100
-        }
+        const revenueLines = await buildRevenueLines(je.id, inv.invoice_number, form.items, carriedTotal)
 
         const { error: lineErr } = await supabase.from('journal_entry_lines').insert([...debitLines, ...revenueLines])
         if (lineErr) {
@@ -598,29 +611,11 @@ export default function BillingPage() {
         if (jeErr) throw jeErr
         if (je) {
           jeId = je.id
-          const lines = [{ entry_id: je.id, account_id: cashAcct.id, description: `${capitalize(payForm.payment_method.replace('_', ' '))} received`, debit: amountReceived, credit: 0 }]
-          
-          const accountTotals: Record<string, number> = {}
-          selectedInvoice.items.forEach(item => {
-            const code = (item as any).account_code || '4300'
-            accountTotals[code] = (accountTotals[code] || 0) + Number(item.total)
-          })
-          const invoiceSubtotal = Object.values(accountTotals).reduce((a,b) => a+b, 0)
-          
-          let remainingPaid = amountReceived
-          for (const [code, itemTotal] of Object.entries(accountTotals)) {
-            const acc = accounts?.find(a => a.code === code)
-            if (!acc) continue
-            const ratio = invoiceSubtotal > 0 ? itemTotal / invoiceSubtotal : (1 / Object.keys(accountTotals).length)
-            const amount = Math.round((amountReceived * ratio) * 100) / 100
-            if (amount > 0) {
-              lines.push({ entry_id: je.id, account_id: acc.id, description: selectedInvoice.invoice_number, debit: 0, credit: amount })
-              remainingPaid -= amount
-            }
-          }
-          if (Math.abs(remainingPaid) > 0.001 && lines.length > 1) {
-            lines[1].credit = Math.round((lines[1].credit + remainingPaid) * 100) / 100
-          }
+          const revenueLines = await buildRevenueLines(je.id, selectedInvoice.invoice_number, selectedInvoice.items, amountReceived)
+          const lines = [
+            { entry_id: je.id, account_id: cashAcct.id, description: `${capitalize(payForm.payment_method.replace('_', ' '))} received`, debit: amountReceived, credit: 0 },
+            ...revenueLines,
+          ]
 
           const { error: lineErr } = await supabase.from('journal_entry_lines').insert(lines)
           if (lineErr) {
@@ -648,29 +643,11 @@ export default function BillingPage() {
               }).select().single()
               if (depJeErr) throw depJeErr
               if (depJe) {
-                const lines = [{ entry_id: depJe.id, account_id: depositLiabilityAcc.id, debit: res.deposit, credit: 0, description: 'Deposit Applied — Liability Cleared' }]
-                
-                const accountTotals: Record<string, number> = {}
-                selectedInvoice.items.forEach(item => {
-                  const code = (item as any).account_code || '4300'
-                  accountTotals[code] = (accountTotals[code] || 0) + Number(item.total)
-                })
-                const invoiceSubtotal = Object.values(accountTotals).reduce((a,b) => a+b, 0)
-                
-                let remainingPaid = res.deposit
-                for (const [code, itemTotal] of Object.entries(accountTotals)) {
-                  const acc = accounts?.find(a => a.code === code)
-                  if (!acc) continue
-                  const ratio = invoiceSubtotal > 0 ? itemTotal / invoiceSubtotal : (1 / Object.keys(accountTotals).length)
-                  const amount = Math.round((res.deposit * ratio) * 100) / 100
-                  if (amount > 0) {
-                    lines.push({ entry_id: depJe.id, account_id: acc.id, debit: 0, credit: amount, description: `Revenue — ${selectedInvoice.invoice_number}` })
-                    remainingPaid -= amount
-                  }
-                }
-                if (Math.abs(remainingPaid) > 0.001 && lines.length > 1) {
-                  lines[1].credit = Math.round((lines[1].credit + remainingPaid) * 100) / 100
-                }
+                const revenueLines = await buildRevenueLines(depJe.id, selectedInvoice.invoice_number, selectedInvoice.items, res.deposit)
+                const lines = [
+                  { entry_id: depJe.id, account_id: depositLiabilityAcc.id, debit: res.deposit, credit: 0, description: 'Deposit Applied — Liability Cleared' },
+                  ...revenueLines,
+                ]
 
                 const { error: depLineErr } = await supabase.from('journal_entry_lines').insert(lines)
                 if (depLineErr) {

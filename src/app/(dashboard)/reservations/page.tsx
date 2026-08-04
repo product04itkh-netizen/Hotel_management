@@ -639,10 +639,14 @@ export default function ReservationsPage() {
           await supabase.from('invoices')
             .update({ status: 'void', updated_at: new Date().toISOString() })
             .eq('id', inv.id)
+          // Every JE tied to this invoice — payment, deposit-applied, or a
+          // prior correction — shares the same `reference`, regardless of
+          // reference_type. Voiding only 'invoice'-type JEs left deposit_applied
+          // entries still posted and counting in reports after the invoice
+          // itself showed void.
           await supabase.from('journal_entries')
             .update({ is_void: true, voided_at: new Date().toISOString() })
             .eq('reference', inv.invoice_number)
-            .eq('reference_type', 'invoice')
             .eq('branch_id', activeBranch.id)
             .eq('is_void', false)
         }

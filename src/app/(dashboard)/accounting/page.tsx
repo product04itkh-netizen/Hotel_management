@@ -201,6 +201,12 @@ export default function AccountingPage() {
   const [reportData,    setReportData]    = useState<any>(null)
   const [reportLoading, setReportLoading] = useState(false)
 
+  // Account drill-down (shared by Trial Balance, P&L, Balance Sheet — click an
+  // account line to see the journal entries behind its balance)
+  const [expandedReportAccts, setExpandedReportAccts] = useState<Set<string>>(new Set())
+  const [reportAcctLines, setReportAcctLines] = useState<Record<string, any[]>>({})
+  const [reportAcctLoading, setReportAcctLoading] = useState<Set<string>>(new Set())
+
   // Bank Reconciliation
   const [reconLines,     setReconLines]     = useState<any[]>([])
   const [reconStmtBal,   setReconStmtBal]   = useState('')
@@ -1077,11 +1083,64 @@ export default function AccountingPage() {
     loadRecurring(); loadEntries()
   }
 
+  // ── Account drill-down ────────────────────────────────────────
+  // Click an account line on Trial Balance / P&L / Balance Sheet to see the
+  // journal entries that make up its balance for that report's period.
+
+  async function toggleAcctDrilldown(accountId: string, from: string | undefined, to: string | undefined) {
+    if (expandedReportAccts.has(accountId)) {
+      setExpandedReportAccts(prev => { const s = new Set(prev); s.delete(accountId); return s })
+      return
+    }
+    setExpandedReportAccts(prev => new Set([...prev, accountId]))
+    if (reportAcctLines[accountId] || !activeBranch) return
+    setReportAcctLoading(prev => new Set([...prev, accountId]))
+    let jeQ = supabase.from('journal_entries').select('id').eq('branch_id', activeBranch.id).eq('status', 'posted').eq('is_void', false)
+    if (from) jeQ = jeQ.gte('entry_date', from)
+    if (to) jeQ = jeQ.lte('entry_date', to)
+    const { data: jeIdRows } = await jeQ
+    const ids = (jeIdRows ?? []).map((e: any) => e.id)
+    let lines: any[] = []
+    if (ids.length > 0) {
+      const { data } = await supabase.from('journal_entry_lines')
+        .select('*, entry:journal_entries(entry_number, entry_date, description, reference)')
+        .eq('account_id', accountId).in('entry_id', ids)
+      lines = (data ?? []).sort((a: any, b: any) => (a.entry?.entry_date ?? '').localeCompare(b.entry?.entry_date ?? ''))
+    }
+    setReportAcctLines(prev => ({ ...prev, [accountId]: lines }))
+    setReportAcctLoading(prev => { const s = new Set(prev); s.delete(accountId); return s })
+  }
+
+  function AcctDrilldown({ accountId }: { accountId: string }) {
+    const lines = reportAcctLines[accountId]
+    const loading = reportAcctLoading.has(accountId)
+    if (loading) return <p className="text-xs text-hmuted py-2 pl-4">Loading entries…</p>
+    if (!lines || lines.length === 0) return <p className="text-xs text-hmuted py-2 pl-4">No entries in this period.</p>
+    return (
+      <div className="pl-4 py-2 space-y-1 bg-hbg/60 rounded-lg my-1">
+        {lines.map((l: any) => (
+          <div key={l.id} className="flex items-center justify-between text-xs py-1 border-b border-hborder/30 last:border-0 pr-2">
+            <div className="min-w-0 flex-1">
+              <span className="font-mono text-hmuted whitespace-nowrap">{l.entry?.entry_number}</span>
+              <span className="text-hmuted whitespace-nowrap ml-2">{l.entry?.entry_date ? formatDate(l.entry.entry_date) : ''}</span>
+              <span className="text-htext ml-2 truncate">{l.entry?.description}</span>
+            </div>
+            <span className="tabular-nums whitespace-nowrap ml-3">
+              {Number(l.debit) > 0 ? <span className="text-htext">DR {formatCurrency(l.debit)}</span> : <span className="text-hmuted">CR {formatCurrency(l.credit)}</span>}
+            </span>
+          </div>
+        ))}
+      </div>
+    )
+  }
+
   // ── Trial Balance ──────────────────────────────────────────────
 
   async function loadTrialBalance() {
     if (!activeBranch) return
     setTbLoading(true)
+    setExpandedReportAccts(new Set())
+    setReportAcctLines({})
     let q = supabase.from('journal_entries').select('id').eq('branch_id', activeBranch.id).eq('status', 'posted').eq('is_void', false)
     if (tbFrom) q = q.gte('entry_date', tbFrom)
     if (tbTo)   q = q.lte('entry_date', tbTo)
@@ -1113,7 +1172,9 @@ export default function AccountingPage() {
   async function loadReport() {
     if (!activeBranch) return
     setReportLoading(true)
-    let q = supabase.from('journal_entries').select('id').eq('branch_id', activeBranch.id).eq('status', 'posted').eq('is_void', false)
+    setExpandedReportAccts(new Set())
+    setReportAcctLines({})
+    let q = supabase.from('journal_entries').select('id, reference, reference_type').eq('branch_id', activeBranch.id).eq('status', 'posted').eq('is_void', false)
     if (reportType === 'pl' && reportFrom) q = q.gte('entry_date', reportFrom)
     if (reportTo) q = q.lte('entry_date', reportTo)
     const { data: jeData } = await q
@@ -1135,7 +1196,23 @@ export default function AccountingPage() {
     if (reportType === 'pl') {
       const revenue  = withBal.filter(a => a.type === 'revenue' && (a.dr > 0 || a.cr > 0))
       const expenses = withBal.filter(a => a.type === 'expense' && (a.dr > 0 || a.cr > 0))
-      setReportData({ type: 'pl', revenue, expenses, totalRev: revenue.reduce((s, a) => s + a.balance, 0), totalExp: expenses.reduce((s, a) => s + a.balance, 0) })
+
+      // Revenue lines above are already net of discounts (the JE only ever
+      // recognizes the post-discount amount) — surface how much was given
+      // away as a separate figure rather than restating the account lines.
+      const invoiceNumbers = [...new Set(
+        (jeData ?? [])
+          .filter((e: any) => ['invoice', 'deposit_applied', 'invoice_correction'].includes(e.reference_type))
+          .map((e: any) => e.reference)
+          .filter(Boolean)
+      )] as string[]
+      let totalDiscounts = 0
+      if (invoiceNumbers.length > 0) {
+        const { data: invRows } = await supabase.from('invoices').select('invoice_number, discount_amount').eq('branch_id', activeBranch.id).in('invoice_number', invoiceNumbers)
+        totalDiscounts = (invRows ?? []).reduce((s, i) => s + Number(i.discount_amount || 0), 0)
+      }
+
+      setReportData({ type: 'pl', revenue, expenses, totalRev: revenue.reduce((s, a) => s + a.balance, 0), totalExp: expenses.reduce((s, a) => s + a.balance, 0), totalDiscounts })
     } else {
       const revAccts = withBal.filter(a => a.type === 'revenue')
       const expAccts = withBal.filter(a => a.type === 'expense')
@@ -1874,20 +1951,32 @@ export default function AccountingPage() {
                 </div>
                 <table className="w-full text-sm table-fixed">
                   <thead><tr className="bg-hsurface2">
-                    {([['Code','w-[10%]'],['Account Name','w-[38%]'],['Type','w-[14%]'],['Debit ($)','w-[13%]'],['Credit ($)','w-[13%]'],['Balance ($)','w-[12%]']] as const).map(([h, w]) => (
+                    {([['', 'w-[4%]'], ['Code','w-[10%]'],['Account Name','w-[34%]'],['Type','w-[14%]'],['Debit ($)','w-[13%]'],['Credit ($)','w-[13%]'],['Balance ($)','w-[12%]']] as const).map(([h, w]) => (
                       <th key={h} className={cn('px-3 py-2.5 text-[11px] font-semibold text-hmuted uppercase tracking-wide', h.includes('$') ? 'text-right' : 'text-left', w)}>{h}</th>
                     ))}
                   </tr></thead>
                   <tbody>
                     {tbRows.map((r, i) => (
-                      <tr key={r.id} className={cn('border-t border-hborder', i % 2 === 1 ? 'bg-hbg/30' : '')}>
-                        <td className="px-3 py-2 font-mono text-xs text-navy whitespace-nowrap truncate">{r.code}</td>
-                        <td className="px-3 py-2 text-htext truncate" title={r.name}>{r.name}</td>
-                        <td className="px-3 py-2"><span className={cn('text-[10px] px-2 py-0.5 rounded-full font-medium', TYPE_COLOR[r.type as AccountType])}>{r.type}</span></td>
-                        <td className="px-3 py-2 text-right text-hmuted whitespace-nowrap">{r.dr > 0 ? formatCurrency(r.dr) : ''}</td>
-                        <td className="px-3 py-2 text-right text-hmuted whitespace-nowrap">{r.cr > 0 ? formatCurrency(r.cr) : ''}</td>
-                        <td className={cn('px-3 py-2 text-right font-semibold whitespace-nowrap', r.balance < 0 ? 'text-red-600' : 'text-dark-navy')}>{formatCurrency(Math.abs(r.balance))}</td>
-                      </tr>
+                      <>
+                        <tr
+                          key={r.id}
+                          className={cn('border-t border-hborder cursor-pointer hover:bg-hbg/50', i % 2 === 1 ? 'bg-hbg/30' : '')}
+                          onClick={() => toggleAcctDrilldown(r.id, tbFrom, tbTo)}
+                        >
+                          <td className="px-3 py-2 text-hmuted text-xs">{expandedReportAccts.has(r.id) ? '▾' : '▸'}</td>
+                          <td className="px-3 py-2 font-mono text-xs text-navy whitespace-nowrap truncate">{r.code}</td>
+                          <td className="px-3 py-2 text-htext truncate" title={r.name}>{r.name}</td>
+                          <td className="px-3 py-2"><span className={cn('text-[10px] px-2 py-0.5 rounded-full font-medium', TYPE_COLOR[r.type as AccountType])}>{r.type}</span></td>
+                          <td className="px-3 py-2 text-right text-hmuted whitespace-nowrap">{r.dr > 0 ? formatCurrency(r.dr) : ''}</td>
+                          <td className="px-3 py-2 text-right text-hmuted whitespace-nowrap">{r.cr > 0 ? formatCurrency(r.cr) : ''}</td>
+                          <td className={cn('px-3 py-2 text-right font-semibold whitespace-nowrap', r.balance < 0 ? 'text-red-600' : 'text-dark-navy')}>{formatCurrency(Math.abs(r.balance))}</td>
+                        </tr>
+                        {expandedReportAccts.has(r.id) && (
+                          <tr className="border-t border-hborder/40">
+                            <td colSpan={7} className="px-3"><AcctDrilldown accountId={r.id} /></td>
+                          </tr>
+                        )}
+                      </>
                     ))}
                   </tbody>
                   <tfoot>
@@ -1897,7 +1986,7 @@ export default function AccountingPage() {
                       const balanced = Math.abs(totDr - totCr) < 0.01
                       return (
                         <tr className="bg-dark-navy text-white">
-                          <td colSpan={3} className="px-4 py-3 font-bold text-sm uppercase tracking-wide">Totals</td>
+                          <td colSpan={4} className="px-4 py-3 font-bold text-sm uppercase tracking-wide">Totals</td>
                           <td className="px-3 py-2 text-right font-bold">{formatCurrency(totDr)}</td>
                           <td className="px-3 py-2 text-right font-bold">{formatCurrency(totCr)}</td>
                           <td className="px-3 py-2 text-right font-bold">
@@ -1952,21 +2041,38 @@ export default function AccountingPage() {
                   <div>
                     <p className="text-xs font-bold text-hmuted uppercase tracking-wide mb-2">Revenue</p>
                     {reportData.revenue.map((a: any) => (
-                      <div key={a.id} className="flex justify-between py-1.5 border-b border-hborder/40 text-sm">
-                        <span className="text-htext">{a.code} — {a.name}</span>
-                        <span className="font-medium text-green-700">{formatCurrency(a.balance)}</span>
+                      <div key={a.id}>
+                        <div
+                          className="flex justify-between py-1.5 border-b border-hborder/40 text-sm cursor-pointer hover:bg-hbg/50 -mx-1 px-1 rounded"
+                          onClick={() => toggleAcctDrilldown(a.id, reportFrom, reportTo)}
+                        >
+                          <span className="text-htext">{expandedReportAccts.has(a.id) ? '▾' : '▸'} {a.code} — {a.name}</span>
+                          <span className="font-medium text-green-700">{formatCurrency(a.balance)}</span>
+                        </div>
+                        {expandedReportAccts.has(a.id) && <AcctDrilldown accountId={a.id} />}
                       </div>
                     ))}
                     <div className="flex justify-between py-2 font-bold text-dark-navy">
                       <span>Total Revenue</span><span>{formatCurrency(reportData.totalRev)}</span>
                     </div>
+                    {reportData.totalDiscounts > 0 && (
+                      <p className="text-[11px] text-hmuted -mt-1">
+                        Already net of {formatCurrency(reportData.totalDiscounts)} in discounts given this period — revenue lines above reflect what was actually recognized, not the pre-discount amount.
+                      </p>
+                    )}
                   </div>
                   <div>
                     <p className="text-xs font-bold text-hmuted uppercase tracking-wide mb-2">Expenses</p>
                     {reportData.expenses.map((a: any) => (
-                      <div key={a.id} className="flex justify-between py-1.5 border-b border-hborder/40 text-sm">
-                        <span className="text-htext">{a.code} — {a.name}</span>
-                        <span className="font-medium text-red-600">{formatCurrency(a.balance)}</span>
+                      <div key={a.id}>
+                        <div
+                          className="flex justify-between py-1.5 border-b border-hborder/40 text-sm cursor-pointer hover:bg-hbg/50 -mx-1 px-1 rounded"
+                          onClick={() => toggleAcctDrilldown(a.id, reportFrom, reportTo)}
+                        >
+                          <span className="text-htext">{expandedReportAccts.has(a.id) ? '▾' : '▸'} {a.code} — {a.name}</span>
+                          <span className="font-medium text-red-600">{formatCurrency(a.balance)}</span>
+                        </div>
+                        {expandedReportAccts.has(a.id) && <AcctDrilldown accountId={a.id} />}
                       </div>
                     ))}
                     <div className="flex justify-between py-2 font-bold text-dark-navy">
@@ -1989,9 +2095,15 @@ export default function AccountingPage() {
                   </div>
                   <div className="p-4 space-y-1">
                     {reportData.assets.map((a: any) => (
-                      <div key={a.id} className="flex justify-between py-1 text-sm border-b border-hborder/30">
-                        <span className="text-htext">{a.code} — {a.name}</span>
-                        <span className={cn('font-medium', a.balance < 0 ? 'text-red-500' : '')}>{formatCurrency(a.balance)}</span>
+                      <div key={a.id}>
+                        <div
+                          className="flex justify-between py-1 text-sm border-b border-hborder/30 cursor-pointer hover:bg-hbg/50 -mx-1 px-1 rounded"
+                          onClick={() => toggleAcctDrilldown(a.id, undefined, reportTo)}
+                        >
+                          <span className="text-htext">{expandedReportAccts.has(a.id) ? '▾' : '▸'} {a.code} — {a.name}</span>
+                          <span className={cn('font-medium', a.balance < 0 ? 'text-red-500' : '')}>{formatCurrency(a.balance)}</span>
+                        </div>
+                        {expandedReportAccts.has(a.id) && <AcctDrilldown accountId={a.id} />}
                       </div>
                     ))}
                     <div className="flex justify-between pt-3 font-bold text-dark-navy border-t-2 border-hborder">
@@ -2006,9 +2118,15 @@ export default function AccountingPage() {
                     </div>
                     <div className="p-4 space-y-1">
                       {reportData.liabilities.map((a: any) => (
-                        <div key={a.id} className="flex justify-between py-1 text-sm border-b border-hborder/30">
-                          <span className="text-htext">{a.code} — {a.name}</span>
-                          <span className="font-medium">{formatCurrency(a.balance)}</span>
+                        <div key={a.id}>
+                          <div
+                            className="flex justify-between py-1 text-sm border-b border-hborder/30 cursor-pointer hover:bg-hbg/50 -mx-1 px-1 rounded"
+                            onClick={() => toggleAcctDrilldown(a.id, undefined, reportTo)}
+                          >
+                            <span className="text-htext">{expandedReportAccts.has(a.id) ? '▾' : '▸'} {a.code} — {a.name}</span>
+                            <span className="font-medium">{formatCurrency(a.balance)}</span>
+                          </div>
+                          {expandedReportAccts.has(a.id) && <AcctDrilldown accountId={a.id} />}
                         </div>
                       ))}
                       <div className="flex justify-between pt-2 font-semibold text-dark-navy border-t border-hborder">
@@ -2022,9 +2140,15 @@ export default function AccountingPage() {
                     </div>
                     <div className="p-4 space-y-1">
                       {reportData.equity.map((a: any) => (
-                        <div key={a.id} className="flex justify-between py-1 text-sm border-b border-hborder/30">
-                          <span className="text-htext">{a.code} — {a.name}</span>
-                          <span className="font-medium">{formatCurrency(a.balance)}</span>
+                        <div key={a.id}>
+                          <div
+                            className="flex justify-between py-1 text-sm border-b border-hborder/30 cursor-pointer hover:bg-hbg/50 -mx-1 px-1 rounded"
+                            onClick={() => toggleAcctDrilldown(a.id, undefined, reportTo)}
+                          >
+                            <span className="text-htext">{expandedReportAccts.has(a.id) ? '▾' : '▸'} {a.code} — {a.name}</span>
+                            <span className="font-medium">{formatCurrency(a.balance)}</span>
+                          </div>
+                          {expandedReportAccts.has(a.id) && <AcctDrilldown accountId={a.id} />}
                         </div>
                       ))}
                       <div className="flex justify-between py-1 text-sm border-b border-hborder/30">
