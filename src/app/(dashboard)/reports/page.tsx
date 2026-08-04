@@ -10,7 +10,6 @@ interface MonthlyData {
   month: string
   revenue: number
   reservations: number
-  occupancyRate: number
 }
 
 interface BalanceSheet {
@@ -98,7 +97,7 @@ export default function ReportsPage() {
         .filter(inv => inv.paid_at?.startsWith(monthKey))
         .reduce((s, inv) => s + Number(inv.total), 0)
       const monthReservations = reservations.filter(r => r.check_in_date?.startsWith(monthKey)).length
-      months.push({ month: label, revenue: monthRevenue, reservations: monthReservations, occupancyRate: Math.min(95, 40 + monthReservations * 3) })
+      months.push({ month: label, revenue: monthRevenue, reservations: monthReservations })
     }
     setMonthlyData(months)
 

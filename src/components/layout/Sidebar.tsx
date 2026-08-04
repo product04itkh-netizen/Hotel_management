@@ -23,6 +23,7 @@ const navItems = [
     { href: '/billing', label: 'Billing', icon: '💳' },
     { href: '/accounting', label: 'Accounting', icon: '📒' },
     { href: '/assets', label: 'Fixed Assets', icon: '🏗️' },
+    { href: '/inventory', label: 'Inventory', icon: '📦' },
   ]},
   { group: 'Management', items: [
     { href: '/reports', label: 'Reports', icon: '📈' },

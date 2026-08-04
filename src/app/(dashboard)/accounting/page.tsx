@@ -50,6 +50,10 @@ const TYPE_COLOR: Record<AccountType, string> = {
   equity: 'bg-purple-100 text-purple-700', revenue: 'bg-blue-100 text-blue-700',
   expense: 'bg-orange-100 text-orange-700',
 }
+// Auto-generated from an invoice/reservation event — unposting+editing these would
+// desync the ledger from the invoice/reservation record that has its own copy of
+// the numbers. Reverse or correct these by voiding the invoice/reservation instead.
+const AUTO_JE_REFERENCE_TYPES = ['invoice', 'deposit', 'deposit_applied', 'deposit_refund', 'check_in', 'invoice_correction']
 const TABS: { key: Tab; label: string }[] = [
   { key: 'overview',       label: 'Overview' },
   { key: 'ar',             label: 'Receivables' },
@@ -380,9 +384,9 @@ export default function AccountingPage() {
   async function loadLedger() {
     if (!activeBranch) return
     setLedgerLoading(true)
-    // Step 1: get posted entry IDs in date range
+    // Step 1: get posted, non-void entry IDs in date range
     let jeQ = supabase.from('journal_entries')
-      .select('id').eq('branch_id', activeBranch.id).eq('status', 'posted')
+      .select('id').eq('branch_id', activeBranch.id).eq('status', 'posted').eq('is_void', false)
     if (ledgerFrom) jeQ = jeQ.gte('entry_date', ledgerFrom)
     if (ledgerTo)   jeQ = jeQ.lte('entry_date', ledgerTo)
     const { data: jeData } = await jeQ
@@ -430,7 +434,7 @@ export default function AccountingPage() {
     ])
     // 2-step: get this branch's JE IDs for current month, then fetch their lines
     const { data: monthJeData } = await supabase.from('journal_entries')
-      .select('id').eq('branch_id', activeBranch.id).eq('status', 'posted').gte('entry_date', monthStart)
+      .select('id').eq('branch_id', activeBranch.id).eq('status', 'posted').eq('is_void', false).gte('entry_date', monthStart)
     const monthJeIds = (monthJeData ?? []).map((e: any) => e.id)
     const linesRes = monthJeIds.length > 0
       ? await supabase.from('journal_entry_lines')
@@ -625,6 +629,13 @@ export default function AccountingPage() {
   }
 
   async function unpostJournalEntry(entry: JournalEntry) {
+    if (entry.reference_type && AUTO_JE_REFERENCE_TYPES.includes(entry.reference_type)) {
+      toast(
+        `This entry was generated automatically from a ${entry.reference_type.replace(/_/g, ' ')} and is linked to an invoice or reservation record. Editing it here would desync the ledger from that record — void or correct the invoice/reservation instead, which reverses both together.`,
+        'error'
+      )
+      return
+    }
     setConfirmDialog({
       title: `Unpost ${entry.entry_number}?`,
       message: 'Entry will return to draft and can be edited. It will be excluded from reports until re-posted.',
@@ -993,7 +1004,7 @@ export default function AccountingPage() {
   async function loadTrialBalance() {
     if (!activeBranch) return
     setTbLoading(true)
-    let q = supabase.from('journal_entries').select('id').eq('branch_id', activeBranch.id).eq('status', 'posted')
+    let q = supabase.from('journal_entries').select('id').eq('branch_id', activeBranch.id).eq('status', 'posted').eq('is_void', false)
     if (tbFrom) q = q.gte('entry_date', tbFrom)
     if (tbTo)   q = q.lte('entry_date', tbTo)
     const { data: jeData } = await q
@@ -1024,7 +1035,7 @@ export default function AccountingPage() {
   async function loadReport() {
     if (!activeBranch) return
     setReportLoading(true)
-    let q = supabase.from('journal_entries').select('id').eq('branch_id', activeBranch.id).eq('status', 'posted')
+    let q = supabase.from('journal_entries').select('id').eq('branch_id', activeBranch.id).eq('status', 'posted').eq('is_void', false)
     if (reportType === 'pl' && reportFrom) q = q.gte('entry_date', reportFrom)
     if (reportTo) q = q.lte('entry_date', reportTo)
     const { data: jeData } = await q
@@ -1072,7 +1083,7 @@ export default function AccountingPage() {
     if (!reconAccountId) { toast('Select an account to reconcile', 'error'); return }
     setReconLoading(true)
     const { data: jeData } = await supabase.from('journal_entries')
-      .select('id').eq('branch_id', activeBranch.id).eq('status', 'posted')
+      .select('id').eq('branch_id', activeBranch.id).eq('status', 'posted').eq('is_void', false)
     const ids = (jeData ?? []).map((e: any) => e.id)
     if (ids.length === 0) { setReconLines([]); setReconLoading(false); return }
     const { data } = await supabase.from('journal_entry_lines')
@@ -1619,10 +1630,12 @@ export default function AccountingPage() {
                             <div className="flex items-center gap-1.5">
                               {e.status === 'draft' && (
                                 <>
-                                  <button
-                                    onClick={() => openEditJe(e)}
-                                    className="text-[11px] font-medium text-blue-600 border border-blue-200 bg-blue-50 hover:bg-blue-100 px-2 py-1 rounded transition-colors"
-                                  >Edit</button>
+                                  {!(e.reference_type && AUTO_JE_REFERENCE_TYPES.includes(e.reference_type)) && (
+                                    <button
+                                      onClick={() => openEditJe(e)}
+                                      className="text-[11px] font-medium text-blue-600 border border-blue-200 bg-blue-50 hover:bg-blue-100 px-2 py-1 rounded transition-colors"
+                                    >Edit</button>
+                                  )}
                                   <button
                                     onClick={() => postJournalEntry(e)}
                                     className="text-[11px] font-medium text-green-700 border border-green-200 bg-green-50 hover:bg-green-100 px-2 py-1 rounded transition-colors"

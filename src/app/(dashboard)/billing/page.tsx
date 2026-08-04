@@ -40,6 +40,7 @@ export default function BillingPage() {
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [reservations, setReservations] = useState<Reservation[]>([])
   const [revenueAccounts, setRevenueAccounts] = useState<{code: string, name: string}[]>([])
+  const [bankAccounts, setBankAccounts] = useState<{code: string, name: string}[]>([])
   const [loading, setLoading] = useState(true)
   const [statusFilter, setStatusFilter] = useState('all')
   const [invoiceOpen, setInvoiceOpen] = useState(false)
@@ -59,7 +60,15 @@ export default function BillingPage() {
     discount_reason: '',
     notes: '',
   })
-  const [payForm, setPayForm] = useState({ payment_method: 'cash', amount_paid: 0, notes: '' })
+  const [payForm, setPayForm] = useState({ payment_method: 'cash', amount_paid: 0, notes: '', account_code: '' })
+
+  // Void & Reissue
+  const [voidReissueOpen, setVoidReissueOpen] = useState(false)
+  const [voidReissueTarget, setVoidReissueTarget] = useState<Invoice | null>(null)
+  const [voidReason, setVoidReason] = useState('')
+  const [voidReissueSaving, setVoidReissueSaving] = useState(false)
+  const [reissueOf, setReissueOf] = useState<Invoice | null>(null)
+  const [carriedForwardLines, setCarriedForwardLines] = useState<{ account_id: string; amount: number }[]>([])
 
   useEffect(() => { if (activeBranch) { loadData(); loadPaymentMethods() } }, [activeBranch]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -71,7 +80,7 @@ export default function BillingPage() {
 
   async function loadData() {
     if (!activeBranch) return
-    const [invRes, resRes, settingsRes, coaRes] = await Promise.all([
+    const [invRes, resRes, settingsRes, coaRes, bankRes] = await Promise.all([
       supabase.from('invoices')
         .select('*, reservation:reservations(reservation_number, check_in_date, check_out_date), guest:guests(full_name, phone), house:houses(name, code)')
         .eq('branch_id', activeBranch.id)
@@ -83,11 +92,13 @@ export default function BillingPage() {
         .order('created_at', { ascending: false }),
       supabase.from('hotel_settings').select('*').eq('branch_id', activeBranch.id).single(),
       supabase.from('chart_of_accounts').select('code, name').eq('branch_id', activeBranch.id).eq('is_active', true).eq('type', 'revenue').order('code'),
+      supabase.from('chart_of_accounts').select('code, name').eq('branch_id', activeBranch.id).eq('is_active', true).eq('type', 'asset').order('code'),
     ])
     setInvoices((invRes.data ?? []) as unknown as Invoice[])
     setReservations((resRes.data ?? []) as unknown as Reservation[])
     if (settingsRes.data) { setTaxRate(Number(settingsRes.data.tax_rate)); setSettings(settingsRes.data) }
     setRevenueAccounts((coaRes.data ?? []) as any)
+    setBankAccounts((bankRes.data ?? []) as any)
     setLoading(false)
   }
 
@@ -119,6 +130,8 @@ export default function BillingPage() {
 
   async function openCreateInvoice(reservation?: Reservation) {
     setReservationReceipt(null)
+    setReissueOf(null)
+    setCarriedForwardLines([])
     if (reservation) {
       // Load the held deposit receipt for this reservation (if any)
       const { data: receipt } = await supabase
@@ -379,12 +392,160 @@ export default function BillingPage() {
     loadData()
   }
 
+  // ── Void & Reissue ──────────────────────────────────────────────
+  // Corrects a mistaken invoice by voiding the original (kept permanently,
+  // never edited in place) and opening a pre-filled replacement. Any cash
+  // already collected carries forward untouched — same debit accounts and
+  // amounts as the original JE(s) — only the revenue split is recomputed
+  // against the corrected items.
+
+  function openVoidReissue(inv: Invoice) {
+    setVoidReissueTarget(inv)
+    setVoidReason('')
+    setVoidReissueOpen(true)
+  }
+
+  async function confirmVoidAndReissue() {
+    if (!voidReissueTarget || !activeBranch) return
+    if (!voidReason.trim()) { toast('A reason is required', 'error'); return }
+    setVoidReissueSaving(true)
+    const inv = voidReissueTarget
+
+    // Every JE tied to this invoice (payment + any deposit-applied share) uses
+    // reference = invoice_number regardless of reference_type.
+    const { data: jes } = await supabase.from('journal_entries')
+      .select('id').eq('branch_id', activeBranch.id).eq('reference', inv.invoice_number).eq('is_void', false)
+    const jeIds = (jes ?? []).map(j => j.id)
+
+    let carried: { account_id: string; amount: number }[] = []
+    if (jeIds.length > 0) {
+      const { data: lines } = await supabase.from('journal_entry_lines').select('account_id, debit').in('entry_id', jeIds)
+      const byAccount: Record<string, number> = {}
+      for (const l of lines ?? []) {
+        if (Number(l.debit) > 0) byAccount[l.account_id] = (byAccount[l.account_id] || 0) + Number(l.debit)
+      }
+      carried = Object.entries(byAccount).map(([account_id, amount]) => ({ account_id, amount: Math.round(amount * 100) / 100 }))
+
+      const { error: voidJeErr } = await supabase.from('journal_entries')
+        .update({ is_void: true, voided_at: new Date().toISOString() }).in('id', jeIds)
+      if (voidJeErr) { toast(voidJeErr.message, 'error'); setVoidReissueSaving(false); return }
+    }
+
+    const { error: voidErr } = await supabase.from('invoices').update({
+      status: 'void', void_reason: voidReason.trim(), voided_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    }).eq('id', inv.id)
+    if (voidErr) { toast(voidErr.message, 'error'); setVoidReissueSaving(false); return }
+
+    toast(`${inv.invoice_number} voided — correct the details and save to issue the replacement`)
+    setVoidReissueSaving(false)
+    setVoidReissueOpen(false)
+    setVoidReissueTarget(null)
+
+    setReissueOf(inv)
+    setCarriedForwardLines(carried)
+    setReservationReceipt(null)
+    setForm({
+      reservation_id: inv.reservation_id ?? '',
+      items: (inv.items ?? []).map(i => ({ ...i })),
+      discount_amount: Number(inv.discount_amount ?? 0),
+      discount_pct: 0,
+      discount_type: '$',
+      discount_reason: '',
+      notes: '',
+    })
+    setInvoiceOpen(true)
+    loadData()
+  }
+
+  async function handleReissueSave() {
+    if (!reissueOf || !activeBranch) return
+    setSaving(true)
+    const carriedTotal = Math.round(carriedForwardLines.reduce((s, l) => s + l.amount, 0) * 100) / 100
+    const newStatus = carriedTotal >= total && total > 0 ? 'paid' : carriedTotal > 0 ? 'partial' : 'unpaid'
+
+    const { data: inv, error } = await supabase.from('invoices').insert({
+      invoice_number: await generateInvoiceNumber(),
+      reservation_id: reissueOf.reservation_id ?? null,
+      guest_id: reissueOf.guest_id ?? null,
+      house_id: reissueOf.house_id ?? null,
+      branch_id: activeBranch.id,
+      subtotal, tax_rate: taxRate, tax_amount: taxAmount, discount_amount: discountAmount, total,
+      amount_paid: carriedTotal,
+      deposit_amount: reissueOf.deposit_amount ?? 0,
+      status: newStatus,
+      payment_method: carriedTotal > 0 ? (reissueOf.payment_method ?? 'cash') : null,
+      paid_at: newStatus === 'paid' ? new Date().toISOString() : null,
+      items: form.items,
+      notes: [form.notes, `Corrects ${reissueOf.invoice_number}`].filter(Boolean).join(' · '),
+    }).select().single()
+    if (error || !inv) { toast(error?.message ?? 'Failed to create replacement invoice', 'error'); setSaving(false); return }
+
+    await supabase.from('invoices').update({
+      superseded_by_invoice_id: inv.id, updated_at: new Date().toISOString(),
+    }).eq('id', reissueOf.id)
+
+    if (carriedTotal > 0) {
+      const { data: je, error: jeErr } = await supabase.from('journal_entries').insert({
+        entry_number: generateJournalEntryNumber(), entry_date: new Date().toISOString().split('T')[0],
+        reference: inv.invoice_number, reference_type: 'invoice_correction',
+        description: `Invoice correction — carried forward from ${reissueOf.invoice_number}`,
+        branch_id: activeBranch.id,
+      }).select().single()
+      if (jeErr) {
+        toast(`Invoice created but JE failed: ${jeErr.message}`, 'error')
+      } else if (je) {
+        const debitLines = carriedForwardLines.map(l => ({ entry_id: je.id, account_id: l.account_id, debit: l.amount, credit: 0, description: 'Carried forward — unchanged' }))
+
+        const accountTotals: Record<string, number> = {}
+        form.items.forEach(item => {
+          const code = (item as any).account_code || '4300'
+          accountTotals[code] = (accountTotals[code] || 0) + Number(item.total)
+        })
+        const invoiceSubtotal = Object.values(accountTotals).reduce((a, b) => a + b, 0)
+        const { data: accts } = await supabase.from('chart_of_accounts').select('id, code').eq('branch_id', activeBranch.id).in('code', Object.keys(accountTotals))
+
+        let remaining = carriedTotal
+        const revenueLines: any[] = []
+        for (const [code, itemTotal] of Object.entries(accountTotals)) {
+          const acc = accts?.find(a => a.code === code)
+          if (!acc) continue
+          const ratio = invoiceSubtotal > 0 ? itemTotal / invoiceSubtotal : (1 / Object.keys(accountTotals).length)
+          const amount = Math.round((carriedTotal * ratio) * 100) / 100
+          if (amount > 0) { revenueLines.push({ entry_id: je.id, account_id: acc.id, debit: 0, credit: amount, description: `Revenue — ${inv.invoice_number}` }); remaining -= amount }
+        }
+        if (Math.abs(remaining) > 0.001 && revenueLines.length > 0) {
+          revenueLines[0].credit = Math.round((revenueLines[0].credit + remaining) * 100) / 100
+        }
+
+        const { error: lineErr } = await supabase.from('journal_entry_lines').insert([...debitLines, ...revenueLines])
+        if (lineErr) {
+          await supabase.from('journal_entries').delete().eq('id', je.id)
+          toast(`Invoice created but JE lines failed: ${lineErr.message}`, 'error')
+        } else {
+          await supabase.from('payment_transactions').insert({
+            invoice_id: inv.id, amount: carriedTotal, payment_method: reissueOf.payment_method ?? 'cash',
+            payment_date: new Date().toISOString(), notes: `Carried forward from voided invoice ${reissueOf.invoice_number}`,
+            journal_entry_id: je.id, branch_id: activeBranch.id,
+          })
+        }
+      }
+    }
+
+    toast(`${inv.invoice_number} issued, replacing ${reissueOf.invoice_number}`)
+    setSaving(false)
+    setInvoiceOpen(false)
+    setReissueOf(null)
+    setCarriedForwardLines([])
+    loadData()
+  }
+
   function openPayment(invoice: Invoice) {
     setSelectedInvoice(invoice)
     setPayForm({
       payment_method: 'cash',
       amount_paid: Number(invoice.total) - Number(invoice.amount_paid),
       notes: '',
+      account_code: '',
     })
     setPayOpen(true)
   }
@@ -409,9 +570,9 @@ export default function BillingPage() {
     // ── Auto journal entry: DR Cash → CR Revenue ──────────────
     let jeId: string | null = null
     try {
-      // Determine account code based on dynamic payment method account_code or is_cash flag
+      // Manual override takes priority; otherwise fall back to the payment method's mapped account
       const selectedPm = paymentMethods.find(m => m.value === payForm.payment_method)
-      const cashCode = (selectedPm as any)?.account_code || (selectedPm?.is_cash ? '1010' : '1020')
+      const cashCode = payForm.account_code || (selectedPm as any)?.account_code || (selectedPm?.is_cash ? '1010' : '1020')
 
       const itemCodes = new Set(selectedInvoice.items.map(i => (i as any).account_code || '4300'))
 
@@ -627,7 +788,14 @@ export default function BillingPage() {
                 const balance = Number(inv.total) - Number(inv.amount_paid)
                 return (
                   <tr key={inv.id} className="border-t border-hborder hover:bg-hbg/40">
-                    <td className="px-3 py-2 h-[52px] align-middle font-mono text-xs text-hmuted whitespace-nowrap">{inv.invoice_number}</td>
+                    <td className="px-3 py-2 h-[52px] align-middle font-mono text-xs text-hmuted whitespace-nowrap">
+                      {inv.invoice_number}
+                      {inv.superseded_by_invoice_id && (
+                        <p className="text-[10px] text-amber-700 font-sans normal-case">
+                          → {invoices.find(i => i.id === inv.superseded_by_invoice_id)?.invoice_number ?? 'replacement'}
+                        </p>
+                      )}
+                    </td>
                     <td className="px-3 py-2 h-[52px] align-middle max-w-[150px]">
                       <p className="font-medium text-htext truncate text-xs" title={(inv.guest as any)?.full_name ?? undefined}>{(inv.guest as any)?.full_name ?? '—'}</p>
                       <p className="text-[11px] text-hmuted truncate">{(inv.guest as any)?.phone ?? ''}</p>
@@ -645,7 +813,7 @@ export default function BillingPage() {
                         ? <span className="text-red-600 font-semibold">{formatCurrency(balance)}</span>
                         : <span className="text-green-600">—</span>}
                     </td>
-                    <td className="px-3 py-2 h-[52px] align-middle"><Badge status={inv.status} /></td>
+                    <td className="px-3 py-2 h-[52px] align-middle" title={inv.status === 'void' ? inv.void_reason : undefined}><Badge status={inv.status} /></td>
                     <td className="px-3 py-2 h-[52px] align-middle text-xs text-hmuted whitespace-nowrap">{formatDate(inv.invoice_date ?? inv.created_at)}</td>
                     <td className="px-3 py-2 h-[52px] align-middle">
                       <div className="flex items-center gap-2 flex-nowrap">
@@ -654,6 +822,9 @@ export default function BillingPage() {
                         )}
                         {Number(inv.amount_paid) > 0 && (
                           <button onClick={() => setReceiptInvoice(inv)} className="text-xs text-navy hover:underline font-medium whitespace-nowrap">Receipt</button>
+                        )}
+                        {inv.status !== 'void' && !inv.superseded_by_invoice_id && (
+                          <button onClick={() => openVoidReissue(inv)} className="text-xs text-red-600 hover:underline font-medium whitespace-nowrap">Void & Reissue</button>
                         )}
                       </div>
                     </td>
@@ -667,8 +838,18 @@ export default function BillingPage() {
       </div>
 
       {/* ── Create Invoice Modal ── */}
-      <Modal open={invoiceOpen} onClose={() => setInvoiceOpen(false)} title="Create Invoice" size="lg">
+      <Modal
+        open={invoiceOpen}
+        onClose={() => { setInvoiceOpen(false); setReissueOf(null); setCarriedForwardLines([]) }}
+        title={reissueOf ? `Correct Invoice — replacing ${reissueOf.invoice_number}` : 'Create Invoice'}
+        size="lg"
+      >
         <div className="space-y-4">
+          {reissueOf && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-800">
+              <strong>{reissueOf.invoice_number}</strong> has been voided and can't be changed. Edit the items/amounts below to the correct values — {formatCurrency(carriedForwardLines.reduce((s, l) => s + l.amount, 0))} already collected will carry forward onto this replacement automatically, no new payment needed for that portion.
+            </div>
+          )}
           <div>
             <label className="text-xs text-hmuted">Link to Reservation</label>
             {(() => {
@@ -932,15 +1113,38 @@ export default function BillingPage() {
             />
           </div>
           <div className="flex justify-end gap-3">
-            <Button variant="ghost" onClick={() => setInvoiceOpen(false)}>Cancel</Button>
+            <Button variant="ghost" onClick={() => { setInvoiceOpen(false); setReissueOf(null); setCarriedForwardLines([]) }}>Cancel</Button>
             <Button
-              onClick={handleCreate}
-              disabled={saving || (() => {
+              onClick={reissueOf ? handleReissueSave : handleCreate}
+              disabled={saving || (!reissueOf && (() => {
                 const t = new Date().toISOString().split('T')[0]
                 const r = reservations.find(r => r.id === form.reservation_id)
                 return !!(r && r.check_out_date > t)
-              })()}
-            >{saving ? 'Creating…' : 'Create Invoice'}</Button>
+              })())}
+            >{saving ? (reissueOf ? 'Issuing…' : 'Creating…') : (reissueOf ? 'Issue Replacement' : 'Create Invoice')}</Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* ── Void & Reissue: reason capture ── */}
+      <Modal open={voidReissueOpen} onClose={() => setVoidReissueOpen(false)} title={`Void ${voidReissueTarget?.invoice_number ?? ''}`} size="sm">
+        <div className="space-y-3">
+          <p className="text-sm text-htext">
+            This voids <strong>{voidReissueTarget?.invoice_number}</strong> permanently — it stays on record for audit but no longer counts in your books. You'll then get a pre-filled form to issue the corrected replacement, and any amount already collected ({formatCurrency(voidReissueTarget?.amount_paid ?? 0)}) carries forward automatically.
+          </p>
+          <div>
+            <label className="block text-xs text-hmuted mb-1">Reason *</label>
+            <textarea
+              value={voidReason}
+              onChange={e => setVoidReason(e.target.value)}
+              rows={3}
+              placeholder="What was wrong with this invoice?"
+              className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg resize-none"
+            />
+          </div>
+          <div className="flex justify-end gap-3 pt-1">
+            <Button variant="ghost" onClick={() => setVoidReissueOpen(false)}>Cancel</Button>
+            <Button onClick={confirmVoidAndReissue} disabled={voidReissueSaving}>{voidReissueSaving ? 'Voiding…' : 'Void & Continue'}</Button>
           </div>
         </div>
       </Modal>
@@ -984,9 +1188,22 @@ export default function BillingPage() {
                   <option key={m.value} value={m.value}>{m.name}</option>
                 ))}
               </select>
-              <p className="text-[10px] text-hmuted mt-1">
-                Posts to: {(() => { const pm = paymentMethods.find(m => m.value === payForm.payment_method); const code = (pm as any)?.account_code || (pm?.is_cash ? '1010' : '1020'); return `${code} ${pm?.is_cash ? 'Cash on Hand' : 'Bank'}` })()}
-              </p>
+            </div>
+            <div>
+              <label className="block text-xs text-hmuted mb-1">Post to GL Account (optional)</label>
+              <select
+                value={payForm.account_code}
+                onChange={e => setPayForm(f => ({ ...f, account_code: e.target.value }))}
+                className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg"
+              >
+                <option value="">
+                  {(() => { const pm = paymentMethods.find(m => m.value === payForm.payment_method); const code = (pm as any)?.account_code || (pm?.is_cash ? '1010' : '1020'); const acct = bankAccounts.find(a => a.code === code); return `Auto (${code}${acct ? ` ${acct.name}` : ''})` })()}
+                </option>
+                {bankAccounts.map(a => (
+                  <option key={a.code} value={a.code}>{a.code} — {a.name}</option>
+                ))}
+              </select>
+              <p className="text-[10px] text-hmuted mt-1">Defaults to the payment method's mapped account — override if this payment landed somewhere else.</p>
             </div>
             <div>
               <label className="block text-xs text-hmuted mb-1">Amount Received ($)</label>

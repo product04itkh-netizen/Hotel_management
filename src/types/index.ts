@@ -184,6 +184,36 @@ export interface PettyCashTransaction {
   created_at: string
 }
 
+export type InventoryCategory = 'food' | 'cleaning' | 'laundry' | 'beverage' | 'fuel' | 'other'
+
+export interface InventoryItem {
+  id: string
+  branch_id: string
+  name: string
+  unit: string
+  category: InventoryCategory
+  expense_account_code: string
+  reorder_point: number
+  last_unit_cost: number
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface InventoryTransaction {
+  id: string
+  branch_id: string
+  item_id: string
+  transaction_type: 'purchase' | 'consumption' | 'adjustment_in' | 'adjustment_out' | 'opening_balance'
+  quantity: number
+  unit_cost: number
+  notes?: string | null
+  transaction_date: string
+  petty_cash_transaction_id?: string | null
+  journal_entry_id?: string | null
+  created_at: string
+}
+
 export interface PaymentTransaction {
   id: string
   invoice_id: string
@@ -405,6 +435,11 @@ export interface Invoice {
   notes?: string
   branch_id?: string
   branch?: Branch
+  house_id?: string
+  deposit_amount?: number
+  void_reason?: string
+  voided_at?: string
+  superseded_by_invoice_id?: string
   created_at: string
   updated_at: string
   reservation?: Reservation

@@ -29,3 +29,6 @@ tsconfig.tsbuildinfo
 
 # Data files
 *.xlsx
+
+# Local data backups — contain real guest PII, never commit
+backups/
