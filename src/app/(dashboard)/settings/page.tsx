@@ -161,6 +161,9 @@ export default function SettingsPage() {
 
   async function loadCoaAccounts() {
     if (!activeBranch) return
+    // Guest payment methods map to a cash/bank asset account (where the money
+    // lands). The ITC loan is a bill-payment funding source, not a guest
+    // payment channel, so it's handled in Record Bill Payment — not here.
     const { data } = await supabase.from('chart_of_accounts')
       .select('id, code, name')
       .eq('branch_id', activeBranch.id)

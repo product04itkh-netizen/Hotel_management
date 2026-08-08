@@ -182,7 +182,7 @@ export default function AccountingPage() {
     expense_account_id: '', notes: '',
   })
   const [billPayForm, setBillPayForm] = useState({
-    payment_date: todayStr(), amount: '', payment_method: 'cash', reference: '', notes: '',
+    payment_date: todayStr(), amount: '', account_code: '1010', reference: '', notes: '',
   })
 
   // Vendors
@@ -237,7 +237,7 @@ export default function AccountingPage() {
   const [showAgingReport, setShowAgingReport] = useState(false)
 
   // Payment Methods (dynamic, loaded from DB)
-  const [paymentMethods, setPaymentMethods] = useState<{ name: string; value: string; is_cash: boolean }[]>([
+  const [paymentMethods, setPaymentMethods] = useState<{ name: string; value: string; is_cash: boolean; account_code?: string }[]>([
     { name: 'Cash', value: 'cash', is_cash: true },
     { name: 'Bank Transfer', value: 'bank_transfer', is_cash: false },
     { name: 'ABA Pay', value: 'aba_pay', is_cash: false },
@@ -262,8 +262,8 @@ export default function AccountingPage() {
 
   async function loadPaymentMethods() {
     if (!activeBranch) return
-    const { data } = await supabase.from('payment_methods').select('name, value, is_cash').eq('branch_id', activeBranch.id).eq('is_active', true).order('sort_order')
-    if (data && data.length > 0) setPaymentMethods(data as { name: string; value: string; is_cash: boolean }[])
+    const { data } = await supabase.from('payment_methods').select('name, value, is_cash, account_code').eq('branch_id', activeBranch.id).eq('is_active', true).order('sort_order')
+    if (data && data.length > 0) setPaymentMethods(data as { name: string; value: string; is_cash: boolean; account_code?: string }[])
   }
 
   // ── Load ───────────────────────────────────────────────────────
@@ -872,13 +872,17 @@ export default function AccountingPage() {
     const newStatus = newPaid >= Number(selectedBill.total) ? 'paid' : 'partial'
 
     const apAcct   = accounts.find(a => a.code === '2100')
-    const cashCode = (() => {
-      const pm = paymentMethods.find(m => m.value === billPayForm.payment_method)
-      return (pm as any)?.account_code || ((pm?.is_cash ?? (billPayForm.payment_method === 'cash')) ? '1010' : '1020')
-    })()
-    const cashAcct = accounts.find(a => a.code === cashCode)
+    // A bill is settled FROM a GL account the user picks — a cash/bank account,
+    // or 2400 Loan From ITC (ITC covers it, increasing the loan). The JE is
+    // always DR 2100 Accounts Payable / CR <selected account>.
+    const creditCode = billPayForm.account_code
+    const creditAcct = accounts.find(a => a.code === creditCode)
+    if (!apAcct || !creditAcct) {
+      toast(`Missing GL account (${!apAcct ? '2100 Accounts Payable' : creditCode}) — add it in Chart of Accounts first`, 'error')
+      setBillSaving(false); return
+    }
     let jeId: string | null = null
-    if (apAcct && cashAcct) {
+    {
       const { data: je, error: jeErr } = await supabase.from('journal_entries').insert({
         entry_number: generateJournalEntryNumber(), entry_date: billPayForm.payment_date,
         reference: selectedBill.bill_number, reference_type: 'bill_payment',
@@ -889,8 +893,8 @@ export default function AccountingPage() {
       if (je) {
         jeId = je.id
         const { error: lineErr } = await supabase.from('journal_entry_lines').insert([
-          { entry_id: je.id, account_id: apAcct.id,   debit: payAmt, credit: 0 },
-          { entry_id: je.id, account_id: cashAcct.id,  debit: 0, credit: payAmt },
+          { entry_id: je.id, account_id: apAcct.id,     debit: payAmt, credit: 0 },
+          { entry_id: je.id, account_id: creditAcct.id, debit: 0, credit: payAmt },
         ])
         if (lineErr) {
           await supabase.from('journal_entries').delete().eq('id', je.id)
@@ -901,7 +905,7 @@ export default function AccountingPage() {
 
     const { error: pmtErr } = await supabase.from('bill_payments').insert({
       bill_id: selectedBill.id, payment_date: billPayForm.payment_date,
-      amount: payAmt, payment_method: billPayForm.payment_method,
+      amount: payAmt, payment_method: `${creditAcct.code} ${creditAcct.name.trim()}`,
       reference: billPayForm.reference || null, notes: billPayForm.notes || null,
       journal_entry_id: jeId, branch_id: activeBranch?.id ?? null,
     })
@@ -922,7 +926,7 @@ export default function AccountingPage() {
 
     toast('Payment recorded')
     setBillSaving(false); setBillPayOpen(false)
-    setBillPayForm({ payment_date: todayStr(), amount: '', payment_method: 'cash', reference: '', notes: '' })
+    setBillPayForm({ payment_date: todayStr(), amount: '', account_code: '1010', reference: '', notes: '' })
     setSelectedBill(null); loadBills(); loadEntries()
   }
 
@@ -2967,11 +2971,19 @@ export default function AccountingPage() {
               </div>
             </div>
             <div>
-              <label className="block text-xs text-hmuted mb-1">Payment Method</label>
-              <select value={billPayForm.payment_method} onChange={e => setBillPayForm(f => ({ ...f, payment_method: e.target.value }))} className={input}>
-                {paymentMethods.map(m => (
-                  <option key={m.value} value={m.value}>{m.name}</option>
-                ))}
+              <label className="block text-xs text-hmuted mb-1">Pay From Account</label>
+              <select value={billPayForm.account_code} onChange={e => setBillPayForm(f => ({ ...f, account_code: e.target.value }))} className={input}>
+                {(() => {
+                  // Where the money comes from to settle the bill: the branch's
+                  // cash/bank accounts (category "Bank" — Cash, Petty Cash, Bank)
+                  // plus 2400 Loan From ITC. Not guest payment methods.
+                  const opts = accounts
+                    .filter(a => a.is_active && (a.category === 'Bank' || a.code === '2400'))
+                    .sort((a, b) => a.code.localeCompare(b.code))
+                  return opts.length > 0
+                    ? opts.map(a => <option key={a.id} value={a.code}>{a.code} — {a.name.trim()}</option>)
+                    : <option value="1010">1010 — Cash</option>
+                })()}
               </select>
             </div>
             <div>
@@ -2979,7 +2991,10 @@ export default function AccountingPage() {
               <input value={billPayForm.reference} onChange={e => setBillPayForm(f => ({ ...f, reference: e.target.value }))} placeholder="Transfer ref, receipt #…" className={input} />
             </div>
             <p className="text-[10px] text-hmuted bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">
-              Auto journal: DR 2100 Accounts Payable / CR {(paymentMethods.find(m => m.value === billPayForm.payment_method)?.is_cash ?? (billPayForm.payment_method === 'cash')) ? '1010 Cash on Hand' : '1020 Cash at Bank'}
+              Auto journal: DR 2100 Accounts Payable / CR {(() => {
+                const acct = accounts.find(a => a.code === billPayForm.account_code)
+                return acct ? `${acct.code} ${acct.name.trim()}` : billPayForm.account_code
+              })()}
             </p>
             <div className="flex justify-end gap-3 pt-1">
               <Button variant="ghost" onClick={() => { setBillPayOpen(false); setSelectedBill(null) }}>Cancel</Button>

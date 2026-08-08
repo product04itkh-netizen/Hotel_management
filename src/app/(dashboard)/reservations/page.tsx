@@ -1598,18 +1598,19 @@ export default function ReservationsPage() {
                       className="border border-hborder rounded-md px-2 py-0.5 text-xs focus:outline-none focus:border-navy bg-hbg text-htext"
                     >
                       {paymentMethods.length > 0
-                        ? paymentMethods.map(pm => (
-                            <option key={pm.value} value={pm.value}>{pm.name}</option>
-                          ))
+                        ? paymentMethods.map(pm => {
+                            const code = (pm as any).account_code || (pm.is_cash ? '1010' : '1020')
+                            return <option key={pm.value} value={pm.value}>{code} — {pm.name}</option>
+                          })
                         : (
                             <>
-                              <option value="cash">Cash</option>
-                              <option value="bank_transfer">Bank Transfer</option>
-                              <option value="aba_pay">ABA Pay</option>
-                              <option value="wing">Wing</option>
-                              <option value="bakong">Bakong</option>
-                              <option value="online">Online (OTA)</option>
-                              <option value="other">Other</option>
+                              <option value="cash">1010 — Cash</option>
+                              <option value="bank_transfer">1020 — Bank Transfer</option>
+                              <option value="aba_pay">1020 — ABA Pay</option>
+                              <option value="wing">1020 — Wing</option>
+                              <option value="bakong">1020 — Bakong</option>
+                              <option value="online">1020 — Online (OTA)</option>
+                              <option value="other">1020 — Other</option>
                             </>
                           )
                       }
