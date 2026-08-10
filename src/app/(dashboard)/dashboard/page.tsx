@@ -21,6 +21,19 @@ interface Stats {
 
 const WEEK_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
+// Whole days from today (local) to a YYYY-MM-DD date. 0 = today, 1 = tomorrow.
+function daysUntil(dateStr: string): number {
+  const today = new Date(); today.setHours(0, 0, 0, 0)
+  const d = new Date(dateStr + 'T00:00:00')
+  return Math.round((d.getTime() - today.getTime()) / 86400000)
+}
+function arrivalBadge(n: number): { label: string; cls: string } {
+  if (n <= 0) return { label: 'Today', cls: 'bg-emerald-100 text-emerald-700' }
+  if (n === 1) return { label: 'Tomorrow', cls: 'bg-amber-100 text-amber-700' }
+  if (n <= 7) return { label: `in ${n} days`, cls: 'bg-blue-50 text-blue-700' }
+  return { label: `in ${n} days`, cls: 'bg-hsurface2 text-hmuted' }
+}
+
 export default function DashboardPage() {
   const supabase = createClient()
   const { activeBranch } = useBranch()
@@ -30,7 +43,7 @@ export default function DashboardPage() {
     availableHouses: 0, maintenanceHouses: 0,
   })
   const [recentReservations, setRecentReservations] = useState<Reservation[]>([])
-  const [pendingReservations, setPendingReservations] = useState<Reservation[]>([])
+  const [upcomingCheckIns, setUpcomingCheckIns] = useState<Reservation[]>([])
   const [weeklyData, setWeeklyData] = useState<number[]>([60, 72, 65, 80, 78, 90, 85])
   const [loading, setLoading] = useState(true)
 
@@ -42,14 +55,15 @@ export default function DashboardPage() {
     if (!activeBranch) return
     const today = new Date().toISOString().split('T')[0]
 
-    const [housesRes, checkInsRes, checkOutsRes, revenueRes, housekeepingRes, reservationsRes, pendingRes] = await Promise.all([
+    const [housesRes, checkInsRes, checkOutsRes, revenueRes, housekeepingRes, reservationsRes, upcomingRes] = await Promise.all([
       supabase.from('houses').select('status').eq('branch_id', activeBranch.id),
       supabase.from('reservations').select('id').eq('branch_id', activeBranch.id).eq('check_in_date', today).in('status', ['confirmed', 'checked_in']),
       supabase.from('reservations').select('id').eq('branch_id', activeBranch.id).eq('check_out_date', today).eq('status', 'checked_in'),
       supabase.from('invoices').select('total').eq('branch_id', activeBranch.id).eq('status', 'paid').gte('paid_at', today + 'T00:00:00').lte('paid_at', today + 'T23:59:59'),
       supabase.from('housekeeping_tasks').select('id').eq('branch_id', activeBranch.id).in('status', ['pending', 'in_progress']),
       supabase.from('reservations').select('*, guest:guests(full_name, phone), house:houses(name, code, house_type)').eq('branch_id', activeBranch.id).order('created_at', { ascending: false }).limit(6),
-      supabase.from('reservations').select('*, guest:guests(full_name, phone), house:houses(name, code, house_type)').eq('branch_id', activeBranch.id).eq('status', 'pending').order('check_in_date', { ascending: true }),
+      // Upcoming arrivals: not-yet-arrived reservations from today onward, soonest first
+      supabase.from('reservations').select('*, guest:guests(full_name, phone), house:houses(name, code, house_type)').eq('branch_id', activeBranch.id).in('status', ['confirmed', 'pending']).gte('check_in_date', today).order('check_in_date', { ascending: true }).limit(10),
     ])
 
     const houseRows = housesRes.data ?? []
@@ -70,7 +84,7 @@ export default function DashboardPage() {
     })
 
     setRecentReservations((reservationsRes.data ?? []) as unknown as Reservation[])
-    setPendingReservations((pendingRes.data ?? []) as unknown as Reservation[])
+    setUpcomingCheckIns((upcomingRes.data ?? []) as unknown as Reservation[])
     setLoading(false)
   }
 
@@ -161,16 +175,16 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Pending Reservations */}
+        {/* Upcoming Check-ins */}
         <div className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden mb-5">
           <div className="px-6 py-4 border-b border-hborder flex items-center justify-between">
             <div>
-              <h3 className="font-serif text-[17px] text-dark-navy">Pending Reservations</h3>
-              <p className="text-xs text-hmuted">Awaiting confirmation — needs action</p>
+              <h3 className="font-serif text-[17px] text-dark-navy">Upcoming Check-ins</h3>
+              <p className="text-xs text-hmuted">Arrivals ahead — prep rooms &amp; guests accordingly</p>
             </div>
-            {pendingReservations.length > 0 && (
-              <span className="text-[11px] font-bold uppercase tracking-wide bg-amber-100 text-amber-700 px-2.5 py-1 rounded-full">
-                {pendingReservations.length} pending
+            {upcomingCheckIns.length > 0 && (
+              <span className="text-[11px] font-bold uppercase tracking-wide bg-emerald-100 text-emerald-700 px-2.5 py-1 rounded-full">
+                {upcomingCheckIns.length} arriving
               </span>
             )}
           </div>
@@ -178,10 +192,10 @@ export default function DashboardPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-hsurface2 text-left">
-                  <th className="px-3 py-2.5 text-[11px] font-semibold text-hmuted uppercase tracking-wide">Ref</th>
+                  <th className="px-3 py-2.5 text-[11px] font-semibold text-hmuted uppercase tracking-wide">Arrives</th>
+                  <th className="px-3 py-2.5 text-[11px] font-semibold text-hmuted uppercase tracking-wide">Check-in</th>
                   <th className="px-3 py-2.5 text-[11px] font-semibold text-hmuted uppercase tracking-wide">Guest</th>
                   <th className="px-3 py-2.5 text-[11px] font-semibold text-hmuted uppercase tracking-wide">House</th>
-                  <th className="px-3 py-2.5 text-[11px] font-semibold text-hmuted uppercase tracking-wide">Check-in</th>
                   <th className="px-3 py-2.5 text-[11px] font-semibold text-hmuted uppercase tracking-wide">Check-out</th>
                   <th className="px-3 py-2.5 text-[11px] font-semibold text-hmuted uppercase tracking-wide">Status</th>
                 </tr>
@@ -191,20 +205,25 @@ export default function DashboardPage() {
                   <tr>
                     <td colSpan={6} className="px-5 py-8 text-center text-hmuted text-sm">Loading…</td>
                   </tr>
-                ) : pendingReservations.length === 0 ? (
+                ) : upcomingCheckIns.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-5 py-8 text-center text-hmuted text-sm">No pending reservations</td>
+                    <td colSpan={6} className="px-5 py-8 text-center text-hmuted text-sm">No upcoming check-ins</td>
                   </tr>
-                ) : pendingReservations.map(res => (
-                  <tr key={res.id} className="border-t border-hborder hover:bg-hbg/50 transition-colors">
-                    <td className="px-3 py-2 font-mono text-xs text-hmuted whitespace-nowrap">{res.reservation_number}</td>
-                    <td className="px-3 py-2 font-medium text-htext max-w-[160px] truncate" title={(res.guest as any)?.full_name ?? undefined}>{(res.guest as any)?.full_name ?? '—'}</td>
-                    <td className="px-3 py-2 text-hmuted font-mono text-xs whitespace-nowrap" title={(res.house as any)?.name ?? undefined}>{(res.house as any)?.code || (res.house as any)?.name || '—'}</td>
-                    <td className="px-3 py-2 text-hmuted text-xs whitespace-nowrap">{formatDate(res.check_in_date)}</td>
-                    <td className="px-3 py-2 text-hmuted text-xs whitespace-nowrap">{formatDate(res.check_out_date)}</td>
-                    <td className="px-3 py-2"><Badge status={res.status} /></td>
-                  </tr>
-                ))}
+                ) : upcomingCheckIns.map(res => {
+                  const badge = arrivalBadge(daysUntil(res.check_in_date))
+                  return (
+                    <tr key={res.id} className="border-t border-hborder hover:bg-hbg/50 transition-colors">
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        <span className={`text-[11px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full ${badge.cls}`}>{badge.label}</span>
+                      </td>
+                      <td className="px-3 py-2 text-htext text-xs whitespace-nowrap">{formatDate(res.check_in_date)}</td>
+                      <td className="px-3 py-2 font-medium text-htext max-w-[160px] truncate" title={(res.guest as any)?.full_name ?? undefined}>{(res.guest as any)?.full_name ?? '—'}</td>
+                      <td className="px-3 py-2 text-hmuted font-mono text-xs whitespace-nowrap" title={(res.house as any)?.name ?? undefined}>{(res.house as any)?.code || (res.house as any)?.name || '—'}</td>
+                      <td className="px-3 py-2 text-hmuted text-xs whitespace-nowrap">{formatDate(res.check_out_date)}</td>
+                      <td className="px-3 py-2"><Badge status={res.status} /></td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>
