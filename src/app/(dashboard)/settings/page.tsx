@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { TopBar } from '@/components/layout/TopBar'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from '@/components/ui/Toast'
 import { formatCurrency } from '@/lib/utils'
@@ -34,6 +35,7 @@ export default function SettingsPage() {
   const { activeBranch, refreshHotelSettings } = useBranch()
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [confirmDialog, setConfirmDialog] = useState<{ title: string; message?: string; confirmLabel?: string; variant?: 'default' | 'danger'; onConfirm: () => void } | null>(null)
   const [testingTelegram, setTestingTelegram] = useState(false)
   const [testEvent, setTestEvent] = useState('new_reservation')
   const [settingsId, setSettingsId] = useState<string | null>(null)
@@ -151,12 +153,20 @@ export default function SettingsPage() {
     loadServiceCatalog()
   }
 
-  async function deleteSc(item: ServiceCatalogItem) {
-    if (!confirm(`Delete "${item.name_en}"? This cannot be undone.`)) return
-    const { error } = await supabase.from('service_catalog_items').delete().eq('id', item.id)
-    if (error) { toast(`Failed to delete: ${error.message}`, 'error'); return }
-    toast('Catalog item deleted', 'info')
-    loadServiceCatalog()
+  function deleteSc(item: ServiceCatalogItem) {
+    setConfirmDialog({
+      title: `Delete "${item.name_en}"?`,
+      message: `This removes the catalog item permanently. It will no longer appear when building reservations. Existing reservations that already used it keep their line items — only future selections are affected. This cannot be undone.`,
+      confirmLabel: 'Delete Item',
+      variant: 'danger',
+      onConfirm: async () => {
+        setConfirmDialog(null)
+        const { error } = await supabase.from('service_catalog_items').delete().eq('id', item.id)
+        if (error) { toast(`Failed to delete: ${error.message}`, 'error'); return }
+        toast('Catalog item deleted', 'info')
+        loadServiceCatalog()
+      },
+    })
   }
 
   async function loadCoaAccounts() {
@@ -237,12 +247,20 @@ export default function SettingsPage() {
     loadPaymentMethods()
   }
 
-  async function deletePm(pm: PaymentMethod) {
-    if (!confirm(`Delete "${pm.name}"? This cannot be undone.`)) return
-    const { error } = await supabase.from('payment_methods').delete().eq('id', pm.id)
-    if (error) { toast(`Failed to delete: ${error.message}`, 'error'); return }
-    toast('Payment method deleted', 'info')
-    loadPaymentMethods()
+  function deletePm(pm: PaymentMethod) {
+    setConfirmDialog({
+      title: `Delete "${pm.name}"?`,
+      message: `This removes the payment method from deposit & invoice forms going forward. Past transactions recorded with it are unaffected and keep their journal entries. This cannot be undone.`,
+      confirmLabel: 'Delete Method',
+      variant: 'danger',
+      onConfirm: async () => {
+        setConfirmDialog(null)
+        const { error } = await supabase.from('payment_methods').delete().eq('id', pm.id)
+        if (error) { toast(`Failed to delete: ${error.message}`, 'error'); return }
+        toast('Payment method deleted', 'info')
+        loadPaymentMethods()
+      },
+    })
   }
 
   async function movePm(pm: PaymentMethod, dir: 'up' | 'down') {
@@ -932,6 +950,16 @@ export default function SettingsPage() {
           </div>
         </div>
       </Modal>
+
+      <ConfirmDialog
+        open={!!confirmDialog}
+        title={confirmDialog?.title ?? ''}
+        message={confirmDialog?.message}
+        confirmLabel={confirmDialog?.confirmLabel}
+        variant={confirmDialog?.variant}
+        onConfirm={() => confirmDialog?.onConfirm()}
+        onCancel={() => setConfirmDialog(null)}
+      />
     </>
   )
 }

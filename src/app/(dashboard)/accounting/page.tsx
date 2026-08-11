@@ -110,6 +110,9 @@ export default function AccountingPage() {
   const [coaForm, setCoaForm] = useState({ ...emptyCoaForm })
   const [coaSaving, setCoaSaving] = useState(false)
 
+  // Current user role — admins may override the auto-JE unpost/edit guardrail.
+  const [isAdmin, setIsAdmin] = useState(false)
+
   // Journal Entries
   const [entries, setEntries] = useState<JournalEntry[]>([])
   const [jeFormOpen, setJeFormOpen] = useState(false)
@@ -259,6 +262,15 @@ export default function AccountingPage() {
   useEffect(() => {
     if (tab === 'ledger' && activeBranch) loadLedger()
   }, [tab, activeBranch]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+      const { data } = await supabase.from('staff').select('role').eq('auth_user_id', user.id).maybeSingle()
+      setIsAdmin(data?.role === 'admin')
+    })()
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadPaymentMethods() {
     if (!activeBranch) return
@@ -651,18 +663,21 @@ export default function AccountingPage() {
   }
 
   async function unpostJournalEntry(entry: JournalEntry) {
-    if (entry.reference_type && AUTO_JE_REFERENCE_TYPES.includes(entry.reference_type)) {
+    const isAuto = !!(entry.reference_type && AUTO_JE_REFERENCE_TYPES.includes(entry.reference_type))
+    if (isAuto && !isAdmin) {
       toast(
-        `This entry was generated automatically from a ${entry.reference_type.replace(/_/g, ' ')} and is linked to an invoice or reservation record. To fix amounts/accounts, void or correct the invoice/reservation instead — that reverses both together. To fix just the date, use "Correct Date" instead of Unpost.`,
+        `This entry was generated automatically from a ${entry.reference_type!.replace(/_/g, ' ')} and is linked to an invoice or reservation record. To fix amounts/accounts, void or correct the invoice/reservation instead — that reverses both together. To fix just the date, use "Correct Date" instead of Unpost.`,
         'error'
       )
       return
     }
     setConfirmDialog({
       title: `Unpost ${entry.entry_number}?`,
-      message: 'Entry will return to draft and can be edited. It will be excluded from reports until re-posted.',
+      message: isAuto
+        ? `⚠️  Admin override — this is an auto-generated ${entry.reference_type!.replace(/_/g, ' ')} entry linked to an invoice/reservation. Editing it here will NOT update that source record, so the two can go out of sync. Only proceed if you know what you're doing; otherwise use Correct Date / Correct COA or void the source document.`
+        : 'Entry will return to draft and can be edited. It will be excluded from reports until re-posted.',
       confirmLabel: 'Unpost',
-      variant: 'default',
+      variant: isAuto ? 'danger' : 'default',
       onConfirm: async () => {
         setConfirmDialog(null)
         await supabase.from('journal_entries').update({ status: 'draft', updated_at: new Date().toISOString() }).eq('id', entry.id)
@@ -1440,35 +1455,79 @@ export default function AccountingPage() {
     })) }])
   }
 
-  function exportReport() {
-    if (!reportData) { toast('Load the report first', 'error'); return }
+  async function exportReport() {
+    if (!reportData || !activeBranch) { toast('Load the report first', 'error'); return }
+
+    // Fetch the drill-down journal entries for every account in the report, so
+    // the export carries the full detail — not just account totals. Same period
+    // + posted/non-void filter the on-screen drill-down uses.
+    const from = reportType === 'pl' ? reportFrom : undefined
+    let jeQ = supabase.from('journal_entries').select('id').eq('branch_id', activeBranch.id).eq('status', 'posted').eq('is_void', false)
+    if (from) jeQ = jeQ.gte('entry_date', from)
+    if (reportTo) jeQ = jeQ.lte('entry_date', reportTo)
+    const { data: jeIdRows } = await jeQ
+    const jeIds = (jeIdRows ?? []).map((e: any) => e.id)
+    const { data: allLines } = jeIds.length > 0
+      ? await supabase.from('journal_entry_lines')
+          .select('account_id, debit, credit, entry:journal_entries(entry_number, entry_date, description, reference)')
+          .in('entry_id', jeIds)
+      : { data: [] as any[] }
+    const byAcct: Record<string, any[]> = {}
+    for (const l of allLines ?? []) { (byAcct[l.account_id] ||= []).push(l) }
+
+    const COLS = ['Section', 'Code', 'Account', 'Entry #', 'Date', 'Description', 'Debit', 'Credit', 'Amount'] as const
+    const blank = () => Object.fromEntries(COLS.map(c => [c, ''])) as Record<string, any>
+    const sectionRow = (label: string) => ({ ...blank(), Section: label })
+    const totalRow = (label: string, amount: number) => ({ ...blank(), Account: label, Amount: Number(amount) })
+    // An account's summary line followed by each of its journal entries.
+    const acctBlock = (a: any) => {
+      const out: Record<string, any>[] = [{ ...blank(), Code: a.code, Account: a.name, Amount: Number(a.balance) }]
+      const lines = (byAcct[a.id] ?? []).slice().sort((x, y) => (x.entry?.entry_date ?? '').localeCompare(y.entry?.entry_date ?? ''))
+      for (const l of lines) {
+        out.push({
+          ...blank(),
+          'Entry #': l.entry?.entry_number ?? '',
+          Date: l.entry?.entry_date ?? '',
+          Description: l.entry?.description ?? '',
+          Debit: Number(l.debit) || '',
+          Credit: Number(l.credit) || '',
+        })
+      }
+      return out
+    }
+
     if (reportData.type === 'pl') {
       const rows = [
-        { 'Section': 'REVENUE', 'Code': '', 'Account': '', 'Amount': '' },
-        ...reportData.revenue.map((a: any) => ({ 'Section': '', 'Code': a.code, 'Account': a.name, 'Amount': Number(a.balance) })),
-        { 'Section': '', 'Code': '', 'Account': 'Total Revenue', 'Amount': Number(reportData.totalRev) },
-        { 'Section': '', 'Code': '', 'Account': '', 'Amount': '' },
-        { 'Section': 'EXPENSES', 'Code': '', 'Account': '', 'Amount': '' },
-        ...reportData.expenses.map((a: any) => ({ 'Section': '', 'Code': a.code, 'Account': a.name, 'Amount': Number(a.balance) })),
-        { 'Section': '', 'Code': '', 'Account': 'Total Expenses', 'Amount': Number(reportData.totalExp) },
-        { 'Section': '', 'Code': '', 'Account': '', 'Amount': '' },
-        { 'Section': '', 'Code': '', 'Account': 'NET INCOME', 'Amount': Number(reportData.totalRev) - Number(reportData.totalExp) },
+        sectionRow('REVENUE'),
+        ...reportData.revenue.flatMap(acctBlock),
+        totalRow('Total Revenue', reportData.totalRev),
+        blank(),
+        sectionRow('EXPENSES'),
+        ...reportData.expenses.flatMap(acctBlock),
+        totalRow('Total Expenses', reportData.totalExp),
+        blank(),
+        totalRow('NET INCOME', Number(reportData.totalRev) - Number(reportData.totalExp)),
       ]
-      exportXlsx(`PL_${reportFrom}_${reportTo}`, [{ name: 'P&L', rows }])
+      exportXlsx(`PL_${reportFrom}_${reportTo}`, [{ name: 'Income Statement', rows }])
     } else {
+      const diff = Number(reportData.totalAssets) - (Number(reportData.totalLiab) + Number(reportData.totalEquity))
       const rows = [
-        { 'Section': 'ASSETS', 'Code': '', 'Account': '', 'Amount': '' },
-        ...reportData.assets.map((a: any) => ({ 'Section': '', 'Code': a.code, 'Account': a.name, 'Amount': Number(a.balance) })),
-        { 'Section': '', 'Code': '', 'Account': 'Total Assets', 'Amount': Number(reportData.totalAssets) },
-        { 'Section': '', 'Code': '', 'Account': '', 'Amount': '' },
-        { 'Section': 'LIABILITIES', 'Code': '', 'Account': '', 'Amount': '' },
-        ...reportData.liabilities.map((a: any) => ({ 'Section': '', 'Code': a.code, 'Account': a.name, 'Amount': Number(a.balance) })),
-        { 'Section': '', 'Code': '', 'Account': 'Total Liabilities', 'Amount': Number(reportData.totalLiab) },
-        { 'Section': '', 'Code': '', 'Account': '', 'Amount': '' },
-        { 'Section': 'EQUITY', 'Code': '', 'Account': '', 'Amount': '' },
-        ...reportData.equity.map((a: any) => ({ 'Section': '', 'Code': a.code, 'Account': a.name, 'Amount': Number(a.balance) })),
-        { 'Section': '', 'Code': '', 'Account': 'Net Income', 'Amount': Number(reportData.netIncome) },
-        { 'Section': '', 'Code': '', 'Account': 'Total Equity', 'Amount': Number(reportData.totalEquity) },
+        sectionRow('ASSETS'),
+        ...reportData.assets.flatMap(acctBlock),
+        totalRow('Total Assets', reportData.totalAssets),
+        blank(),
+        sectionRow('LIABILITIES'),
+        ...reportData.liabilities.flatMap(acctBlock),
+        totalRow('Total Liabilities', reportData.totalLiab),
+        blank(),
+        sectionRow('EQUITY'),
+        ...reportData.equity.flatMap(acctBlock),
+        totalRow('Net Income', reportData.netIncome),
+        totalRow('Total Equity', reportData.totalEquity),
+        blank(),
+        totalRow('Total Liabilities + Equity', Number(reportData.totalLiab) + Number(reportData.totalEquity)),
+        { ...blank(), Account: 'BALANCE CHECK (Assets − Liab − Equity)', Amount: Number(diff.toFixed(2)) },
+        { ...blank(), Account: 'Status', Description: Math.abs(diff) < 0.01 ? 'BALANCED' : 'OUT OF BALANCE' },
       ]
       exportXlsx(`Balance_Sheet_${reportTo}`, [{ name: 'Balance Sheet', rows }])
     }
@@ -1877,7 +1936,7 @@ export default function AccountingPage() {
                             <div className="flex items-center gap-1.5">
                               {e.status === 'draft' && (
                                 <>
-                                  {!(e.reference_type && AUTO_JE_REFERENCE_TYPES.includes(e.reference_type)) && (
+                                  {(isAdmin || !(e.reference_type && AUTO_JE_REFERENCE_TYPES.includes(e.reference_type))) && (
                                     <button
                                       onClick={() => openEditJe(e)}
                                       className="text-[11px] font-medium text-blue-600 border border-blue-200 bg-blue-50 hover:bg-blue-100 px-2 py-1 rounded transition-colors"
@@ -2272,11 +2331,30 @@ export default function AccountingPage() {
                       </div>
                     </div>
                   </div>
-                  <div className={cn('p-4 rounded-xl font-bold text-sm flex justify-between', Math.abs(reportData.totalAssets - reportData.totalLiab - reportData.totalEquity) < 0.01 ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-700')}>
-                    <span>Balance Check (Assets = Liab + Equity)</span>
-                    <span>{Math.abs(reportData.totalAssets - reportData.totalLiab - reportData.totalEquity) < 0.01 ? '✓ Balanced' : `⚠ Off by ${formatCurrency(Math.abs(reportData.totalAssets - reportData.totalLiab - reportData.totalEquity))}`}</span>
-                  </div>
                 </div>
+                {/* Full-width Balance Check */}
+                {(() => {
+                  const lhs = Number(reportData.totalAssets)
+                  const rhs = Number(reportData.totalLiab) + Number(reportData.totalEquity)
+                  const diff = lhs - rhs
+                  const balanced = Math.abs(diff) < 0.01
+                  return (
+                    <div className={cn('col-span-2 rounded-2xl border shadow-card px-5 py-4 flex items-center justify-between', balanced ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-300')}>
+                      <div className="flex items-center gap-3">
+                        <span className={cn('flex-none w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-bold', balanced ? 'bg-green-600' : 'bg-red-600')}>{balanced ? '✓' : '!'}</span>
+                        <div>
+                          <p className={cn('font-bold text-sm', balanced ? 'text-green-800' : 'text-red-800')}>Balance Check — Assets = Liabilities + Equity</p>
+                          <p className="text-xs text-hmuted mt-0.5">
+                            Total Assets <strong>{formatCurrency(lhs)}</strong> vs. Liabilities + Equity <strong>{formatCurrency(rhs)}</strong>
+                          </p>
+                        </div>
+                      </div>
+                      <span className={cn('text-lg font-bold', balanced ? 'text-green-700' : 'text-red-700')}>
+                        {balanced ? 'Balanced' : `Off by ${formatCurrency(Math.abs(diff))}`}
+                      </span>
+                    </div>
+                  )
+                })()}
               </div>
             )}
 

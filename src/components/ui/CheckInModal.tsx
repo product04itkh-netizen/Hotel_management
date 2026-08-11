@@ -2,6 +2,7 @@
 import { useState } from 'react'
 import { Modal } from './Modal'
 import { Button } from './Button'
+import { toast } from './Toast'
 import type { House } from '@/types'
 
 const ID_TYPES = ['Passport', 'National ID', "Driver's License", 'Other']
@@ -92,13 +93,13 @@ export function CheckInModal(props: Props) {
 
   async function handleConfirm() {
     if (!form.id_number.trim()) {
-      alert('ID Number is required to complete check-in.')
+      toast('ID Number is required to complete check-in.', 'error')
       return
     }
     if (props.mode === 'walkin') {
-      if (!form.guest_name?.trim()) { alert('Guest name is required.'); return }
-      if (!form.house_id) { alert('Please select a house.'); return }
-      if (!form.check_out_date) { alert('Check-out date is required.'); return }
+      if (!form.guest_name?.trim()) { toast('Guest name is required.', 'error'); return }
+      if (!form.house_id) { toast('Please select a house.', 'error'); return }
+      if (!form.check_out_date) { toast('Check-out date is required.', 'error'); return }
     }
     setSaving(true)
     try {

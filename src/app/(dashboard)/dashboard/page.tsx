@@ -1,8 +1,9 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { TopBar } from '@/components/layout/TopBar'
 import { StatCard } from '@/components/ui/StatCard'
 import { Badge } from '@/components/ui/Badge'
+import { Modal } from '@/components/ui/Modal'
 import { createClient } from '@/lib/supabase/client'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { useBranch } from '@/context/BranchContext'
@@ -44,6 +45,7 @@ export default function DashboardPage() {
   })
   const [recentReservations, setRecentReservations] = useState<Reservation[]>([])
   const [upcomingCheckIns, setUpcomingCheckIns] = useState<Reservation[]>([])
+  const [selectedRes, setSelectedRes] = useState<Reservation | null>(null)
   const [weeklyData, setWeeklyData] = useState<number[]>([60, 72, 65, 80, 78, 90, 85])
   const [loading, setLoading] = useState(true)
 
@@ -61,9 +63,9 @@ export default function DashboardPage() {
       supabase.from('reservations').select('id').eq('branch_id', activeBranch.id).eq('check_out_date', today).eq('status', 'checked_in'),
       supabase.from('invoices').select('total').eq('branch_id', activeBranch.id).eq('status', 'paid').gte('paid_at', today + 'T00:00:00').lte('paid_at', today + 'T23:59:59'),
       supabase.from('housekeeping_tasks').select('id').eq('branch_id', activeBranch.id).in('status', ['pending', 'in_progress']),
-      supabase.from('reservations').select('*, guest:guests(full_name, phone), house:houses(name, code, house_type)').eq('branch_id', activeBranch.id).order('created_at', { ascending: false }).limit(6),
+      supabase.from('reservations').select('*, guest:guests(full_name, phone), house:houses(name, code, house_type), line_items:reservation_line_items(id, label, qty, unit_price, amount, discount, revenue_account_code, sort_order)').eq('branch_id', activeBranch.id).order('created_at', { ascending: false }).limit(6),
       // Upcoming arrivals: not-yet-arrived reservations from today onward, soonest first
-      supabase.from('reservations').select('*, guest:guests(full_name, phone), house:houses(name, code, house_type)').eq('branch_id', activeBranch.id).in('status', ['confirmed', 'pending']).gte('check_in_date', today).order('check_in_date', { ascending: true }).limit(10),
+      supabase.from('reservations').select('*, guest:guests(full_name, phone), house:houses(name, code, house_type), line_items:reservation_line_items(id, label, qty, unit_price, amount, discount, revenue_account_code, sort_order)').eq('branch_id', activeBranch.id).in('status', ['confirmed', 'pending']).gte('check_in_date', today).order('check_in_date', { ascending: true }).limit(10),
     ])
 
     const houseRows = housesRes.data ?? []
@@ -212,7 +214,7 @@ export default function DashboardPage() {
                 ) : upcomingCheckIns.map(res => {
                   const badge = arrivalBadge(daysUntil(res.check_in_date))
                   return (
-                    <tr key={res.id} className="border-t border-hborder hover:bg-hbg/50 transition-colors">
+                    <tr key={res.id} onClick={() => setSelectedRes(res)} className="border-t border-hborder hover:bg-hbg/50 transition-colors cursor-pointer">
                       <td className="px-3 py-2 whitespace-nowrap">
                         <span className={`text-[11px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full ${badge.cls}`}>{badge.label}</span>
                       </td>
@@ -257,7 +259,7 @@ export default function DashboardPage() {
                     <td colSpan={6} className="px-5 py-8 text-center text-hmuted text-sm">No reservations yet</td>
                   </tr>
                 ) : recentReservations.map(res => (
-                  <tr key={res.id} className="border-t border-hborder hover:bg-hbg/50 transition-colors">
+                  <tr key={res.id} onClick={() => setSelectedRes(res)} className="border-t border-hborder hover:bg-hbg/50 transition-colors cursor-pointer">
                     <td className="px-3 py-2 font-mono text-xs text-hmuted whitespace-nowrap">{res.reservation_number}</td>
                     <td className="px-3 py-2 font-medium text-htext max-w-[160px] truncate" title={(res.guest as any)?.full_name ?? undefined}>{(res.guest as any)?.full_name ?? '—'}</td>
                     <td className="px-3 py-2 text-hmuted font-mono text-xs whitespace-nowrap" title={(res.house as any)?.name ?? undefined}>{(res.house as any)?.code || (res.house as any)?.name || '—'}</td>
@@ -271,6 +273,91 @@ export default function DashboardPage() {
           </div>
         </div>
       </div>
+
+      {/* Reservation details */}
+      <Modal open={!!selectedRes} onClose={() => setSelectedRes(null)} title={selectedRes?.reservation_number ?? 'Reservation'} size="md">
+        {selectedRes && (() => {
+          const g = selectedRes.guest as any
+          const h = selectedRes.house as any
+          const r = selectedRes as any
+          const nights = selectedRes.check_in_date && selectedRes.check_out_date
+            ? Math.max(0, Math.round((new Date(selectedRes.check_out_date).getTime() - new Date(selectedRes.check_in_date).getTime()) / 86400000))
+            : 0
+          const badge = arrivalBadge(daysUntil(selectedRes.check_in_date))
+          const Row = ({ label, value }: { label: string; value: ReactNode }) => (
+            <div className="flex justify-between gap-4 py-2 border-b border-hborder/50 last:border-0">
+              <span className="text-xs text-hmuted uppercase tracking-wide">{label}</span>
+              <span className="text-sm text-htext text-right">{value}</span>
+            </div>
+          )
+          return (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <Badge status={selectedRes.status} />
+                <span className={`text-[11px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full ${badge.cls}`}>{badge.label}</span>
+              </div>
+              <div className="bg-hsurface2 rounded-xl px-4 py-3">
+                <Row label="Guest" value={g?.full_name ?? '—'} />
+                {g?.phone && <Row label="Phone" value={g.phone} />}
+                <Row label="House" value={`${h?.code ? h.code + ' — ' : ''}${h?.name ?? '—'}${h?.house_type ? ` (${h.house_type})` : ''}`} />
+              </div>
+              <div className="bg-hsurface2 rounded-xl px-4 py-3">
+                <Row label="Check-in" value={formatDate(selectedRes.check_in_date)} />
+                <Row label="Check-out" value={formatDate(selectedRes.check_out_date)} />
+                <Row label="Nights" value={nights} />
+                {r.arrival_time && <Row label="Arrival Time" value={r.arrival_time} />}
+                <Row label="Guests" value={`${r.adults ?? 0} adult${(r.adults ?? 0) === 1 ? '' : 's'}${r.children ? `, ${r.children} child${r.children === 1 ? '' : 'ren'}` : ''}`} />
+                {r.source && <Row label="Source" value={String(r.source).replace(/_/g, ' ')} />}
+              </div>
+              {(() => {
+                const items: any[] = ((r.line_items as any[]) ?? []).slice().sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+                if (items.length === 0) return null
+                const fnb = items.filter(i => i.revenue_account_code === '4100')
+                const activities = items.filter(i => i.revenue_account_code !== '4100')
+                const group = (title: string, list: any[]) => list.length === 0 ? null : (
+                  <div>
+                    <p className="text-xs text-hmuted uppercase tracking-wide mb-1">{title}</p>
+                    <div className="bg-hsurface2 rounded-xl px-4 py-2">
+                      {list.map(it => (
+                        <div key={it.id} className="flex justify-between gap-4 py-1.5 border-b border-hborder/50 last:border-0 text-sm">
+                          <span className="text-htext">
+                            {it.label}
+                            {it.qty > 1 && <span className="text-hmuted"> ×{it.qty}</span>}
+                            {Number(it.discount) > 0 && <span className="text-[10px] text-emerald-700 ml-1.5">−{formatCurrency(Number(it.discount))}</span>}
+                          </span>
+                          <span className="text-htext tabular-nums whitespace-nowrap">{formatCurrency(Number(it.amount))}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )
+                return (
+                  <div className="space-y-3">
+                    {group('Activities & Services', activities)}
+                    {group('Food & Beverage', fnb)}
+                  </div>
+                )
+              })()}
+              <div className="bg-hsurface2 rounded-xl px-4 py-3">
+                {r.deposit > 0 && <Row label="Deposit" value={formatCurrency(Number(r.deposit))} />}
+                {r.total_amount != null && <Row label="Total" value={formatCurrency(Number(r.total_amount))} />}
+              </div>
+              {r.special_requests && (
+                <div>
+                  <p className="text-xs text-hmuted uppercase tracking-wide mb-1">Special Requests</p>
+                  <p className="text-sm text-htext">{r.special_requests}</p>
+                </div>
+              )}
+              {r.notes && (
+                <div>
+                  <p className="text-xs text-hmuted uppercase tracking-wide mb-1">Notes</p>
+                  <p className="text-sm text-htext">{r.notes}</p>
+                </div>
+              )}
+            </div>
+          )
+        })()}
+      </Modal>
     </>
   )
 }

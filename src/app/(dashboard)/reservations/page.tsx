@@ -280,7 +280,19 @@ export default function ReservationsPage() {
     const depositAcc = accounts.find(a => a.code === '2200')?.id
     if (!assetAcc || !depositAcc) return
 
-    const { data: existingJes } = await supabase.from('journal_entries').select('id').eq('reference', resNum).eq('reference_type', 'deposit')
+    // The deposit JE must be dated when the deposit was RECEIVED (the receipt
+    // date), not "now". This function reruns on every reservation edit — using
+    // today's date silently re-dated the deposit JE to the edit/checkout/invoice
+    // date each time, misstating which period the cash landed in. Source the
+    // date from the receipt; preserve an existing JE's date as a fallback.
+    const { data: resRow } = await supabase.from('reservations').select('id').eq('reservation_number', resNum).eq('branch_id', activeBranch.id).maybeSingle()
+    const { data: receipt } = resRow
+      ? await supabase.from('deposit_receipts').select('receipt_date').eq('reservation_id', resRow.id).order('receipt_date', { ascending: true }).limit(1).maybeSingle()
+      : { data: null }
+
+    const { data: existingJes } = await supabase.from('journal_entries').select('id, entry_date').eq('reference', resNum).eq('reference_type', 'deposit')
+    const priorDate = existingJes && existingJes.length > 0 ? existingJes[0].entry_date : null
+    const depositDate = receipt?.receipt_date || priorDate || new Date().toISOString().split('T')[0]
     if (existingJes && existingJes.length > 0) {
       const jeIds = existingJes.map(je => je.id)
       await supabase.from('journal_entry_lines').delete().in('entry_id', jeIds)
@@ -290,7 +302,7 @@ export default function ReservationsPage() {
     if (depositAmt > 0) {
       const { data: entry, error: entryErr } = await supabase.from('journal_entries').insert({
         entry_number: generateJournalEntryNumber(),
-        entry_date: new Date().toISOString().split('T')[0],
+        entry_date: depositDate,
         reference: resNum,
         reference_type: 'deposit',
         description: `Deposit received for ${guestName} (${resNum})`,
@@ -596,30 +608,36 @@ export default function ReservationsPage() {
     if (!activeBranch) return
     const guestName = (res.guest as any)?.full_name ?? res.guest_name ?? 'Guest'
 
-    const [{ data: invoices }, { data: activeReceipt }, { data: pettyCash }, { data: checkInJes }] = await Promise.all([
+    const [{ data: invoices }, { data: activeReceipts }, { data: pettyCash }, { data: checkInJes }, { data: depositJes }] = await Promise.all([
       supabase.from('invoices').select('id, invoice_number, total, status').eq('reservation_id', res.id),
-      // 'held' means never applied to an invoice yet — needs a refund on cancel.
-      // 'applied' means it WAS consumed by an invoice, but that invoice is about
-      // to be voided below, so the deposit is effectively un-applied too and
-      // needs the same refund — this was previously only handled for 'held',
-      // leaving an applied-then-voided deposit's liability stuck on the books
-      // forever with no refund ever recorded.
-      supabase.from('deposit_receipts').select('*').eq('reservation_id', res.id).in('status', ['held', 'applied']).maybeSingle(),
+      // Every still-active deposit receipt for this reservation. 'held' = never
+      // applied; 'applied' = consumed by an invoice that's about to be voided.
+      // Both are unwound on cancel. NOTE: NOT .maybeSingle() — a reservation can
+      // carry more than one receipt, and maybeSingle() silently returned null on
+      // 2+ rows, skipping the entire refund/void path.
+      supabase.from('deposit_receipts').select('*').eq('reservation_id', res.id).in('status', ['held', 'applied']),
       supabase.from('petty_cash_transactions').select('id').eq('reservation_id', res.id),
       // Check-in posts a revenue-recognition JE (DR Accounts Receivable / CR
       // Revenue) keyed to the reservation number, not the invoice number —
       // the invoice-voiding loop below never sees it, so it was never reversed.
       supabase.from('journal_entries').select('id').eq('reference', res.reservation_number).eq('reference_type', 'check_in').eq('branch_id', activeBranch.id).eq('is_void', false),
+      // The deposit-received JE (DR Cash / CR Guest Deposits), keyed to the
+      // reservation number. Was never voided on cancel, leaving the cash and
+      // deposit-liability sitting on the balance sheet for a dead reservation.
+      supabase.from('journal_entries').select('id').eq('reference', res.reservation_number).eq('reference_type', 'deposit').eq('branch_id', activeBranch.id).eq('is_void', false),
     ])
 
     const activeInvoices = (invoices ?? []).filter((inv: any) => !['void', 'refunded'].includes(inv.status))
+    const depositReceipts = activeReceipts ?? []
+    const depositTotal = depositReceipts.reduce((s: number, r: any) => s + Number(r.amount), 0)
     const pcCount = (pettyCash ?? []).length
     const checkInJeIds = (checkInJes ?? []).map((j: any) => j.id)
+    const depositJeIds = (depositJes ?? []).map((j: any) => j.id)
 
     const lines: string[] = [
       `Reservation ${res.reservation_number} — ${guestName} will be cancelled.`,
     ]
-    if (activeReceipt) lines.push(`Deposit ${formatCurrency(activeReceipt.amount)} will be refunded with a reversing JE.`)
+    if (depositReceipts.length > 0) lines.push(`Deposit ${formatCurrency(depositTotal)} will be reversed (deposit entr${depositJeIds.length === 1 ? 'y' : 'ies'} voided).`)
     for (const inv of activeInvoices) {
       lines.push(`Invoice ${inv.invoice_number} (${formatCurrency(inv.total)}) will be voided.`)
     }
@@ -640,11 +658,18 @@ export default function ReservationsPage() {
           .update({ status: 'cancelled', updated_at: new Date().toISOString() })
           .eq('id', res.id)
 
-        if (activeReceipt) {
+        if (depositReceipts.length > 0) {
           await supabase.from('deposit_receipts')
             .update({ status: 'refunded', updated_at: new Date().toISOString() })
-            .eq('id', activeReceipt.id)
-          await createRefundJournalEntry(res.reservation_number, guestName, activeReceipt.amount, activeReceipt.payment_method)
+            .in('id', depositReceipts.map((r: any) => r.id))
+        }
+        // Void the deposit-received JE(s) so the cash + deposit liability they
+        // recorded stop counting — same treatment as the invoice/check-in JEs
+        // below. (A cancelled reservation should leave no financial footprint.)
+        if (depositJeIds.length > 0) {
+          await supabase.from('journal_entries')
+            .update({ is_void: true, voided_at: new Date().toISOString() })
+            .in('id', depositJeIds)
         }
 
         for (const inv of activeInvoices) {

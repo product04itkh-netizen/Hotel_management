@@ -1,8 +1,9 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { TopBar } from '@/components/layout/TopBar'
+import { Modal } from '@/components/ui/Modal'
 import { createClient } from '@/lib/supabase/client'
-import { formatCurrency } from '@/lib/utils'
+import { formatCurrency, formatDate } from '@/lib/utils'
 import { useBranch } from '@/context/BranchContext'
 import jsPDF from 'jspdf'
 
@@ -52,6 +53,10 @@ export default function ReportsPage() {
     revenueByType: [], expenseByCategory: [], totalRevenue: 0, totalExpenses: 0, netIncome: 0,
   })
   const [expandedAccounts, setExpandedAccounts] = useState<Record<string, boolean>>({})
+  // Current customer deposits held (account 2200 liability, all-time) + drill-down
+  const [customerDeposits, setCustomerDeposits] = useState(0)
+  const [depositDetails, setDepositDetails] = useState<{ entry_number: string; entry_date: string; description: string; debit: number; credit: number }[]>([])
+  const [depositModalOpen, setDepositModalOpen] = useState(false)
 
   useEffect(() => { if (activeBranch) loadReports() }, [activeBranch]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -205,6 +210,29 @@ export default function ReportsPage() {
     const plTotalRev = plRevenue.reduce((s, r) => s + r.amount, 0)
     const plTotalExp = plExpense.reduce((s, e) => s + e.amount, 0)
     setPl({ revenueByType: plRevenue, expenseByCategory: plExpense, totalRevenue: plTotalRev, totalExpenses: plTotalExp, netIncome: plTotalRev - plTotalExp })
+
+    // ── Current customer deposits held (2200 Guest Deposits Received) ──
+    // Point-in-time liability, so all-time & non-void (not the 6-month window).
+    const { data: dep2200Acct } = await supabase.from('chart_of_accounts')
+      .select('id').eq('branch_id', activeBranch.id).eq('code', '2200').maybeSingle()
+    if (dep2200Acct) {
+      const { data: allJes } = await supabase.from('journal_entries')
+        .select('id, entry_number, entry_date, description').eq('branch_id', activeBranch.id).eq('is_void', false)
+      const jeMeta: Record<string, any> = Object.fromEntries((allJes ?? []).map(j => [j.id, j]))
+      const allJeIds = (allJes ?? []).map(j => j.id)
+      const { data: depLines } = allJeIds.length > 0
+        ? await supabase.from('journal_entry_lines').select('entry_id, debit, credit').eq('account_id', dep2200Acct.id).in('entry_id', allJeIds)
+        : { data: [] as any[] }
+      const rows = (depLines ?? []).map((l: any) => {
+        const je = jeMeta[l.entry_id] ?? {}
+        return { entry_number: je.entry_number ?? '', entry_date: je.entry_date ?? '', description: je.description ?? '', debit: Number(l.debit), credit: Number(l.credit) }
+      }).sort((a, b) => (a.entry_date || '').localeCompare(b.entry_date || ''))
+      setCustomerDeposits(rows.reduce((s, r) => s + r.credit - r.debit, 0))
+      setDepositDetails(rows)
+    } else {
+      setCustomerDeposits(0)
+      setDepositDetails([])
+    }
 
     setLoading(false)
   }
@@ -369,7 +397,7 @@ export default function ReportsPage() {
       <TopBar title="Reports & Analytics" subtitle={`Occupancy, revenue & KPIs — ${activeBranch?.location ?? ''}`} />
       <div className="p-8 flex-1 section-enter">
         {/* KPIs */}
-        <div className="grid grid-cols-5 gap-4 mb-6">
+        <div className="grid grid-cols-6 gap-4 mb-6">
           {[
             { label: 'Total Revenue', value: formatCurrency(kpis.totalRevenue), accent: '#C89B3C' },
             { label: 'Total Guests', value: kpis.totalGuests, accent: '#004AAD' },
@@ -383,6 +411,16 @@ export default function ReportsPage() {
               <p className="font-serif text-2xl text-dark-navy mt-1 pl-2">{k.value}</p>
             </div>
           ))}
+          {/* Customer Deposits — clickable drill-down */}
+          <button
+            onClick={() => setDepositModalOpen(true)}
+            className="bg-white border border-hborder rounded-2xl p-4 shadow-card relative overflow-hidden text-left hover:shadow-lg hover:border-[#0EA5E9]/40 transition-all group"
+          >
+            <div className="absolute top-0 left-0 w-1 h-full rounded-l-2xl" style={{ background: '#0EA5E9' }} />
+            <p className="text-[11px] text-hmuted uppercase tracking-wide pl-2">Customer Deposits</p>
+            <p className="font-serif text-2xl text-dark-navy mt-1 pl-2">{formatCurrency(customerDeposits)}</p>
+            <span className="pl-2 text-[10px] font-medium text-[#0EA5E9] group-hover:underline">View {depositDetails.length} entr{depositDetails.length === 1 ? 'y' : 'ies'} →</span>
+          </button>
         </div>
 
         {/* Balance Sheet */}
@@ -696,6 +734,51 @@ export default function ReportsPage() {
           </div>
         </div>
       </div>
+
+      {/* Customer Deposits drill-down */}
+      <Modal open={depositModalOpen} onClose={() => setDepositModalOpen(false)} title="Customer Deposits Held" size="lg">
+        <div className="space-y-3">
+          <div className="flex items-center justify-between bg-hsurface2 rounded-xl px-4 py-3">
+            <span className="text-sm text-hmuted">Current balance — Guest Deposits Received (2200)</span>
+            <span className="font-serif text-xl text-dark-navy">{formatCurrency(customerDeposits)}</span>
+          </div>
+          {depositDetails.length === 0 ? (
+            <p className="text-sm text-hmuted text-center py-8">No deposit activity yet.</p>
+          ) : (
+            <div className="overflow-x-auto max-h-[55vh] overflow-y-auto border border-hborder rounded-xl">
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 bg-hsurface2">
+                  <tr className="text-left">
+                    <th className="px-3 py-2.5 text-[11px] font-semibold text-hmuted uppercase tracking-wide">Entry</th>
+                    <th className="px-3 py-2.5 text-[11px] font-semibold text-hmuted uppercase tracking-wide">Date</th>
+                    <th className="px-3 py-2.5 text-[11px] font-semibold text-hmuted uppercase tracking-wide">Description</th>
+                    <th className="px-3 py-2.5 text-[11px] font-semibold text-hmuted uppercase tracking-wide text-right">Received (CR)</th>
+                    <th className="px-3 py-2.5 text-[11px] font-semibold text-hmuted uppercase tracking-wide text-right">Applied/Refunded (DR)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {depositDetails.map((d, i) => (
+                    <tr key={i} className="border-t border-hborder hover:bg-hbg/50">
+                      <td className="px-3 py-2 font-mono text-xs text-hmuted whitespace-nowrap">{d.entry_number}</td>
+                      <td className="px-3 py-2 text-xs text-hmuted whitespace-nowrap">{d.entry_date ? formatDate(d.entry_date) : '—'}</td>
+                      <td className="px-3 py-2 text-htext max-w-[260px] truncate" title={d.description}>{d.description}</td>
+                      <td className="px-3 py-2 text-right tabular-nums text-[#1A7A4A]">{d.credit > 0 ? formatCurrency(d.credit) : ''}</td>
+                      <td className="px-3 py-2 text-right tabular-nums text-[#B83232]">{d.debit > 0 ? formatCurrency(d.debit) : ''}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t-2 border-hborder bg-hsurface2/60 font-semibold">
+                    <td className="px-3 py-2.5 text-dark-navy" colSpan={3}>Net deposits held</td>
+                    <td className="px-3 py-2.5 text-right tabular-nums text-dark-navy" colSpan={2}>{formatCurrency(customerDeposits)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+          <p className="text-[10px] text-hmuted">Credits are deposits received; debits are deposits applied to invoices or refunded. The net is your current guest-deposit liability.</p>
+        </div>
+      </Modal>
     </>
   )
 }
