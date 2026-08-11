@@ -1312,18 +1312,26 @@ export default function AccountingPage() {
 
       setReportData({ type: 'pl', revenue, expenses, totalRev: revenue.reduce((s, a) => s + a.balance, 0), totalExp: expenses.reduce((s, a) => s + a.balance, 0), totalDiscounts, discountDetails })
     } else {
-      const revAccts = withBal.filter(a => a.type === 'revenue')
-      const expAccts = withBal.filter(a => a.type === 'expense')
-      const netIncome = revAccts.reduce((s, a) => s + a.balance, 0) - expAccts.reduce((s, a) => s + a.balance, 0)
+      const revAccts  = withBal.filter(a => a.type === 'revenue')
+      const expAccts  = withBal.filter(a => a.type === 'expense')
+      const incomeRevenue  = revAccts.reduce((s, a) => s + a.balance, 0)
+      const incomeExpenses = expAccts.reduce((s, a) => s + a.balance, 0)
+      const netIncome = incomeRevenue - incomeExpenses
+      const isRelevant = (a: any) => a.is_active || Math.abs(a.balance) > 0.001
+      const assetAccts = withBal.filter(a => a.type === 'asset' && isRelevant(a))
+      const liabAccts  = withBal.filter(a => a.type === 'liability' && isRelevant(a))
+      const equityAccts = withBal.filter(a => a.type === 'equity' && isRelevant(a))
       setReportData({
         type: 'bs',
-        assets:      withBal.filter(a => a.type === 'asset'),
-        liabilities: withBal.filter(a => a.type === 'liability'),
-        equity:      withBal.filter(a => a.type === 'equity'),
-        totalAssets: withBal.filter(a => a.type === 'asset').reduce((s, a) => s + a.balance, 0),
-        totalLiab:   withBal.filter(a => a.type === 'liability').reduce((s, a) => s + a.balance, 0),
-        totalEquity: withBal.filter(a => a.type === 'equity').reduce((s, a) => s + a.balance, 0) + netIncome,
+        assets:         assetAccts,
+        liabilities:    liabAccts,
+        equity:         equityAccts,
+        totalAssets:    assetAccts.reduce((s, a) => s + a.balance, 0),
+        totalLiab:      liabAccts.reduce((s, a) => s + a.balance, 0),
+        totalEquity:    equityAccts.reduce((s, a) => s + a.balance, 0) + netIncome,
         netIncome,
+        incomeRevenue,
+        incomeExpenses,
       })
     }
     setReportLoading(false)
@@ -2258,105 +2266,225 @@ export default function AccountingPage() {
               </div>
             )}
 
-            {reportData?.type === 'bs' && (
-              <div className="grid grid-cols-2 gap-4">
-                <div className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
-                  <div className="px-5 py-3 border-b border-hborder bg-green-50">
-                    <p className="font-bold text-green-800 text-sm uppercase tracking-wide">Assets</p>
-                  </div>
-                  <div className="p-4 space-y-1">
-                    {reportData.assets.map((a: any) => (
-                      <div key={a.id}>
-                        <div
-                          className="flex justify-between py-1 text-sm border-b border-hborder/30 cursor-pointer hover:bg-hbg/50 -mx-1 px-1 rounded"
-                          onClick={() => toggleAcctDrilldown(a.id, undefined, reportTo)}
-                        >
-                          <span className="text-htext">{expandedReportAccts.has(a.id) ? '▾' : '▸'} {a.code} — {a.name}</span>
-                          <span className={cn('font-medium', a.balance < 0 ? 'text-red-500' : '')}>{formatCurrency(a.balance)}</span>
-                        </div>
-                        {expandedReportAccts.has(a.id) && <AcctDrilldown accountId={a.id} />}
-                      </div>
-                    ))}
-                    <div className="flex justify-between pt-3 font-bold text-dark-navy border-t-2 border-hborder">
-                      <span>Total Assets</span><span>{formatCurrency(reportData.totalAssets)}</span>
-                    </div>
-                  </div>
-                </div>
-                <div className="space-y-4">
-                  <div className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
-                    <div className="px-5 py-3 border-b border-hborder bg-red-50">
-                      <p className="font-bold text-red-800 text-sm uppercase tracking-wide">Liabilities</p>
-                    </div>
-                    <div className="p-4 space-y-1">
-                      {reportData.liabilities.map((a: any) => (
-                        <div key={a.id}>
-                          <div
-                            className="flex justify-between py-1 text-sm border-b border-hborder/30 cursor-pointer hover:bg-hbg/50 -mx-1 px-1 rounded"
-                            onClick={() => toggleAcctDrilldown(a.id, undefined, reportTo)}
-                          >
-                            <span className="text-htext">{expandedReportAccts.has(a.id) ? '▾' : '▸'} {a.code} — {a.name}</span>
-                            <span className="font-medium">{formatCurrency(a.balance)}</span>
-                          </div>
-                          {expandedReportAccts.has(a.id) && <AcctDrilldown accountId={a.id} />}
-                        </div>
-                      ))}
-                      <div className="flex justify-between pt-2 font-semibold text-dark-navy border-t border-hborder">
-                        <span>Total Liabilities</span><span>{formatCurrency(reportData.totalLiab)}</span>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
-                    <div className="px-5 py-3 border-b border-hborder bg-purple-50">
-                      <p className="font-bold text-purple-800 text-sm uppercase tracking-wide">Equity</p>
-                    </div>
-                    <div className="p-4 space-y-1">
-                      {reportData.equity.map((a: any) => (
-                        <div key={a.id}>
-                          <div
-                            className="flex justify-between py-1 text-sm border-b border-hborder/30 cursor-pointer hover:bg-hbg/50 -mx-1 px-1 rounded"
-                            onClick={() => toggleAcctDrilldown(a.id, undefined, reportTo)}
-                          >
-                            <span className="text-htext">{expandedReportAccts.has(a.id) ? '▾' : '▸'} {a.code} — {a.name}</span>
-                            <span className="font-medium">{formatCurrency(a.balance)}</span>
-                          </div>
-                          {expandedReportAccts.has(a.id) && <AcctDrilldown accountId={a.id} />}
-                        </div>
-                      ))}
-                      <div className="flex justify-between py-1 text-sm border-b border-hborder/30">
-                        <span className="text-htext italic">Current Period Net Income</span>
-                        <span className={cn('font-medium', reportData.netIncome < 0 ? 'text-red-500' : 'text-green-700')}>{formatCurrency(reportData.netIncome)}</span>
-                      </div>
-                      <div className="flex justify-between pt-2 font-semibold text-dark-navy border-t border-hborder">
-                        <span>Total Equity</span><span>{formatCurrency(reportData.totalEquity)}</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                {/* Full-width Balance Check */}
-                {(() => {
-                  const lhs = Number(reportData.totalAssets)
-                  const rhs = Number(reportData.totalLiab) + Number(reportData.totalEquity)
-                  const diff = lhs - rhs
-                  const balanced = Math.abs(diff) < 0.01
-                  return (
-                    <div className={cn('col-span-2 rounded-2xl border shadow-card px-5 py-4 flex items-center justify-between', balanced ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-300')}>
-                      <div className="flex items-center gap-3">
-                        <span className={cn('flex-none w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-bold', balanced ? 'bg-green-600' : 'bg-red-600')}>{balanced ? '✓' : '!'}</span>
-                        <div>
-                          <p className={cn('font-bold text-sm', balanced ? 'text-green-800' : 'text-red-800')}>Balance Check — Assets = Liabilities + Equity</p>
-                          <p className="text-xs text-hmuted mt-0.5">
-                            Total Assets <strong>{formatCurrency(lhs)}</strong> vs. Liabilities + Equity <strong>{formatCurrency(rhs)}</strong>
-                          </p>
-                        </div>
-                      </div>
-                      <span className={cn('text-lg font-bold', balanced ? 'text-green-700' : 'text-red-700')}>
-                        {balanced ? 'Balanced' : `Off by ${formatCurrency(Math.abs(diff))}`}
+            {reportData?.type === 'bs' && (() => {
+              // ── Group assets by code range (industry standard) ─────────────────
+              // Robust against incorrect category assignments in the DB.
+              // Category 'Bank' → Cash & Bank; otherwise by numeric code:
+              //   code < 1500     → Current Assets (AR, inventory, prepaid…)
+              //   1500 ≤ code < 1800 → Fixed Assets (PP&E + accumulated dep.)
+              //   code ≥ 1800     → Other Assets
+              const codeNum = (a: any) => Number(a.code)
+              type BsGroup = { key: string; label: string; filter: (a: any) => boolean; totalLabel: string }
+              const ASSET_GROUPS: BsGroup[] = [
+                { key: 'bank',    label: 'Cash & Bank',    filter: (a) => a.category === 'Bank' || codeNum(a) < 1030,                        totalLabel: 'Total Cash & Bank' },
+                { key: 'current', label: 'Current Assets', filter: (a) => a.category !== 'Bank' && codeNum(a) >= 1030 && codeNum(a) < 1500,  totalLabel: 'Total Current Assets' },
+                { key: 'fixed',   label: 'Fixed Assets',   filter: (a) => a.category !== 'Bank' && codeNum(a) >= 1500 && codeNum(a) < 1800,  totalLabel: 'Total Fixed Assets' },
+                { key: 'other',   label: 'Other Assets',   filter: (a) => a.category !== 'Bank' && codeNum(a) >= 1800,                       totalLabel: 'Total Other Assets' },
+              ]
+              const ungroupedAssets = reportData.assets.filter((a: any) =>
+                !ASSET_GROUPS.some(g => g.filter(a))
+              )
+              // ── Group liabilities by category ────────────────────────────────
+              // Detect AP accounts by name (case-insensitive) rather than code range
+              const isApAccount = (a: any) =>
+                /accounts?\s*payable/i.test(a.name) || (a.category === 'current_liability' && Number(a.code) < 2200)
+              const apAccts   = reportData.liabilities.filter(isApAccount)
+              const otherLiab = reportData.liabilities.filter((a: any) => !isApAccount(a))
+              const totalAP   = apAccts.reduce((s: number, a: any) => s + a.balance, 0)
+              // Income summary for bottom panel
+              const incomeRevenue  = reportData.incomeRevenue  ?? 0
+              const incomeExpenses = reportData.incomeExpenses ?? 0
+              const netIncome      = reportData.netIncome       ?? 0
+
+              function BsAcctRow({ a }: { a: any }) {
+                return (
+                  <div key={a.id}>
+                    <div
+                      className="flex justify-between py-1 text-sm border-b border-hborder/20 cursor-pointer hover:bg-hbg/50 -mx-1 px-1 rounded"
+                      onClick={() => toggleAcctDrilldown(a.id, undefined, reportTo)}
+                    >
+                      <span className="flex items-center gap-1 text-htext">
+                        <span className="text-hmuted text-[10px]">{expandedReportAccts.has(a.id) ? '▾' : '▸'}</span>
+                        <span className="font-mono text-[11px] text-navy">{a.code}</span>
+                        <span className="text-hmuted">·</span>
+                        <span>{a.name}</span>
+                      </span>
+                      <span className={cn('font-medium tabular-nums', a.balance < 0 ? 'text-red-500' : '')}>
+                        {a.balance < 0 ? `(${formatCurrency(Math.abs(a.balance))})` : formatCurrency(a.balance)}
                       </span>
                     </div>
-                  )
-                })()}
-              </div>
-            )}
+                    {expandedReportAccts.has(a.id) && <AcctDrilldown accountId={a.id} />}
+                  </div>
+                )
+              }
+
+              return (
+                <div className="grid grid-cols-2 gap-4">
+
+                  {/* ── LEFT: ASSETS ── */}
+                  <div className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
+                    <div className="px-5 py-3 border-b border-hborder flex items-center gap-2">
+                      <svg className="w-4 h-4 text-[#1A7A4A]" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>
+                      <p className="font-bold text-[#1A7A4A] text-sm uppercase tracking-wide">Assets</p>
+                    </div>
+                    <div className="p-4 space-y-4">
+
+                      {ASSET_GROUPS.map(g => {
+                        const accts = reportData.assets.filter((a: any) => g.filter(a))
+                        if (accts.length === 0) return null
+                        const subtotal = accts.reduce((s: number, a: any) => s + a.balance, 0)
+                        return (
+                          <div key={g.key}>
+                            <p className="text-[10px] font-semibold tracking-widest text-hmuted uppercase mb-1.5">{g.label}</p>
+                            <div className="space-y-0.5">
+                              {accts.map((a: any) => <BsAcctRow key={a.id} a={a} />)}
+                            </div>
+                            <div className="flex justify-between pt-2 mt-1 border-t border-hborder font-semibold text-sm text-[#1A7A4A]">
+                              <span>{g.totalLabel}</span>
+                              <span className="tabular-nums">{formatCurrency(subtotal)}</span>
+                            </div>
+                          </div>
+                        )
+                      })}
+
+                      {/* Ungrouped assets fallback */}
+                      {ungroupedAssets.length > 0 && (
+                        <div>
+                          <p className="text-[10px] font-semibold tracking-widest text-hmuted uppercase mb-1.5">Other Assets</p>
+                          <div className="space-y-0.5">
+                            {ungroupedAssets.map((a: any) => <BsAcctRow key={a.id} a={a} />)}
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="flex justify-between pt-2 font-bold text-dark-navy border-t-2 border-dark-navy text-[15px]">
+                        <span>Total Assets</span>
+                        <span className="tabular-nums">{formatCurrency(reportData.totalAssets)}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* ── RIGHT: Liabilities + Equity ── */}
+                  <div className="space-y-4">
+
+                    {/* Liabilities */}
+                    <div className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
+                      <div className="px-5 py-3 border-b border-hborder flex items-center gap-2">
+                        <svg className="w-4 h-4 text-[#B83232]" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 17h8m0 0V9m0 8l-8-8-4 4-6-6" /></svg>
+                        <p className="font-bold text-[#B83232] text-sm uppercase tracking-wide">Liabilities</p>
+                      </div>
+                      <div className="p-4 space-y-4">
+
+                        {/* Accounts Payable */}
+                        {apAccts.length > 0 && (
+                          <div>
+                            <p className="text-[10px] font-semibold tracking-widest text-hmuted uppercase mb-1.5">Accounts Payable</p>
+                            <div className="space-y-0.5">
+                              {apAccts.map((a: any) => <BsAcctRow key={a.id} a={a} />)}
+                            </div>
+                            <div className="flex justify-between pt-2 mt-1 border-t border-hborder font-semibold text-sm text-[#B83232]">
+                              <span>Total Payables</span>
+                              <span className="tabular-nums">{formatCurrency(totalAP)}</span>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Other Current Liabilities */}
+                        {otherLiab.length > 0 && (
+                          <div>
+                            <p className="text-[10px] font-semibold tracking-widest text-hmuted uppercase mb-1.5">Other Current Liabilities</p>
+                            <div className="space-y-0.5">
+                              {otherLiab.map((a: any) => <BsAcctRow key={a.id} a={a} />)}
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="flex justify-between pt-2 font-bold text-dark-navy border-t-2 border-dark-navy text-[15px]">
+                          <span>Total Liabilities</span>
+                          <span className="tabular-nums">{formatCurrency(reportData.totalLiab)}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Equity */}
+                    <div className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
+                      <div className="px-5 py-3 border-b border-hborder flex items-center gap-2">
+                        <svg className="w-4 h-4 text-[#7C3AED]" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-2.21 0-4 1.343-4 3s1.79 3 4 3 4 1.343 4 3-1.79 3-4 3m0-18v2m0 16v2" /></svg>
+                        <p className="font-bold text-[#7C3AED] text-sm uppercase tracking-wide">Equity</p>
+                      </div>
+                      <div className="p-4 space-y-4">
+                        {reportData.equity.length > 0 && (
+                          <div>
+                            <p className="text-[10px] font-semibold tracking-widest text-hmuted uppercase mb-1.5">Share Capital</p>
+                            <div className="space-y-0.5">
+                              {reportData.equity.map((a: any) => <BsAcctRow key={a.id} a={a} />)}
+                            </div>
+                            <div className="flex justify-between pt-2 mt-1 border-t border-hborder font-semibold text-sm text-[#7C3AED]">
+                              <span>Total Share Capital</span>
+                              <span className="tabular-nums">{formatCurrency(reportData.equity.reduce((s: number, a: any) => s + a.balance, 0))}</span>
+                            </div>
+                          </div>
+                        )}
+                        <div className="flex justify-between py-1.5 text-sm border-b border-hborder/30">
+                          <span className="text-htext font-medium italic">Net Income (Current Period)</span>
+                          <span className={cn('font-semibold tabular-nums', reportData.netIncome < 0 ? 'text-red-500' : 'text-[#1A7A4A]')}>
+                            {reportData.netIncome < 0 ? `(${formatCurrency(Math.abs(reportData.netIncome))})` : formatCurrency(reportData.netIncome)}
+                          </span>
+                        </div>
+                        <div className="flex justify-between pt-2 font-bold text-dark-navy border-t-2 border-dark-navy text-[15px]">
+                          <span>Total Equity</span>
+                          <span className="tabular-nums">{formatCurrency(reportData.totalEquity)}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Liabilities + Equity check */}
+                    {(() => {
+                      const lhs = Number(reportData.totalAssets)
+                      const rhs = Number(reportData.totalLiab) + Number(reportData.totalEquity)
+                      const balanced = Math.abs(lhs - rhs) < 0.01
+                      return (
+                        <div className={cn('rounded-2xl border px-5 py-3.5 flex items-center justify-between', balanced ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-300')}>
+                          <span className={cn('font-bold text-sm', balanced ? 'text-green-800' : 'text-red-800')}>Liabilities + Equity</span>
+                          <div className="flex items-center gap-3">
+                            <span className="font-bold tabular-nums text-[15px] text-dark-navy">{formatCurrency(rhs)}</span>
+                            <span className={cn('text-[11px] font-semibold px-2 py-0.5 rounded-full', balanced ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700')}>
+                              {balanced ? '✓ Balanced' : `Off by ${formatCurrency(Math.abs(lhs - rhs))}`}
+                            </span>
+                          </div>
+                        </div>
+                      )
+                    })()}
+
+                    {/* Income Summary */}
+                    <div className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
+                      <div className="px-5 py-3 border-b border-hborder">
+                        <p className="font-bold text-dark-navy text-sm">Income Summary</p>
+                      </div>
+                      <div className="p-4 space-y-2 text-sm">
+                        <div className="flex justify-between">
+                          <span className="text-hmuted">Revenue</span>
+                          <span className="font-semibold text-[#1A7A4A] tabular-nums">{formatCurrency(incomeRevenue)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-hmuted">Expenses</span>
+                          <span className="font-semibold text-[#B83232] tabular-nums">
+                            {incomeExpenses > 0 ? `(${formatCurrency(incomeExpenses)})` : formatCurrency(incomeExpenses)}
+                          </span>
+                        </div>
+                        <div className="flex justify-between pt-2 border-t border-hborder font-bold">
+                          <span className="text-dark-navy">Net Income</span>
+                          <span className={cn('tabular-nums', netIncome < 0 ? 'text-red-600' : 'text-[#1A7A4A]')}>
+                            {netIncome < 0 ? `(${formatCurrency(Math.abs(netIncome))})` : formatCurrency(netIncome)}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                </div>
+              )
+            })()}
 
             {!reportData && !reportLoading && (
               <p className="text-center text-hmuted py-16">Select a report type and date range, then click Generate.</p>
