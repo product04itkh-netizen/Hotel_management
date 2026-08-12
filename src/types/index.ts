@@ -17,6 +17,14 @@ export interface Vendor {
 
 export type BillStatus = 'unpaid' | 'partial' | 'paid' | 'void'
 
+export interface BillLineItem {
+  account_id: string
+  account_code?: string
+  account_name?: string
+  description?: string
+  amount: number
+}
+
 export interface Bill {
   id: string
   bill_number: string
@@ -26,6 +34,7 @@ export interface Bill {
   due_date?: string
   expense_account_id?: string
   expense_account?: ChartOfAccount
+  line_items?: BillLineItem[]
   description: string
   subtotal: number
   tax_amount: number

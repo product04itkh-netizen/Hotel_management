@@ -181,8 +181,8 @@ export default function AccountingPage() {
   const [billSaving, setBillSaving] = useState(false)
   const [billForm, setBillForm] = useState({
     vendor_id: '', bill_date: todayStr(), due_date: '',
-    description: '', subtotal: '', tax_amount: '0',
-    expense_account_id: '', notes: '',
+    description: '', tax_amount: '0', notes: '',
+    lines: [{ expense_account_id: '', amount: '' }] as { expense_account_id: string; amount: string }[],
   })
   const [billPayForm, setBillPayForm] = useState({
     payment_date: todayStr(), amount: '', account_code: '1010', reference: '', notes: '',
@@ -822,37 +822,55 @@ export default function AccountingPage() {
 
   // ── Bills ──────────────────────────────────────────────────────
 
+  function addBillLine() {
+    setBillForm(f => ({ ...f, lines: [...f.lines, { expense_account_id: '', amount: '' }] }))
+  }
+  function removeBillLine(idx: number) {
+    setBillForm(f => ({ ...f, lines: f.lines.length > 1 ? f.lines.filter((_, i) => i !== idx) : f.lines }))
+  }
+  function updateBillLine(idx: number, field: 'expense_account_id' | 'amount', value: string) {
+    setBillForm(f => ({ ...f, lines: f.lines.map((l, i) => i === idx ? { ...l, [field]: value } : l) }))
+  }
+
   async function saveBill() {
-    if (!billForm.description || Number(billForm.subtotal) <= 0) {
-      toast('Description and amount required', 'error'); return
-    }
-    if (!billForm.expense_account_id) {
-      toast('Expense account is required', 'error'); return
-    }
+    const validLines = billForm.lines.filter(l => l.expense_account_id && Number(l.amount) > 0)
+    if (!billForm.description) { toast('Description is required', 'error'); return }
+    if (validLines.length === 0) { toast('Add at least one expense line with an account and amount', 'error'); return }
+    // Guard against a half-filled line (account picked but no amount, or vice versa).
+    const halfFilled = billForm.lines.some(l => (l.expense_account_id && !(Number(l.amount) > 0)) || (!l.expense_account_id && Number(l.amount) > 0))
+    if (halfFilled) { toast('Every expense line needs both an account and an amount', 'error'); return }
+
     setBillSaving(true)
-    const subtotal = Number(billForm.subtotal)
+    const subtotal = validLines.reduce((s, l) => s + Number(l.amount), 0)
     const taxAmt   = Number(billForm.tax_amount || 0)
     const total    = subtotal + taxAmt
 
+    const apAcct = accounts.find(a => a.code === '2100')
+    if (!apAcct) { toast('Missing GL account 2100 Accounts Payable — add it first', 'error'); setBillSaving(false); return }
+
+    const lineItems = validLines.map(l => {
+      const acc = accounts.find(a => a.id === l.expense_account_id)
+      return { account_id: l.expense_account_id, account_code: acc?.code, account_name: acc?.name, description: billForm.description, amount: Number(l.amount) }
+    })
+
+    // Auto journal: one DR per expense line, tax folded onto the first line's
+    // account (matches the prior single-line behaviour where tax was part of the
+    // expense debit), balanced against a single CR to Accounts Payable.
     let jeId: string | null = null
-    const apAcct  = accounts.find(a => a.code === '2100')
-    const expAcct = billForm.expense_account_id ? accounts.find(a => a.id === billForm.expense_account_id) : null
-    if (apAcct && expAcct) {
-      const { data: je } = await supabase.from('journal_entries').insert({
-        entry_number: generateJournalEntryNumber(), entry_date: billForm.bill_date,
-        reference_type: 'bill', description: `Bill — ${billForm.description}`,
-        branch_id: activeBranch?.id ?? null,
-      }).select().single()
-      if (je) {
-        jeId = je.id
-        const { error: lineErr } = await supabase.from('journal_entry_lines').insert([
-          { entry_id: je.id, account_id: expAcct.id, description: billForm.description, debit: total, credit: 0 },
-          { entry_id: je.id, account_id: apAcct.id,  description: billForm.description, debit: 0, credit: total },
-        ])
-        if (lineErr) {
-          await supabase.from('journal_entries').delete().eq('id', je.id)
-          toast('Failed to save journal lines', 'error'); setBillSaving(false); return
-        }
+    const { data: je } = await supabase.from('journal_entries').insert({
+      entry_number: generateJournalEntryNumber(), entry_date: billForm.bill_date,
+      reference_type: 'bill', description: `Bill — ${billForm.description}`,
+      branch_id: activeBranch?.id ?? null,
+    }).select().single()
+    if (je) {
+      jeId = je.id
+      const jeLines = validLines.map(l => ({ entry_id: je.id, account_id: l.expense_account_id, description: billForm.description, debit: Number(l.amount), credit: 0 }))
+      if (taxAmt > 0) jeLines.push({ entry_id: je.id, account_id: validLines[0].expense_account_id, description: `${billForm.description} — Tax/VAT`, debit: taxAmt, credit: 0 })
+      jeLines.push({ entry_id: je.id, account_id: apAcct.id, description: billForm.description, debit: 0, credit: total })
+      const { error: lineErr } = await supabase.from('journal_entry_lines').insert(jeLines)
+      if (lineErr) {
+        await supabase.from('journal_entries').delete().eq('id', je.id)
+        toast('Failed to save journal lines', 'error'); setBillSaving(false); return
       }
     }
 
@@ -861,7 +879,8 @@ export default function AccountingPage() {
       vendor_id: billForm.vendor_id || null,
       bill_date: billForm.bill_date,
       due_date: billForm.due_date || null,
-      expense_account_id: billForm.expense_account_id || null,
+      expense_account_id: validLines[0].expense_account_id, // primary account (first line) for list display
+      line_items: lineItems,
       description: billForm.description,
       subtotal, tax_amount: taxAmt, total,
       amount_paid: 0, status: 'unpaid',
@@ -869,13 +888,13 @@ export default function AccountingPage() {
       journal_entry_id: jeId,
       branch_id: activeBranch?.id ?? null,
     })
-    if (error) { 
+    if (error) {
       if (jeId) await supabase.from('journal_entries').delete().eq('id', jeId)
-      toast(error.message, 'error'); setBillSaving(false); return 
+      toast(error.message, 'error'); setBillSaving(false); return
     }
     toast('Bill recorded')
     setBillSaving(false); setBillFormOpen(false)
-    setBillForm({ vendor_id: '', bill_date: todayStr(), due_date: '', description: '', subtotal: '', tax_amount: '0', expense_account_id: '', notes: '' })
+    setBillForm({ vendor_id: '', bill_date: todayStr(), due_date: '', description: '', tax_amount: '0', notes: '', lines: [{ expense_account_id: '', amount: '' }] })
     loadBills(); loadEntries()
   }
 
@@ -1772,7 +1791,9 @@ export default function AccountingPage() {
                           <td className="px-3 py-2 font-mono text-xs text-hmuted whitespace-nowrap truncate">{b.bill_number}</td>
                           <td className="px-3 py-2 text-htext truncate" title={vendor?.name ?? undefined}>{vendor?.name ?? '—'}</td>
                           <td className="px-3 py-2 text-htext truncate" title={b.description ?? undefined}>{b.description}</td>
-                          <td className="px-3 py-2 text-xs text-hmuted font-mono whitespace-nowrap truncate">{expAcct ? `${expAcct.code}` : '—'}</td>
+                          <td className="px-3 py-2 text-xs text-hmuted font-mono whitespace-nowrap truncate" title={(b as any).line_items?.length > 1 ? (b as any).line_items.map((li: any) => `${li.account_code} ${formatCurrency(li.amount)}`).join(', ') : undefined}>
+                            {(b as any).line_items?.length > 1 ? `Split (${(b as any).line_items.length})` : (expAcct ? expAcct.code : '—')}
+                          </td>
                           <td className="px-3 py-2 text-xs text-hmuted whitespace-nowrap">{formatDate(b.bill_date)}</td>
                           <td className="px-3 py-2 text-xs text-hmuted whitespace-nowrap">{b.due_date ? formatDate(b.due_date) : '—'}</td>
                           <td className="px-3 py-2 font-medium text-right whitespace-nowrap">{formatCurrency(b.total)}</td>
@@ -3103,13 +3124,6 @@ export default function AccountingPage() {
               {vendors.filter(v => v.is_active).map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
             </select>
           </div>
-          <div>
-            <label className="block text-xs text-hmuted mb-1">Expense Account *</label>
-            <select value={billForm.expense_account_id} onChange={e => setBillForm(f => ({ ...f, expense_account_id: e.target.value }))} className={input}>
-              <option value="">Select account…</option>
-              {expenseAccounts.map(a => <option key={a.id} value={a.id}>{a.code} — {a.name}</option>)}
-            </select>
-          </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs text-hmuted mb-1">Bill Date</label>
@@ -3124,31 +3138,64 @@ export default function AccountingPage() {
             <label className="block text-xs text-hmuted mb-1">Description *</label>
             <input value={billForm.description} onChange={e => setBillForm(f => ({ ...f, description: e.target.value }))} placeholder="e.g. Electricity bill June 2026, ABA bank fee…" className={input} />
           </div>
+          {/* Expense lines — a bill can split across multiple expense accounts */}
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-xs text-hmuted">Expense Accounts *</label>
+              <button type="button" onClick={addBillLine} className="text-[11px] font-medium text-navy border border-blue-200 bg-blue-50 hover:bg-blue-100 px-2 py-1 rounded transition-colors">+ Add line</button>
+            </div>
+            <div className="space-y-2">
+              {billForm.lines.map((ln, idx) => (
+                <div key={idx} className="flex items-center gap-2">
+                  <select value={ln.expense_account_id} onChange={e => updateBillLine(idx, 'expense_account_id', e.target.value)} className={cn(input, 'flex-1')}>
+                    <option value="">Select account…</option>
+                    {expenseAccounts.map(a => <option key={a.id} value={a.id}>{a.code} — {a.name}</option>)}
+                  </select>
+                  <input type="number" min={0} step={0.01} value={ln.amount} onChange={e => updateBillLine(idx, 'amount', e.target.value)} placeholder="0.00" className={cn(input, 'w-28')} />
+                  <button
+                    type="button"
+                    onClick={() => removeBillLine(idx)}
+                    disabled={billForm.lines.length === 1}
+                    className="flex-none w-8 h-8 rounded-lg text-red-500 hover:bg-red-50 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+                    title="Remove line"
+                  >×</button>
+                </div>
+              ))}
+            </div>
+          </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs text-hmuted mb-1">Subtotal ($) *</label>
-              <input type="number" min={0} step={0.01} value={billForm.subtotal} onChange={e => setBillForm(f => ({ ...f, subtotal: e.target.value }))} placeholder="0.00" className={input} />
+              <label className="block text-xs text-hmuted mb-1">Subtotal ($)</label>
+              <div className={cn(input, 'bg-hsurface2 flex items-center')}>{formatCurrency(billForm.lines.reduce((s, l) => s + (Number(l.amount) || 0), 0))}</div>
             </div>
             <div>
               <label className="block text-xs text-hmuted mb-1">Tax / VAT ($)</label>
               <input type="number" min={0} step={0.01} value={billForm.tax_amount} onChange={e => setBillForm(f => ({ ...f, tax_amount: e.target.value }))} placeholder="0.00" className={input} />
             </div>
           </div>
-          {Number(billForm.subtotal) > 0 && (
-            <div className="bg-hsurface2 rounded-xl px-4 py-2.5 flex items-center justify-between text-sm">
-              <span className="text-hmuted">Total</span>
-              <span className="font-bold text-dark-navy">{formatCurrency(Number(billForm.subtotal) + Number(billForm.tax_amount || 0))}</span>
-            </div>
-          )}
+          {(() => {
+            const subtotal = billForm.lines.reduce((s, l) => s + (Number(l.amount) || 0), 0)
+            return subtotal > 0 ? (
+              <div className="bg-hsurface2 rounded-xl px-4 py-2.5 flex items-center justify-between text-sm">
+                <span className="text-hmuted">Total</span>
+                <span className="font-bold text-dark-navy">{formatCurrency(subtotal + Number(billForm.tax_amount || 0))}</span>
+              </div>
+            ) : null
+          })()}
           <div>
             <label className="block text-xs text-hmuted mb-1">Notes</label>
             <input value={billForm.notes} onChange={e => setBillForm(f => ({ ...f, notes: e.target.value }))} placeholder="Optional" className={input} />
           </div>
-          {billForm.expense_account_id && accounts.find(a => a.id === billForm.expense_account_id) && (
-            <p className="text-[10px] text-hmuted bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">
-              Auto journal: DR {accounts.find(a => a.id === billForm.expense_account_id)?.code} {accounts.find(a => a.id === billForm.expense_account_id)?.name} / CR 2100 Accounts Payable
-            </p>
-          )}
+          {(() => {
+            const valid = billForm.lines.filter(l => l.expense_account_id && Number(l.amount) > 0)
+            if (valid.length === 0) return null
+            const drs = valid.map(l => accounts.find(a => a.id === l.expense_account_id)?.code).filter(Boolean).join(', ')
+            return (
+              <p className="text-[10px] text-hmuted bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">
+                Auto journal: DR {drs}{Number(billForm.tax_amount) > 0 ? ' (+ tax on first line)' : ''} / CR 2100 Accounts Payable
+              </p>
+            )
+          })()}
           <div className="flex justify-end gap-3 pt-1">
             <Button variant="ghost" onClick={() => setBillFormOpen(false)}>Cancel</Button>
             <Button onClick={saveBill} disabled={billSaving}>{billSaving ? 'Saving…' : 'Record Bill'}</Button>
