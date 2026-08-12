@@ -98,7 +98,7 @@ const emptyJeLine = () => ({ account_id: '', description: '', debit: '' as numbe
 // ── Page ───────────────────────────────────────────────────────
 export default function AccountingPage() {
   const supabase = createClient()
-  const { activeBranch } = useBranch()
+  const { activeBranch, hotelSettings } = useBranch()
   const [tab, setTab] = useState<Tab>('overview')
 
   const [confirmDialog, setConfirmDialog] = useState<{ title: string; message?: string; confirmLabel?: string; variant?: 'default' | 'danger'; onConfirm: () => void } | null>(null)
@@ -178,6 +178,7 @@ export default function AccountingPage() {
   const [billFormOpen, setBillFormOpen] = useState(false)
   const [billPayOpen, setBillPayOpen] = useState(false)
   const [selectedBill, setSelectedBill] = useState<Bill | null>(null)
+  const [receiptBill, setReceiptBill] = useState<Bill | null>(null)
   const [billSaving, setBillSaving] = useState(false)
   const [billForm, setBillForm] = useState({
     vendor_id: '', bill_date: todayStr(), due_date: '',
@@ -394,7 +395,7 @@ export default function AccountingPage() {
   async function loadBills() {
     if (!activeBranch) return
     const { data } = await supabase.from('bills')
-      .select('*, vendor:vendors(name, payment_terms), expense_account:chart_of_accounts(code, name)')
+      .select('*, vendor:vendors(name, contact_name, phone, email, address, payment_terms), expense_account:chart_of_accounts(code, name)')
       .eq('branch_id', activeBranch.id)
       .order('bill_date', { ascending: false })
     setBills((data ?? []) as Bill[])
@@ -1808,12 +1809,20 @@ export default function AccountingPage() {
                             )}>{b.status}</span>
                           </td>
                           <td className="px-3 py-2">
-                            {b.status !== 'paid' && b.status !== 'void' && (
-                              <button
-                                onClick={() => { setSelectedBill(b); setBillPayForm(f => ({ ...f, amount: String(balance) })); setBillPayOpen(true) }}
-                                className="text-xs text-navy hover:underline font-medium"
-                              >Pay</button>
-                            )}
+                            <div className="flex items-center gap-2">
+                              {b.status !== 'paid' && b.status !== 'void' && (
+                                <button
+                                  onClick={() => { setSelectedBill(b); setBillPayForm(f => ({ ...f, amount: String(balance) })); setBillPayOpen(true) }}
+                                  className="text-xs text-navy hover:underline font-medium"
+                                >Pay</button>
+                              )}
+                              {b.status !== 'void' && (
+                                <button
+                                  onClick={() => setReceiptBill(b)}
+                                  className="text-xs text-hmuted hover:text-navy hover:underline font-medium"
+                                >Receipt</button>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       )
@@ -3210,6 +3219,146 @@ export default function AccountingPage() {
           </div>
         </div>
       </Modal>
+
+      {/* ── Bill Receipt (printable) ── */}
+      {receiptBill && (() => {
+        const b: any = receiptBill
+        const vendor = b.vendor
+        const balance = Number(b.total) - Number(b.amount_paid)
+        const lineItems: any[] = Array.isArray(b.line_items) && b.line_items.length > 0
+          ? b.line_items
+          : [{ account_code: b.expense_account?.code, account_name: b.expense_account?.name, description: b.description, amount: Number(b.subtotal) }]
+        const hotelName = hotelSettings?.hotel_name ?? 'OnlyOne Homestay'
+        const hotelPhone = hotelSettings?.hotel_phone ?? ''
+        const hotelAddress = hotelSettings?.hotel_address ?? ''
+        const statusStyle = b.status === 'paid'
+          ? { bg: '#e7f5ee', fg: '#1a7a4a', label: 'PAID' }
+          : b.status === 'partial'
+            ? { bg: '#fef6e7', fg: '#b7791f', label: 'PARTIALLY PAID' }
+            : { bg: '#fdecec', fg: '#c0392b', label: 'UNPAID' }
+
+        function printBillReceipt() {
+          const content = document.getElementById('bill-receipt-printable')?.innerHTML ?? ''
+          const w = window.open('', '_blank', 'width=720,height=960')
+          if (!w) return
+          w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><base href="${window.location.origin}"><title>Bill ${b.bill_number}</title>
+          <style>
+            * { box-sizing: border-box; margin: 0; padding: 0; }
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #fff; color: #1a1a2e; padding: 40px; max-width: 680px; margin: 0 auto; }
+            table { width: 100%; border-collapse: collapse; }
+            @media print { body { padding: 0; } }
+          </style></head><body>${content}</body></html>`)
+          w.document.close()
+          w.focus()
+          setTimeout(() => w.print(), 400)
+        }
+
+        return (
+          <Modal open={true} onClose={() => setReceiptBill(null)} title="Bill Receipt" size="lg">
+            <div className="flex justify-end gap-2 mb-4 print:hidden">
+              <Button variant="ghost" onClick={() => setReceiptBill(null)}>Close</Button>
+              <Button onClick={printBillReceipt}>Print / Save PDF</Button>
+            </div>
+
+            <div id="bill-receipt-printable">
+              {/* Header */}
+              <div style={{ background: '#1a1a2e', borderRadius: '12px 12px 0 0', padding: '24px 32px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src="/logo.jpg" alt={hotelName} style={{ height: 64, width: 64, objectFit: 'contain', borderRadius: 8, background: 'white', padding: 4 }} />
+                  <div>
+                    <div style={{ color: '#c89b3c', fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 2 }}>{hotelName}{activeBranch?.location ? ` · ${activeBranch.location}` : ''}</div>
+                    {hotelPhone && <div style={{ color: '#a0aec0', fontSize: 12, marginTop: 3 }}>{hotelPhone}</div>}
+                    {hotelAddress && <div style={{ color: '#a0aec0', fontSize: 11, marginTop: 2 }}>{hotelAddress}</div>}
+                  </div>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: 3, color: '#a0aec0', fontWeight: 600 }}>Bill</div>
+                  <div style={{ fontSize: 22, fontWeight: 800, color: '#c89b3c', letterSpacing: -0.5 }}>{b.bill_number}</div>
+                  <div style={{ fontSize: 12, color: '#a0aec0', marginTop: 2 }}>{formatDate(b.bill_date)}</div>
+                </div>
+              </div>
+
+              {/* Body */}
+              <div style={{ border: '1px solid #e8edf3', borderTop: 'none', borderRadius: '0 0 12px 12px', padding: '28px 32px' }}>
+                {/* Vendor + status/dates */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
+                  <div>
+                    <p style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: 2, color: '#9ca3af', marginBottom: 6 }}>Vendor</p>
+                    <p style={{ fontSize: 16, fontWeight: 700, color: '#1a1a2e' }}>{vendor?.name ?? 'One-off / No vendor'}</p>
+                    {vendor?.contact_name && <p style={{ fontSize: 13, color: '#6b7280', marginTop: 2 }}>{vendor.contact_name}</p>}
+                    {vendor?.phone && <p style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>{vendor.phone}</p>}
+                    {vendor?.address && <p style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>{vendor.address}</p>}
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <span style={{ display: 'inline-block', fontSize: 11, fontWeight: 800, letterSpacing: 1, padding: '4px 12px', borderRadius: 999, background: statusStyle.bg, color: statusStyle.fg }}>{statusStyle.label}</span>
+                    <p style={{ fontSize: 11, color: '#9ca3af', marginTop: 10 }}>Bill Date: <span style={{ color: '#1a1a2e', fontWeight: 600 }}>{formatDate(b.bill_date)}</span></p>
+                    {b.due_date && <p style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>Due Date: <span style={{ color: '#1a1a2e', fontWeight: 600 }}>{formatDate(b.due_date)}</span></p>}
+                  </div>
+                </div>
+
+                <div style={{ marginBottom: 18 }}>
+                  <p style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: 2, color: '#9ca3af', marginBottom: 4 }}>Description</p>
+                  <p style={{ fontSize: 14, color: '#1a1a2e' }}>{b.description}</p>
+                </div>
+
+                {/* Expense lines */}
+                <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 24 }}>
+                  <thead>
+                    <tr style={{ borderBottom: '2px solid #1a1a2e' }}>
+                      {['Account', 'Memo', 'Amount'].map((h, i) => (
+                        <th key={h} style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: 1.5, color: '#6b7280', fontWeight: 600, padding: '8px 0', textAlign: i === 2 ? 'right' : 'left' }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {lineItems.map((li, i) => (
+                      <tr key={i} style={{ borderBottom: '1px solid #f0f4f8' }}>
+                        <td style={{ padding: '10px 0', fontSize: 13, color: '#374151' }}>{li.account_code ? `${li.account_code} — ${li.account_name ?? ''}` : (li.account_name ?? '—')}</td>
+                        <td style={{ padding: '10px 0', fontSize: 13, color: '#6b7280' }}>{li.description ?? ''}</td>
+                        <td style={{ padding: '10px 0', fontSize: 13, fontWeight: 600, color: '#1a1a2e', textAlign: 'right' }}>{formatCurrency(Number(li.amount))}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+
+                {/* Totals */}
+                <div style={{ marginLeft: 'auto', width: 280 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '4px 0', color: '#6b7280' }}>
+                    <span>Subtotal</span><span>{formatCurrency(Number(b.subtotal))}</span>
+                  </div>
+                  {Number(b.tax_amount) > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '4px 0', color: '#6b7280' }}>
+                      <span>Tax / VAT</span><span>{formatCurrency(Number(b.tax_amount))}</span>
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 16, fontWeight: 800, color: '#1a1a2e', borderTop: '2px solid #1a1a2e', marginTop: 8, paddingTop: 10 }}>
+                    <span>Total</span><span>{formatCurrency(Number(b.total))}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '6px 0 4px', color: '#6b7280', borderTop: '1px solid #e8edf3', marginTop: 8 }}>
+                    <span>Amount Paid</span><span style={{ color: '#1a7a4a', fontWeight: 600 }}>{formatCurrency(Number(b.amount_paid))}</span>
+                  </div>
+                  {balance > 0.001 ? (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, fontWeight: 700, color: '#c0392b', paddingTop: 4 }}>
+                      <span>Balance Due</span><span>{formatCurrency(balance)}</span>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, fontWeight: 700, color: '#1a7a4a', paddingTop: 4 }}>
+                      <span>Balance Due</span><span>Paid in Full ✓</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Footer */}
+                <div style={{ marginTop: 28, paddingTop: 20, borderTop: '1px dashed #e8edf3', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+                  <p style={{ fontSize: 11, color: '#9ca3af' }}>Recorded {formatDate(b.created_at ?? b.bill_date)}{b.notes ? ` · ${b.notes}` : ''}</p>
+                  <p style={{ fontSize: 13, color: '#6b7280', fontStyle: 'italic' }}>Accounts Payable · {hotelName}</p>
+                </div>
+              </div>
+            </div>
+          </Modal>
+        )
+      })()}
 
       {/* ── Pay Bill Modal ── */}
       <Modal open={billPayOpen} onClose={() => { setBillPayOpen(false); setSelectedBill(null) }} title="Record Bill Payment" size="sm">
