@@ -182,7 +182,7 @@ export default function AccountingPage() {
   const [billForm, setBillForm] = useState({
     vendor_id: '', bill_date: todayStr(), due_date: '',
     description: '', tax_amount: '0', notes: '',
-    lines: [{ expense_account_id: '', amount: '' }] as { expense_account_id: string; amount: string }[],
+    lines: [{ expense_account_id: '', amount: '', description: '' }] as { expense_account_id: string; amount: string; description: string }[],
   })
   const [billPayForm, setBillPayForm] = useState({
     payment_date: todayStr(), amount: '', account_code: '1010', reference: '', notes: '',
@@ -823,12 +823,12 @@ export default function AccountingPage() {
   // ── Bills ──────────────────────────────────────────────────────
 
   function addBillLine() {
-    setBillForm(f => ({ ...f, lines: [...f.lines, { expense_account_id: '', amount: '' }] }))
+    setBillForm(f => ({ ...f, lines: [...f.lines, { expense_account_id: '', amount: '', description: '' }] }))
   }
   function removeBillLine(idx: number) {
     setBillForm(f => ({ ...f, lines: f.lines.length > 1 ? f.lines.filter((_, i) => i !== idx) : f.lines }))
   }
-  function updateBillLine(idx: number, field: 'expense_account_id' | 'amount', value: string) {
+  function updateBillLine(idx: number, field: 'expense_account_id' | 'amount' | 'description', value: string) {
     setBillForm(f => ({ ...f, lines: f.lines.map((l, i) => i === idx ? { ...l, [field]: value } : l) }))
   }
 
@@ -850,7 +850,7 @@ export default function AccountingPage() {
 
     const lineItems = validLines.map(l => {
       const acc = accounts.find(a => a.id === l.expense_account_id)
-      return { account_id: l.expense_account_id, account_code: acc?.code, account_name: acc?.name, description: billForm.description, amount: Number(l.amount) }
+      return { account_id: l.expense_account_id, account_code: acc?.code, account_name: acc?.name, description: l.description?.trim() || billForm.description, amount: Number(l.amount) }
     })
 
     // Auto journal: one DR per expense line, tax folded onto the first line's
@@ -864,7 +864,7 @@ export default function AccountingPage() {
     }).select().single()
     if (je) {
       jeId = je.id
-      const jeLines = validLines.map(l => ({ entry_id: je.id, account_id: l.expense_account_id, description: billForm.description, debit: Number(l.amount), credit: 0 }))
+      const jeLines = validLines.map(l => ({ entry_id: je.id, account_id: l.expense_account_id, description: l.description?.trim() || billForm.description, debit: Number(l.amount), credit: 0 }))
       if (taxAmt > 0) jeLines.push({ entry_id: je.id, account_id: validLines[0].expense_account_id, description: `${billForm.description} — Tax/VAT`, debit: taxAmt, credit: 0 })
       jeLines.push({ entry_id: je.id, account_id: apAcct.id, description: billForm.description, debit: 0, credit: total })
       const { error: lineErr } = await supabase.from('journal_entry_lines').insert(jeLines)
@@ -894,7 +894,7 @@ export default function AccountingPage() {
     }
     toast('Bill recorded')
     setBillSaving(false); setBillFormOpen(false)
-    setBillForm({ vendor_id: '', bill_date: todayStr(), due_date: '', description: '', tax_amount: '0', notes: '', lines: [{ expense_account_id: '', amount: '' }] })
+    setBillForm({ vendor_id: '', bill_date: todayStr(), due_date: '', description: '', tax_amount: '0', notes: '', lines: [{ expense_account_id: '', amount: '', description: '' }] })
     loadBills(); loadEntries()
   }
 
@@ -3146,19 +3146,27 @@ export default function AccountingPage() {
             </div>
             <div className="space-y-2">
               {billForm.lines.map((ln, idx) => (
-                <div key={idx} className="flex items-center gap-2">
-                  <select value={ln.expense_account_id} onChange={e => updateBillLine(idx, 'expense_account_id', e.target.value)} className={cn(input, 'flex-1')}>
-                    <option value="">Select account…</option>
-                    {expenseAccounts.map(a => <option key={a.id} value={a.id}>{a.code} — {a.name}</option>)}
-                  </select>
-                  <input type="number" min={0} step={0.01} value={ln.amount} onChange={e => updateBillLine(idx, 'amount', e.target.value)} placeholder="0.00" className={cn(input, 'w-28')} />
-                  <button
-                    type="button"
-                    onClick={() => removeBillLine(idx)}
-                    disabled={billForm.lines.length === 1}
-                    className="flex-none w-8 h-8 rounded-lg text-red-500 hover:bg-red-50 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
-                    title="Remove line"
-                  >×</button>
+                <div key={idx} className="border border-hborder rounded-lg p-2 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <select value={ln.expense_account_id} onChange={e => updateBillLine(idx, 'expense_account_id', e.target.value)} className={cn(input, 'flex-1')}>
+                      <option value="">Select account…</option>
+                      {expenseAccounts.map(a => <option key={a.id} value={a.id}>{a.code} — {a.name}</option>)}
+                    </select>
+                    <input type="number" min={0} step={0.01} value={ln.amount} onChange={e => updateBillLine(idx, 'amount', e.target.value)} placeholder="0.00" className={cn(input, 'w-28')} />
+                    <button
+                      type="button"
+                      onClick={() => removeBillLine(idx)}
+                      disabled={billForm.lines.length === 1}
+                      className="flex-none w-8 h-8 rounded-lg text-red-500 hover:bg-red-50 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+                      title="Remove line"
+                    >×</button>
+                  </div>
+                  <input
+                    value={ln.description}
+                    onChange={e => updateBillLine(idx, 'description', e.target.value)}
+                    placeholder="Memo for this line (optional) — defaults to bill description"
+                    className={cn(input, 'text-xs')}
+                  />
                 </div>
               ))}
             </div>
