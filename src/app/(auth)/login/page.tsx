@@ -29,13 +29,23 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen bg-hbg flex items-center justify-center p-4">
       <div className="w-full max-w-sm">
-        {/* Logo */}
+        {/* Logos — both brands (branch is chosen after sign-in) */}
         <div className="text-center mb-8">
-          <img
-            src="/logo.jpg"
-            alt="OnlyOne Homestay"
-            className="h-28 w-auto object-contain mx-auto mb-3 drop-shadow-sm"
-          />
+          <div className="flex items-center justify-center gap-5 mb-3">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/logo-kampot.jpg"
+              alt="OnlyOne Private Villa — Kampot"
+              className="h-24 w-auto object-contain drop-shadow-sm"
+            />
+            <span className="w-px h-16 bg-hborder" aria-hidden="true" />
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/logo-srae-ambel.jpg"
+              alt="OnlyOne Homestay — Srae Ambel"
+              className="h-24 w-auto object-contain drop-shadow-sm"
+            />
+          </div>
           <p className="text-sm text-hmuted">Management System — Sign in</p>
         </div>
 

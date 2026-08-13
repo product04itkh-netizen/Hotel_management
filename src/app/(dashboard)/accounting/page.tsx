@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { createClient } from '@/lib/supabase/client'
-import { formatCurrency, formatDate, generateJournalEntryNumber, capitalize } from '@/lib/utils'
+import { formatCurrency, formatDate, generateJournalEntryNumber, capitalize, branchLogo } from '@/lib/utils'
 import { exportXlsx } from '@/lib/excel'
 import { toast } from '@/components/ui/Toast'
 import { useBranch } from '@/context/BranchContext'
@@ -179,10 +179,12 @@ export default function AccountingPage() {
   const [billPayOpen, setBillPayOpen] = useState(false)
   const [selectedBill, setSelectedBill] = useState<Bill | null>(null)
   const [receiptBill, setReceiptBill] = useState<Bill | null>(null)
+  const [receiptPayments, setReceiptPayments] = useState<{ payment_date: string; amount: number; payment_method: string; notes?: string }[]>([])
   const [billSaving, setBillSaving] = useState(false)
   const [billForm, setBillForm] = useState({
     vendor_id: '', bill_date: todayStr(), due_date: '',
     description: '', tax_amount: '0', notes: '',
+    paid_from: '', // '' = record as unpaid (CR Accounts Payable); a code = pay immediately from that account
     lines: [{ expense_account_id: '', amount: '', description: '' }] as { expense_account_id: string; amount: string; description: string }[],
   })
   const [billPayForm, setBillPayForm] = useState({
@@ -849,25 +851,36 @@ export default function AccountingPage() {
     const apAcct = accounts.find(a => a.code === '2100')
     if (!apAcct) { toast('Missing GL account 2100 Accounts Payable — add it first', 'error'); setBillSaving(false); return }
 
+    // Pay From: empty = record as an unpaid payable (credit AP, settle later via
+    // Record Bill Payment). A chosen cash/bank/2400 account = pay immediately, so
+    // the single recording JE credits that account directly (DR expense / CR cash)
+    // — no separate payment JE, no double entry — and the bill is marked paid.
+    const payNow = billForm.paid_from !== ''
+    const creditAcct = payNow ? accounts.find(a => a.code === billForm.paid_from) : apAcct
+    if (payNow && !creditAcct) { toast(`Missing GL account ${billForm.paid_from} — add it first`, 'error'); setBillSaving(false); return }
+
     const lineItems = validLines.map(l => {
       const acc = accounts.find(a => a.id === l.expense_account_id)
       return { account_id: l.expense_account_id, account_code: acc?.code, account_name: acc?.name, description: l.description?.trim() || billForm.description, amount: Number(l.amount) }
     })
 
+    const billNumber = await generateBillNumber()
+
     // Auto journal: one DR per expense line, tax folded onto the first line's
     // account (matches the prior single-line behaviour where tax was part of the
-    // expense debit), balanced against a single CR to Accounts Payable.
+    // expense debit), balanced against a single CR to the settlement account
+    // (Accounts Payable when unpaid, or the pay-from account when paying now).
     let jeId: string | null = null
     const { data: je } = await supabase.from('journal_entries').insert({
       entry_number: generateJournalEntryNumber(), entry_date: billForm.bill_date,
-      reference_type: 'bill', description: `Bill — ${billForm.description}`,
+      reference: billNumber, reference_type: 'bill', description: `Bill — ${billForm.description}`,
       branch_id: activeBranch?.id ?? null,
     }).select().single()
     if (je) {
       jeId = je.id
       const jeLines = validLines.map(l => ({ entry_id: je.id, account_id: l.expense_account_id, description: l.description?.trim() || billForm.description, debit: Number(l.amount), credit: 0 }))
       if (taxAmt > 0) jeLines.push({ entry_id: je.id, account_id: validLines[0].expense_account_id, description: `${billForm.description} — Tax/VAT`, debit: taxAmt, credit: 0 })
-      jeLines.push({ entry_id: je.id, account_id: apAcct.id, description: billForm.description, debit: 0, credit: total })
+      jeLines.push({ entry_id: je.id, account_id: creditAcct!.id, description: billForm.description, debit: 0, credit: total })
       const { error: lineErr } = await supabase.from('journal_entry_lines').insert(jeLines)
       if (lineErr) {
         await supabase.from('journal_entries').delete().eq('id', je.id)
@@ -875,8 +888,8 @@ export default function AccountingPage() {
       }
     }
 
-    const { error } = await supabase.from('bills').insert({
-      bill_number: await generateBillNumber(),
+    const { data: newBill, error } = await supabase.from('bills').insert({
+      bill_number: billNumber,
       vendor_id: billForm.vendor_id || null,
       bill_date: billForm.bill_date,
       due_date: billForm.due_date || null,
@@ -884,27 +897,66 @@ export default function AccountingPage() {
       line_items: lineItems,
       description: billForm.description,
       subtotal, tax_amount: taxAmt, total,
-      amount_paid: 0, status: 'unpaid',
+      amount_paid: payNow ? total : 0,
+      status: payNow ? 'paid' : 'unpaid',
       notes: billForm.notes || null,
       journal_entry_id: jeId,
       branch_id: activeBranch?.id ?? null,
-    })
+    }).select().single()
     if (error) {
       if (jeId) await supabase.from('journal_entries').delete().eq('id', jeId)
       toast(error.message, 'error'); setBillSaving(false); return
     }
-    toast('Bill recorded')
+
+    // Paid-immediately: log the payment against the bill so it shows on the
+    // receipt and payment history. The GL side is already in the recording JE
+    // above (no second JE), so link this payment row to that same entry.
+    if (payNow && newBill) {
+      await supabase.from('bill_payments').insert({
+        bill_id: newBill.id, payment_date: billForm.bill_date,
+        amount: total, payment_method: `${creditAcct!.code} ${creditAcct!.name.trim()}`,
+        reference: null, notes: 'Paid at recording', journal_entry_id: jeId, branch_id: activeBranch?.id ?? null,
+      })
+    }
+
+    toast(payNow ? 'Bill recorded & paid' : 'Bill recorded')
     setBillSaving(false); setBillFormOpen(false)
-    setBillForm({ vendor_id: '', bill_date: todayStr(), due_date: '', description: '', tax_amount: '0', notes: '', lines: [{ expense_account_id: '', amount: '', description: '' }] })
+    setBillForm({ vendor_id: '', bill_date: todayStr(), due_date: '', description: '', tax_amount: '0', notes: '', paid_from: '', lines: [{ expense_account_id: '', amount: '', description: '' }] })
     loadBills(); loadEntries()
+  }
+
+  async function openBillReceipt(bill: Bill) {
+    setReceiptBill(bill)
+    const { data } = await supabase.from('bill_payments')
+      .select('payment_date, amount, payment_method, notes')
+      .eq('bill_id', bill.id).order('payment_date', { ascending: true })
+    setReceiptPayments((data ?? []) as any[])
   }
 
   async function saveBillPayment() {
     if (!selectedBill || Number(billPayForm.amount) <= 0) { toast('Amount required', 'error'); return }
     setBillSaving(true)
     const payAmt  = Number(billPayForm.amount)
-    const newPaid = Number(selectedBill.amount_paid) + payAmt
-    const newStatus = newPaid >= Number(selectedBill.total) ? 'paid' : 'partial'
+
+    // Guard against double-paying / overpaying. The "Pay From Account" selector
+    // also exists on Record New Bill (pay-at-recording) — a bill paid there is
+    // already 'paid', so it must never accept another payment here. Re-read the
+    // bill's LIVE state (not the possibly-stale row the modal was opened with,
+    // e.g. paid in another tab or at recording) before posting anything.
+    const { data: fresh } = await supabase.from('bills').select('status, amount_paid, total').eq('id', selectedBill.id).single()
+    if (!fresh) { toast('Bill not found', 'error'); setBillSaving(false); return }
+    if (fresh.status === 'paid' || fresh.status === 'void') {
+      toast(`This bill is already ${fresh.status === 'void' ? 'voided' : 'fully paid'} — no further payment can be recorded.`, 'error')
+      setBillSaving(false); loadBills(); return
+    }
+    const remaining = Math.round((Number(fresh.total) - Number(fresh.amount_paid)) * 100) / 100
+    if (payAmt > remaining + 0.001) {
+      toast(`Amount ${formatCurrency(payAmt)} exceeds the remaining balance of ${formatCurrency(remaining)}.`, 'error')
+      setBillSaving(false); return
+    }
+
+    const newPaid = Math.round((Number(fresh.amount_paid) + payAmt) * 100) / 100
+    const newStatus = newPaid >= Number(fresh.total) - 0.001 ? 'paid' : 'partial'
 
     const apAcct   = accounts.find(a => a.code === '2100')
     // A bill is settled FROM a GL account the user picks — a cash/bank account,
@@ -1818,7 +1870,7 @@ export default function AccountingPage() {
                               )}
                               {b.status !== 'void' && (
                                 <button
-                                  onClick={() => setReceiptBill(b)}
+                                  onClick={() => openBillReceipt(b)}
                                   className="text-xs text-hmuted hover:text-navy hover:underline font-medium"
                                 >Receipt</button>
                               )}
@@ -3200,6 +3252,16 @@ export default function AccountingPage() {
             ) : null
           })()}
           <div>
+            <label className="block text-xs text-hmuted mb-1">Pay From Account</label>
+            <select value={billForm.paid_from} onChange={e => setBillForm(f => ({ ...f, paid_from: e.target.value }))} className={input}>
+              <option value="">Accounts Payable — record as unpaid (pay later)</option>
+              {accounts
+                .filter(a => a.is_active && (a.category === 'Bank' || a.code === '2400'))
+                .sort((a, b) => a.code.localeCompare(b.code))
+                .map(a => <option key={a.id} value={a.code}>Pay now from {a.code} — {a.name.trim()}</option>)}
+            </select>
+          </div>
+          <div>
             <label className="block text-xs text-hmuted mb-1">Notes</label>
             <input value={billForm.notes} onChange={e => setBillForm(f => ({ ...f, notes: e.target.value }))} placeholder="Optional" className={input} />
           </div>
@@ -3207,9 +3269,13 @@ export default function AccountingPage() {
             const valid = billForm.lines.filter(l => l.expense_account_id && Number(l.amount) > 0)
             if (valid.length === 0) return null
             const drs = valid.map(l => accounts.find(a => a.id === l.expense_account_id)?.code).filter(Boolean).join(', ')
+            const credit = billForm.paid_from
+              ? (() => { const a = accounts.find(x => x.code === billForm.paid_from); return a ? `${a.code} ${a.name.trim()}` : billForm.paid_from })()
+              : '2100 Accounts Payable'
             return (
               <p className="text-[10px] text-hmuted bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">
-                Auto journal: DR {drs}{Number(billForm.tax_amount) > 0 ? ' (+ tax on first line)' : ''} / CR 2100 Accounts Payable
+                Auto journal: DR {drs}{Number(billForm.tax_amount) > 0 ? ' (+ tax on first line)' : ''} / CR {credit}
+                {billForm.paid_from && <span className="block mt-0.5 text-green-700">✓ Bill will be marked paid immediately.</span>}
               </p>
             )
           })()}
@@ -3254,9 +3320,9 @@ export default function AccountingPage() {
         }
 
         return (
-          <Modal open={true} onClose={() => setReceiptBill(null)} title="Bill Receipt" size="lg">
+          <Modal open={true} onClose={() => { setReceiptBill(null); setReceiptPayments([]) }} title="Bill Receipt" size="lg">
             <div className="flex justify-end gap-2 mb-4 print:hidden">
-              <Button variant="ghost" onClick={() => setReceiptBill(null)}>Close</Button>
+              <Button variant="ghost" onClick={() => { setReceiptBill(null); setReceiptPayments([]) }}>Close</Button>
               <Button onClick={printBillReceipt}>Print / Save PDF</Button>
             </div>
 
@@ -3265,7 +3331,7 @@ export default function AccountingPage() {
               <div style={{ background: '#1a1a2e', borderRadius: '12px 12px 0 0', padding: '24px 32px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src="/logo.jpg" alt={hotelName} style={{ height: 64, width: 64, objectFit: 'contain', borderRadius: 8, background: 'white', padding: 4 }} />
+                  <img src={branchLogo(activeBranch?.location)} alt={hotelName} style={{ height: 64, width: 64, objectFit: 'contain', borderRadius: 8, background: 'white', padding: 4 }} />
                   <div>
                     <div style={{ color: '#c89b3c', fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 2 }}>{hotelName}{activeBranch?.location ? ` · ${activeBranch.location}` : ''}</div>
                     {hotelPhone && <div style={{ color: '#a0aec0', fontSize: 12, marginTop: 3 }}>{hotelPhone}</div>}
@@ -3349,6 +3415,31 @@ export default function AccountingPage() {
                   )}
                 </div>
 
+                {/* Payments — which account each payment was made from */}
+                {receiptPayments.length > 0 && (
+                  <div style={{ marginTop: 8 }}>
+                    <p style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: 2, color: '#9ca3af', marginBottom: 6 }}>Payments</p>
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr style={{ borderBottom: '1px solid #e8edf3' }}>
+                          {['Date', 'Paid From', 'Amount'].map((h, i) => (
+                            <th key={h} style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: 1, color: '#9ca3af', fontWeight: 600, padding: '6px 0', textAlign: i === 2 ? 'right' : 'left' }}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {receiptPayments.map((p, i) => (
+                          <tr key={i} style={{ borderBottom: '1px solid #f7f9fc' }}>
+                            <td style={{ padding: '8px 0', fontSize: 12, color: '#6b7280' }}>{formatDate(p.payment_date)}</td>
+                            <td style={{ padding: '8px 0', fontSize: 12, color: '#1a1a2e', fontWeight: 600 }}>{p.payment_method}{p.notes ? <span style={{ color: '#9ca3af', fontWeight: 400 }}> · {p.notes}</span> : null}</td>
+                            <td style={{ padding: '8px 0', fontSize: 12, color: '#1a7a4a', fontWeight: 600, textAlign: 'right' }}>{formatCurrency(Number(p.amount))}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
                 {/* Footer */}
                 <div style={{ marginTop: 28, paddingTop: 20, borderTop: '1px dashed #e8edf3', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
                   <p style={{ fontSize: 11, color: '#9ca3af' }}>Recorded {formatDate(b.created_at ?? b.bill_date)}{b.notes ? ` · ${b.notes}` : ''}</p>
@@ -3377,7 +3468,10 @@ export default function AccountingPage() {
               </div>
               <div>
                 <label className="block text-xs text-hmuted mb-1">Amount ($) *</label>
-                <input type="number" min={0} step={0.01} value={billPayForm.amount} onChange={e => setBillPayForm(f => ({ ...f, amount: e.target.value }))} placeholder="0.00" className={input} />
+                <input type="number" min={0} step={0.01} max={Number(selectedBill.total) - Number(selectedBill.amount_paid)} value={billPayForm.amount} onChange={e => setBillPayForm(f => ({ ...f, amount: e.target.value }))} placeholder="0.00" className={input} />
+                {Number(billPayForm.amount) > (Number(selectedBill.total) - Number(selectedBill.amount_paid)) + 0.001 && (
+                  <p className="text-[10px] text-red-600 mt-1">Exceeds balance of {formatCurrency(Number(selectedBill.total) - Number(selectedBill.amount_paid))}</p>
+                )}
               </div>
             </div>
             <div>
@@ -3408,7 +3502,7 @@ export default function AccountingPage() {
             </p>
             <div className="flex justify-end gap-3 pt-1">
               <Button variant="ghost" onClick={() => { setBillPayOpen(false); setSelectedBill(null) }}>Cancel</Button>
-              <Button onClick={saveBillPayment} disabled={billSaving}>{billSaving ? 'Saving…' : 'Record Payment'}</Button>
+              <Button onClick={saveBillPayment} disabled={billSaving || Number(billPayForm.amount) <= 0 || Number(billPayForm.amount) > (Number(selectedBill.total) - Number(selectedBill.amount_paid)) + 0.001}>{billSaving ? 'Saving…' : 'Record Payment'}</Button>
             </div>
           </div>
         )}

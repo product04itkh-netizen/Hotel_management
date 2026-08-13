@@ -2,7 +2,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
-import { cn, capitalize } from '@/lib/utils'
+import { cn, capitalize, branchLogo } from '@/lib/utils'
 import { useBranch } from '@/context/BranchContext'
 import { createClient } from '@/lib/supabase/client'
 import type { Branch } from '@/types'
@@ -182,6 +182,7 @@ function useCurrentStaff() {
 
 export function Sidebar() {
   const pathname = usePathname()
+  const { activeBranch } = useBranch()
   const [pendingHref, setPendingHref] = useState<string | null>(null)
   const currentUser = useCurrentStaff()
   const userName = currentUser?.name ?? '…'
@@ -196,8 +197,8 @@ export function Sidebar() {
       {/* Logo */}
       <div className="px-4 py-4 border-b border-white/10 flex items-center justify-center">
         <img
-          src="/logo.jpg"
-          alt="OnlyOne Homestay"
+          src={branchLogo(activeBranch?.location)}
+          alt={activeBranch?.location ?? 'OnlyOne Homestay'}
           className="h-16 w-auto object-contain rounded-xl bg-white px-2 py-1.5 shadow-sm"
         />
       </div>

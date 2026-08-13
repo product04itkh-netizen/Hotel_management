@@ -100,6 +100,15 @@ export function capitalize(str: string): string {
   return str.charAt(0).toUpperCase() + str.slice(1).replace(/_/g, ' ')
 }
 
+/** Per-branch logo, resolved from the branch location. Falls back to the
+ *  generic logo for unknown branches or pre-branch contexts (e.g. login). */
+export function branchLogo(location?: string | null): string {
+  const loc = (location ?? '').toLowerCase()
+  if (loc.includes('kampot')) return '/logo-kampot.jpg'
+  if (loc.includes('srae'))   return '/logo-srae-ambel.jpg'
+  return '/logo.jpg'
+}
+
 /** Formats a 24h "HH:MM" string (as stored in hotel_settings) as 12h e.g. "2:00 PM" */
 export function formatTime12h(time: string | null | undefined): string {
   if (!time) return '—'

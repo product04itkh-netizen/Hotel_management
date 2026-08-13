@@ -2,6 +2,7 @@
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { useBranch } from '@/context/BranchContext'
+import { branchLogo } from '@/lib/utils'
 
 interface TopBarProps {
   title: string
@@ -45,7 +46,7 @@ export function TopBar({ title, subtitle }: TopBarProps) {
           <span className="text-[10px]">📍</span>
           {branchLabel}
         </span>
-        <img src="/logo.jpg" alt="OnlyOne Homestay" className="h-7 w-auto object-contain rounded-md" />
+        <img src={branchLogo(activeBranch?.location)} alt={activeBranch?.location ?? 'OnlyOne Homestay'} className="h-7 w-auto object-contain rounded-md" />
         <button
           onClick={handleLogout}
           className="text-xs text-hmuted hover:text-htext border border-hborder px-3 py-1.5 rounded-lg hover:bg-hsurface2 transition-colors"
