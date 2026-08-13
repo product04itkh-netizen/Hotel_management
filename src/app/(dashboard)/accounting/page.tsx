@@ -2358,10 +2358,10 @@ export default function AccountingPage() {
               const codeNum = (a: any) => Number(a.code)
               type BsGroup = { key: string; label: string; filter: (a: any) => boolean; totalLabel: string }
               const ASSET_GROUPS: BsGroup[] = [
-                { key: 'bank',    label: 'Cash & Bank',    filter: (a) => a.category === 'Bank' || codeNum(a) < 1030,                        totalLabel: 'Total Cash & Bank' },
-                { key: 'current', label: 'Current Assets', filter: (a) => a.category !== 'Bank' && codeNum(a) >= 1030 && codeNum(a) < 1500,  totalLabel: 'Total Current Assets' },
-                { key: 'fixed',   label: 'Fixed Assets',   filter: (a) => a.category !== 'Bank' && codeNum(a) >= 1500 && codeNum(a) < 1800,  totalLabel: 'Total Fixed Assets' },
-                { key: 'other',   label: 'Other Assets',   filter: (a) => a.category !== 'Bank' && codeNum(a) >= 1800,                       totalLabel: 'Total Other Assets' },
+                { key: 'bank',    label: 'Cash & Bank',    filter: (a) => (a.category ?? '').toLowerCase() === 'bank' || codeNum(a) < 1030,                        totalLabel: 'Total Cash & Bank' },
+                { key: 'current', label: 'Current Assets', filter: (a) => (a.category ?? '').toLowerCase() !== 'bank' && codeNum(a) >= 1030 && codeNum(a) < 1500,  totalLabel: 'Total Current Assets' },
+                { key: 'fixed',   label: 'Fixed Assets',   filter: (a) => (a.category ?? '').toLowerCase() !== 'bank' && codeNum(a) >= 1500 && codeNum(a) < 1800,  totalLabel: 'Total Fixed Assets' },
+                { key: 'other',   label: 'Other Assets',   filter: (a) => (a.category ?? '').toLowerCase() !== 'bank' && codeNum(a) >= 1800,                       totalLabel: 'Total Other Assets' },
               ]
               const ungroupedAssets = reportData.assets.filter((a: any) =>
                 !ASSET_GROUPS.some(g => g.filter(a))
@@ -3256,7 +3256,7 @@ export default function AccountingPage() {
             <select value={billForm.paid_from} onChange={e => setBillForm(f => ({ ...f, paid_from: e.target.value }))} className={input}>
               <option value="">Accounts Payable — record as unpaid (pay later)</option>
               {accounts
-                .filter(a => a.is_active && (a.category === 'Bank' || a.code === '2400'))
+                .filter(a => a.is_active && ((a.category ?? '').toLowerCase() === 'bank' || a.code === '2400'))
                 .sort((a, b) => a.code.localeCompare(b.code))
                 .map(a => <option key={a.id} value={a.code}>Pay now from {a.code} — {a.name.trim()}</option>)}
             </select>
@@ -3482,7 +3482,7 @@ export default function AccountingPage() {
                   // cash/bank accounts (category "Bank" — Cash, Petty Cash, Bank)
                   // plus 2400 Loan From ITC. Not guest payment methods.
                   const opts = accounts
-                    .filter(a => a.is_active && (a.category === 'Bank' || a.code === '2400'))
+                    .filter(a => a.is_active && ((a.category ?? '').toLowerCase() === 'bank' || a.code === '2400'))
                     .sort((a, b) => a.code.localeCompare(b.code))
                   return opts.length > 0
                     ? opts.map(a => <option key={a.id} value={a.code}>{a.code} — {a.name.trim()}</option>)
