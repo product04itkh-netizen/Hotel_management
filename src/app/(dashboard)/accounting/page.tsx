@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { createClient } from '@/lib/supabase/client'
-import { formatCurrency, formatDate, generateJournalEntryNumber, capitalize, branchLogo } from '@/lib/utils'
+import { formatCurrency, formatDate, generateJournalEntryNumber, capitalize, branchLogo, branchBrandLabel } from '@/lib/utils'
 import { exportXlsx } from '@/lib/excel'
 import { toast } from '@/components/ui/Toast'
 import { useBranch } from '@/context/BranchContext'
@@ -3333,7 +3333,7 @@ export default function AccountingPage() {
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={branchLogo(activeBranch?.location)} alt={hotelName} style={{ height: 64, width: 64, objectFit: 'contain', borderRadius: 8, background: 'white', padding: 4 }} />
                   <div>
-                    <div style={{ color: '#c89b3c', fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 2 }}>{hotelName}{activeBranch?.location ? ` · ${activeBranch.location}` : ''}</div>
+                    <div style={{ color: '#c89b3c', fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 2 }}>{branchBrandLabel(activeBranch?.location)}</div>
                     {hotelPhone && <div style={{ color: '#a0aec0', fontSize: 12, marginTop: 3 }}>{hotelPhone}</div>}
                     {hotelAddress && <div style={{ color: '#a0aec0', fontSize: 11, marginTop: 2 }}>{hotelAddress}</div>}
                   </div>
@@ -3443,7 +3443,7 @@ export default function AccountingPage() {
                 {/* Footer */}
                 <div style={{ marginTop: 28, paddingTop: 20, borderTop: '1px dashed #e8edf3', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
                   <p style={{ fontSize: 11, color: '#9ca3af' }}>Recorded {formatDate(b.created_at ?? b.bill_date)}{b.notes ? ` · ${b.notes}` : ''}</p>
-                  <p style={{ fontSize: 13, color: '#6b7280', fontStyle: 'italic' }}>Accounts Payable · {hotelName}</p>
+                  <p style={{ fontSize: 13, color: '#6b7280', fontStyle: 'italic' }}>Accounts Payable · {branchBrandLabel(activeBranch?.location)}</p>
                 </div>
               </div>
             </div>

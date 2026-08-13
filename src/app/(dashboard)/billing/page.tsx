@@ -7,7 +7,7 @@ import { Modal } from '@/components/ui/Modal'
 import { createClient } from '@/lib/supabase/client'
 import {
   formatDate, formatCurrency,
-  generateJournalEntryNumber, calculateNights, capitalize, branchLogo,
+  generateJournalEntryNumber, calculateNights, capitalize, branchLogo, branchBrandLabel,
 } from '@/lib/utils'
 import { toast } from '@/components/ui/Toast'
 import { useBranch } from '@/context/BranchContext'
@@ -1282,7 +1282,7 @@ export default function BillingPage() {
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={branchLogo(activeBranch?.location)} alt={settings?.hotel_name ?? 'OnlyOne Homestay'} style={{ height: 64, width: 64, objectFit: 'contain', borderRadius: 8, background: 'white', padding: 4 }} />
                   <div>
-                    <div style={{ color: '#c89b3c', fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 2 }}>{activeBranch?.location ?? ''}</div>
+                    <div style={{ color: '#c89b3c', fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 2 }}>{branchBrandLabel(activeBranch?.location)}</div>
                     {hotelPhone && <div style={{ color: '#a0aec0', fontSize: 12, marginTop: 3 }}>{hotelPhone}</div>}
                     {hotelAddress && <div style={{ color: '#a0aec0', fontSize: 11, marginTop: 2 }}>{hotelAddress}</div>}
                   </div>

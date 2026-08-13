@@ -2,7 +2,7 @@
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { useBranch } from '@/context/BranchContext'
-import { branchLogo } from '@/lib/utils'
+import { branchLogo, branchBrand } from '@/lib/utils'
 
 interface TopBarProps {
   title: string
@@ -24,9 +24,9 @@ export function TopBar({ title, subtitle }: TopBarProps) {
     router.refresh()
   }
 
-  // Display label: "OnlyOne Homestay · Kampot" or fall back while loading
+  // Display label: "OnlyOne Private Villa · Kampot" or fall back while loading
   const branchLabel = activeBranch
-    ? `${activeBranch.name} · ${activeBranch.location}`
+    ? `${branchBrand(activeBranch.location)} · ${activeBranch.location}`
     : 'OnlyOne Homestay'
 
   return (

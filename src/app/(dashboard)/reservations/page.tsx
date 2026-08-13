@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { createClient } from '@/lib/supabase/client'
-import { formatDate, calculateNights, calculateNightlyTotal, generateReservationNumber, formatCurrency, capitalize, generateJournalEntryNumber, formatTime12h } from '@/lib/utils'
+import { formatDate, calculateNights, calculateNightlyTotal, generateReservationNumber, formatCurrency, capitalize, generateJournalEntryNumber, formatTime12h, branchLogo, branchBrandLabel } from '@/lib/utils'
 import { toast } from '@/components/ui/Toast'
 import { useBranch } from '@/context/BranchContext'
 import type { Reservation, House, HousePromotion, DepositReceipt, ServiceCatalogItem } from '@/types'
@@ -1694,7 +1694,7 @@ export default function ReservationsPage() {
           const content = document.getElementById('deposit-receipt-printable')?.innerHTML ?? ''
           const w = window.open('', '_blank', 'width=680,height=860')
           if (!w) return
-          w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Deposit Receipt ${receipt.receipt_number}</title>
+          w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><base href="${window.location.origin}"><title>Deposit Receipt ${receipt.receipt_number}</title>
           <style>
             *{box-sizing:border-box;margin:0;padding:0}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#fff;color:#1a1a2e;padding:40px;max-width:620px;margin:0 auto}
             .hdr{background:#1a1a2e;color:#fff;padding:22px 28px;border-radius:12px 12px 0 0;display:flex;justify-content:space-between;align-items:center}
@@ -1718,9 +1718,13 @@ export default function ReservationsPage() {
             <div id="deposit-receipt-printable">
               {/* Header */}
               <div style={{ background: '#1a1a2e', borderRadius: '12px 12px 0 0', padding: '22px 28px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div>
-                  <div style={{ color: '#c89b3c', fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 2 }}>Deposit Receipt</div>
-                  <div style={{ color: '#a0aec0', fontSize: 11, marginTop: 3 }}>{activeBranch?.location ?? ''}</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={branchLogo(activeBranch?.location)} alt={branchBrandLabel(activeBranch?.location)} style={{ height: 52, width: 52, objectFit: 'contain', borderRadius: 8, background: 'white', padding: 4 }} />
+                  <div>
+                    <div style={{ color: '#c89b3c', fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 2 }}>Deposit Receipt</div>
+                    <div style={{ color: '#a0aec0', fontSize: 11, marginTop: 3 }}>{branchBrandLabel(activeBranch?.location)}</div>
+                  </div>
                 </div>
                 <div style={{ textAlign: 'right' }}>
                   <div style={{ fontSize: 20, fontWeight: 800, color: '#c89b3c' }}>{receipt.receipt_number}</div>

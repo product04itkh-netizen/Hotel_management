@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { TopBar } from '@/components/layout/TopBar'
 import { Modal } from '@/components/ui/Modal'
 import { createClient } from '@/lib/supabase/client'
-import { formatCurrency, formatDate } from '@/lib/utils'
+import { formatCurrency, formatDate, branchBrand } from '@/lib/utils'
 import { useBranch } from '@/context/BranchContext'
 import jsPDF from 'jspdf'
 
@@ -245,7 +245,7 @@ export default function ReportsPage() {
     const contentW = pageW - marginL - marginR
     const now = new Date()
     const dateStr = now.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
-    const branchName = activeBranch?.name ?? 'Hotel'
+    const branchName = branchBrand(activeBranch?.location)
     const branchLocation = activeBranch?.location ?? ''
 
     // ── Header ──────────────────────────────────────────────

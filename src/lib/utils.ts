@@ -109,6 +109,20 @@ export function branchLogo(location?: string | null): string {
   return '/logo.jpg'
 }
 
+/** Per-branch brand name (differs from the generic hotel name):
+ *  Kampot = OnlyOne Private Villa, Srae Ambel = OnlyOne Homestay. */
+export function branchBrand(location?: string | null): string {
+  const loc = (location ?? '').toLowerCase()
+  if (loc.includes('kampot')) return 'OnlyOne Private Villa'
+  if (loc.includes('srae'))   return 'OnlyOne Homestay'
+  return 'OnlyOne Homestay'
+}
+
+/** Full branded label for receipts/headers, e.g. "OnlyOne Private Villa (Kampot)". */
+export function branchBrandLabel(location?: string | null): string {
+  return location ? `${branchBrand(location)} (${location})` : branchBrand(location)
+}
+
 /** Formats a 24h "HH:MM" string (as stored in hotel_settings) as 12h e.g. "2:00 PM" */
 export function formatTime12h(time: string | null | undefined): string {
   if (!time) return '—'

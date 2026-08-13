@@ -2,7 +2,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
-import { cn, capitalize, branchLogo } from '@/lib/utils'
+import { cn, capitalize, branchLogo, branchBrand } from '@/lib/utils'
 import { useBranch } from '@/context/BranchContext'
 import { createClient } from '@/lib/supabase/client'
 import type { Branch } from '@/types'
@@ -86,7 +86,7 @@ function BranchSwitcher() {
             {activeBranch.location}
           </p>
           <p className="text-[10px] text-white/40 mt-0.5 truncate">
-            {activeBranch.name}
+            {branchBrand(activeBranch.location)}
           </p>
         </div>
 
@@ -137,7 +137,7 @@ function BranchSwitcher() {
 
                 <div className="min-w-0">
                   <p className="text-[12.5px] font-medium leading-none">{branch.location}</p>
-                  <p className="text-[10px] text-white/35 mt-0.5">{branch.address ?? branch.name}</p>
+                  <p className="text-[10px] text-white/35 mt-0.5">{branchBrand(branch.location)}</p>
                 </div>
               </button>
             )
