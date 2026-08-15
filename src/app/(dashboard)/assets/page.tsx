@@ -311,10 +311,10 @@ export default function AssetsPage() {
         subtitle={`Asset register & depreciation — ${activeBranch?.location ?? ''}`}
       />
 
-      <div className="p-8 flex-1 section-enter">
+      <div className="p-4 sm:p-6 lg:p-8 flex-1 section-enter">
 
         {/* Tabs */}
-        <div className="flex gap-1 mb-6 bg-hsurface2 rounded-xl p-1 w-fit">
+        <div className="flex flex-wrap gap-1 mb-6 bg-hsurface2 rounded-xl p-1 w-fit">
           {([
             { key: 'overview',     label: 'Overview' },
             { key: 'register',     label: 'Asset Register' },
@@ -346,9 +346,9 @@ export default function AssetsPage() {
                 { label: 'Net Book Value',        value: formatCurrency(nbv),              sub: 'After annual dep.' },
                 { label: 'Active Assets',         value: activeCount.toString(),           sub: `${assets.length - activeCount} disposed/maintenance` },
               ].map(c => (
-                <div key={c.label} className="bg-white rounded-2xl border border-hborder p-5 shadow-sm">
+                <div key={c.label} className="bg-white rounded-2xl border border-hborder p-5 shadow-sm overflow-hidden">
                   <p className="text-xs text-hmuted mb-1">{c.label}</p>
-                  <p className="text-2xl font-bold text-dark-navy">{c.value}</p>
+                  <p className="text-xl sm:text-2xl font-bold text-dark-navy truncate" title={c.value}>{c.value}</p>
                   <p className="text-xs text-hmuted mt-1">{c.sub}</p>
                 </div>
               ))}
@@ -359,6 +359,7 @@ export default function AssetsPage() {
               <div className="px-6 py-4 border-b border-hborder">
                 <h3 className="font-semibold text-dark-navy text-[15px]">By Category</h3>
               </div>
+              <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-hborder bg-hsurface2">
@@ -405,6 +406,7 @@ export default function AssetsPage() {
                   </tr>
                 </tfoot>
               </table>
+              </div>
             </div>
           </div>
         )}
@@ -453,6 +455,7 @@ export default function AssetsPage() {
               </div>
             ) : (
               <div className="bg-white rounded-2xl border border-hborder shadow-sm overflow-hidden">
+                <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-hborder bg-hsurface2">
@@ -526,6 +529,7 @@ export default function AssetsPage() {
                     </tr>
                   </tfoot>
                 </table>
+                </div>
               </div>
             )}
           </div>
@@ -710,7 +714,7 @@ export default function AssetsPage() {
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {/* Category */}
             <div>
               <label className="block text-xs text-hmuted mb-1">Category *</label>
@@ -858,7 +862,7 @@ export default function AssetsPage() {
             </div>
 
             {/* Invoice Ref */}
-            <div className="col-span-2">
+            <div className="col-span-1 sm:col-span-2">
               <label className="block text-xs text-hmuted mb-1">Invoice / Doc Ref</label>
               <input
                 value={form.invoice_doc_ref}

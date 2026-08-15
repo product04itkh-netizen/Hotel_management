@@ -728,7 +728,7 @@ export default function ReservationsPage() {
   return (
     <>
       <TopBar title="Reservations" subtitle={`Manage bookings — ${activeBranch?.location ?? ''}`} />
-      <div className="p-8 flex-1 section-enter">
+      <div className="p-4 sm:p-6 lg:p-8 flex-1 section-enter">
 
         {/* Toolbar */}
         <div className="flex flex-wrap items-center gap-3 mb-6">
@@ -1022,6 +1022,8 @@ export default function ReservationsPage() {
                   </div>
                 </div>
 
+                <div className="overflow-x-auto">
+                <div className="min-w-[640px]">
                 {/* Day-of-week header */}
                 <div className="grid grid-cols-7 border-b border-hborder">
                   {DAY_LABELS.map(d => (
@@ -1115,6 +1117,8 @@ export default function ReservationsPage() {
                     })}
                   </div>
                 ))}
+                </div>
+                </div>
               </div>
             )
           }
@@ -1184,7 +1188,7 @@ export default function ReservationsPage() {
           {/* ── Guest ── */}
           <div className="border border-hborder rounded-xl p-4 space-y-3">
             <p className="text-xs font-semibold text-hmuted uppercase tracking-wide">Guest Information</p>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs text-hmuted mb-1">Full Name *</label>
                 <input
@@ -1203,7 +1207,7 @@ export default function ReservationsPage() {
                   className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg"
                 />
               </div>
-              <div className="col-span-2">
+              <div className="col-span-1 sm:col-span-2">
                 <label className="block text-xs text-hmuted mb-1">Email</label>
                 <input
                   type="email"
@@ -1219,8 +1223,8 @@ export default function ReservationsPage() {
           {/* ── Booking Details ── */}
           <div className="border border-hborder rounded-xl p-4 space-y-3">
             <p className="text-xs font-semibold text-hmuted uppercase tracking-wide">Booking Details</p>
-            <div className="grid grid-cols-3 gap-3">
-              <div className="col-span-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="col-span-1 sm:col-span-3">
                 <label className="block text-xs text-hmuted mb-1">House *</label>
                 <select
                   value={form.house_id}
@@ -1722,12 +1726,12 @@ export default function ReservationsPage() {
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={branchLogo(activeBranch?.location)} alt={branchBrandLabel(activeBranch?.location)} style={{ height: 52, width: 52, objectFit: 'contain', borderRadius: 8, background: 'white', padding: 4 }} />
                   <div>
-                    <div style={{ color: '#c89b3c', fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 2 }}>Deposit Receipt</div>
+                    <div style={{ color: '#F05830', fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 2 }}>Deposit Receipt</div>
                     <div style={{ color: '#a0aec0', fontSize: 11, marginTop: 3 }}>{branchBrandLabel(activeBranch?.location)}</div>
                   </div>
                 </div>
                 <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontSize: 20, fontWeight: 800, color: '#c89b3c' }}>{receipt.receipt_number}</div>
+                  <div style={{ fontSize: 20, fontWeight: 800, color: '#F05830' }}>{receipt.receipt_number}</div>
                   <div style={{ fontSize: 11, color: '#a0aec0', marginTop: 2 }}>{receipt.receipt_date}</div>
                 </div>
               </div>

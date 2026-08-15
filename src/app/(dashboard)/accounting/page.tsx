@@ -1644,7 +1644,7 @@ export default function AccountingPage() {
   return (
     <>
       <TopBar title="Accounting" subtitle={`Double-entry bookkeeping — ${activeBranch?.location ?? ''}`} />
-      <div className="p-8 flex-1 section-enter">
+      <div className="p-4 sm:p-6 lg:p-8 flex-1 section-enter">
 
         {/* Tab bar */}
         <div className="flex gap-1 bg-hsurface2 rounded-xl p-1 mb-6 flex-wrap w-fit">
@@ -1660,30 +1660,30 @@ export default function AccountingPage() {
         {/* ══ OVERVIEW ══════════════════════════════════════════════ */}
         {tab === 'overview' && (
           <div className="space-y-5">
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
               {[
-                { label: 'AR Outstanding',    value: formatCurrency(overview.arOutstanding),  color: '#004AAD', sub: 'Unpaid customer invoices' },
+                { label: 'AR Outstanding',    value: formatCurrency(overview.arOutstanding),  color: '#583808', sub: 'Unpaid customer invoices' },
                 { label: 'AP Outstanding',    value: formatCurrency(overview.apOutstanding),  color: '#B83232', sub: 'Unpaid supplier bills' },
-                { label: 'Petty Cash',        value: formatCurrency(pettyCashBalance),         color: '#C89B3C', sub: (() => { const a = accounts.find(x => x.code === '1011') ?? accounts.find(x => x.code === '1010'); return a ? `${a.code} — ${a.name}` : '1011 — Petty Cash' })() },
+                { label: 'Petty Cash',        value: formatCurrency(pettyCashBalance),         color: '#F05830', sub: (() => { const a = accounts.find(x => x.code === '1011') ?? accounts.find(x => x.code === '1010'); return a ? `${a.code} — ${a.name}` : '1011 — Petty Cash' })() },
               ].map(s => (
                 <div key={s.label} className="bg-white border border-hborder rounded-2xl p-4 shadow-card relative overflow-hidden">
                   <div className="absolute top-0 left-0 w-1 h-full rounded-l-2xl" style={{ background: s.color }} />
                   <p className="text-[11px] text-hmuted uppercase tracking-wide pl-2">{s.label}</p>
-                  <p className="font-serif text-2xl text-dark-navy mt-1 pl-2">{s.value}</p>
+                  <p className="font-serif text-xl sm:text-2xl text-dark-navy mt-1 pl-2 truncate" title={s.value}>{s.value}</p>
                   <p className="text-[10px] text-hmuted pl-2 mt-0.5">{s.sub}</p>
                 </div>
               ))}
             </div>
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
               {[
                 { label: 'Revenue This Month',  value: formatCurrency(overview.monthRevenue),                              color: '#1A7A4A', sub: 'From GL entries' },
                 { label: 'Expenses This Month', value: formatCurrency(overview.monthExpenses),                             color: '#B83232', sub: 'From GL entries' },
-                { label: 'Net Income',          value: formatCurrency(overview.monthRevenue - overview.monthExpenses),     color: '#004AAD', sub: `${overview.totalEntries} total entries` },
+                { label: 'Net Income',          value: formatCurrency(overview.monthRevenue - overview.monthExpenses),     color: '#583808', sub: `${overview.totalEntries} total entries` },
               ].map(s => (
                 <div key={s.label} className="bg-white border border-hborder rounded-2xl p-4 shadow-card relative overflow-hidden">
                   <div className="absolute top-0 left-0 w-1 h-full rounded-l-2xl" style={{ background: s.color }} />
                   <p className="text-[11px] text-hmuted uppercase tracking-wide pl-2">{s.label}</p>
-                  <p className="font-serif text-2xl text-dark-navy mt-1 pl-2">{s.value}</p>
+                  <p className="font-serif text-xl sm:text-2xl text-dark-navy mt-1 pl-2 truncate" title={s.value}>{s.value}</p>
                   <p className="text-[10px] text-hmuted pl-2 mt-0.5">{s.sub}</p>
                 </div>
               ))}
@@ -1696,6 +1696,26 @@ export default function AccountingPage() {
                 </div>
                 <Button size="sm" onClick={() => setTab('journal')}>View All</Button>
               </div>
+
+              {/* ── Mobile card view ── */}
+              <div className="md:hidden divide-y divide-hborder">
+                {entries.length === 0 ? (
+                  <p className="px-5 py-8 text-center text-hmuted text-sm">No entries yet.</p>
+                ) : entries.slice(0, 10).map(e => (
+                  <div key={e.id} className="p-3.5 space-y-1">
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="font-mono text-xs text-hmuted truncate">{e.entry_number}</p>
+                      <span className="bg-hsurface2 text-hmuted text-[10px] px-2 py-0.5 rounded-full capitalize whitespace-nowrap">
+                        {(e.reference_type ?? 'manual').replace(/_/g, ' ')}
+                      </span>
+                    </div>
+                    <p className="text-htext truncate" title={e.description}>{e.description}</p>
+                    <p className="text-xs text-hmuted">{formatDate(e.entry_date)}{e.reference ? ` · ${e.reference}` : ''}</p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="hidden md:block overflow-x-auto">
               <table className="w-full text-sm table-fixed">
                 <thead><tr className="bg-hsurface2">
                   {([['Entry #', 'w-[20%]'], ['Date', 'w-[14%]'], ['Description', 'w-[32%]'], ['Reference', 'w-[20%]'], ['Type', 'w-[14%]']] as const).map(([h, w]) => (
@@ -1719,6 +1739,7 @@ export default function AccountingPage() {
                   {entries.length === 0 && <tr><td colSpan={5} className="px-5 py-8 text-center text-hmuted">No entries yet.</td></tr>}
                 </tbody>
               </table>
+              </div>
             </div>
           </div>
         )}
@@ -1749,7 +1770,53 @@ export default function AccountingPage() {
                   {formatCurrency(filteredAR.filter((i: any) => i.status !== 'paid' && i.status !== 'void').reduce((s: number, i: any) => s + (Number(i.total) - Number(i.amount_paid)), 0))} balance
                 </p>
               </div>
-              <div className="overflow-x-auto">
+
+              {/* ── Mobile card view ── */}
+              <div className="md:hidden divide-y divide-hborder">
+                {filteredAR.length === 0 ? (
+                  <p className="px-5 py-10 text-center text-hmuted text-sm">No invoices found</p>
+                ) : filteredAR.map((inv: any) => {
+                  const issueDate = inv.invoice_date ?? inv.created_at
+                  const od        = daysPastDue(issueDate)
+                  const due       = new Date(issueDate); due.setDate(due.getDate() + 30)
+                  const balance   = Number(inv.total) - Number(inv.amount_paid)
+                  return (
+                    <div key={inv.id} className="p-4 space-y-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="font-mono text-xs text-hmuted truncate">{inv.invoice_number}</p>
+                          <p className="font-medium text-htext truncate" title={inv.guest?.full_name ?? undefined}>{inv.guest?.full_name ?? '—'}</p>
+                        </div>
+                        <span className={cn('text-[10px] px-2 py-0.5 rounded-full font-medium capitalize whitespace-nowrap',
+                          inv.status === 'paid'    ? 'bg-green-100 text-green-700' :
+                          inv.status === 'partial' ? 'bg-yellow-100 text-yellow-700' :
+                          inv.status === 'void'    ? 'bg-gray-100 text-gray-500' :
+                          'bg-red-100 text-red-700'
+                        )}>{inv.status}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5 flex-wrap text-xs text-hmuted">
+                        <span>{inv.house?.code || inv.house?.name || '—'}</span>
+                        <span>·</span>
+                        <span>Issued {formatDate(issueDate)}</span>
+                        <span>·</span>
+                        <span>Due {formatDate(due.toISOString())}</span>
+                        {inv.status !== 'paid' && inv.status !== 'void' && (
+                          <span className={cn('text-[10px] px-2 py-0.5 rounded-full font-medium', agingColor(od))}>{agingLabel(od)}</span>
+                        )}
+                      </div>
+                      <div className="flex items-center justify-between text-sm pt-1.5 border-t border-hborder/60">
+                        <div className="flex gap-3 text-xs text-hmuted">
+                          <span>Total <strong className="text-htext font-medium">{formatCurrency(inv.total)}</strong></span>
+                          <span>Paid <strong className="text-green-700 font-medium">{formatCurrency(inv.amount_paid)}</strong></span>
+                        </div>
+                        <span className="font-semibold text-dark-navy">{formatCurrency(balance)}</span>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+
+              <div className="hidden md:block overflow-x-auto">
                 <table className="w-full text-sm table-fixed">
                   <thead><tr className="bg-hsurface2">
                     {([['Invoice #', 'w-[10%]'], ['Guest', 'w-[24%]'], ['House', 'w-[8%]'], ['Date Issued', 'w-[8%]'], ['Due Date', 'w-[8%]'], ['Total', 'w-[8%]'], ['Paid', 'w-[8%]'], ['Balance', 'w-[8%]'], ['Aging', 'w-[10%]'], ['Status', 'w-[8%]']] as const).map(([h, w]) => (
@@ -1825,7 +1892,57 @@ export default function AccountingPage() {
                   {formatCurrency(filteredBills.filter(b => b.status !== 'paid' && b.status !== 'void').reduce((s, b) => s + (Number(b.total) - Number(b.amount_paid)), 0))} balance
                 </p>
               </div>
-              <div className="overflow-x-auto">
+
+              {/* ── Mobile card view ── */}
+              <div className="md:hidden divide-y divide-hborder">
+                {filteredBills.length === 0 ? (
+                  <p className="px-5 py-10 text-center text-hmuted text-sm">No bills found. Tap + New Bill to record a supplier bill.</p>
+                ) : filteredBills.map(b => {
+                  const balance = Number(b.total) - Number(b.amount_paid)
+                  const vendor  = (b as any).vendor
+                  const expAcct = (b as any).expense_account
+                  return (
+                    <div key={b.id} className="p-4 space-y-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="font-mono text-xs text-hmuted truncate">{b.bill_number}</p>
+                          <p className="font-medium text-htext truncate" title={vendor?.name ?? undefined}>{vendor?.name ?? '—'}</p>
+                        </div>
+                        <span className={cn('text-[10px] px-2 py-0.5 rounded-full font-medium capitalize whitespace-nowrap',
+                          b.status === 'paid'    ? 'bg-green-100 text-green-700' :
+                          b.status === 'partial' ? 'bg-yellow-100 text-yellow-700' :
+                          b.status === 'void'    ? 'bg-gray-100 text-gray-500' :
+                          'bg-red-100 text-red-700'
+                        )}>{b.status}</span>
+                      </div>
+                      {b.description && <p className="text-xs text-hmuted truncate" title={b.description}>{b.description}</p>}
+                      <div className="flex items-center gap-1.5 flex-wrap text-xs text-hmuted">
+                        <span className="font-mono">{(b as any).line_items?.length > 1 ? `Split (${(b as any).line_items.length})` : (expAcct ? expAcct.code : '—')}</span>
+                        <span>·</span>
+                        <span>Billed {formatDate(b.bill_date)}</span>
+                        {b.due_date && <><span>·</span><span>Due {formatDate(b.due_date)}</span></>}
+                      </div>
+                      <div className="flex items-center justify-between text-sm pt-1.5 border-t border-hborder/60">
+                        <div className="flex gap-3 text-xs text-hmuted">
+                          <span>Total <strong className="text-htext font-medium">{formatCurrency(b.total)}</strong></span>
+                          <span>Paid <strong className="text-green-700 font-medium">{formatCurrency(b.amount_paid)}</strong></span>
+                        </div>
+                        <span className="font-semibold text-dark-navy">{formatCurrency(balance)}</span>
+                      </div>
+                      {b.status !== 'void' && (
+                        <div className="flex gap-2 pt-0.5">
+                          {b.status !== 'paid' && (
+                            <Button size="sm" variant="ghost" className="flex-1" onClick={() => { setSelectedBill(b); setBillPayForm(f => ({ ...f, amount: String(balance) })); setBillPayOpen(true) }}>Pay</Button>
+                          )}
+                          <Button size="sm" variant="ghost" className="flex-1" onClick={() => openBillReceipt(b)}>Receipt</Button>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+
+              <div className="hidden md:block overflow-x-auto">
                 <table className="w-full text-sm table-fixed">
                   <thead><tr className="bg-hsurface2">
                     {([['Bill #', 'w-[9%]'], ['Vendor', 'w-[11%]'], ['Description', 'w-[20%]'], ['Account', 'w-[7%]'], ['Bill Date', 'w-[8%]'], ['Due Date', 'w-[8%]'], ['Total', 'w-[8%]'], ['Paid', 'w-[8%]'], ['Balance', 'w-[8%]'], ['Status', 'w-[6%]'], ['Actions', 'w-[7%]']] as const).map(([h, w]) => (
@@ -1897,6 +2014,39 @@ export default function AccountingPage() {
               </div>
             </div>
             <div className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
+
+              {/* ── Mobile card view ── */}
+              <div className="md:hidden divide-y divide-hborder">
+                {vendors.length === 0 ? (
+                  <p className="px-5 py-10 text-center text-hmuted text-sm">No vendors yet. Add the suppliers you regularly pay.</p>
+                ) : vendors.map(v => (
+                  <div key={v.id} className={cn('p-4 space-y-2', !v.is_active && 'opacity-50')}>
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="font-medium text-htext truncate" title={v.name}>{v.name}</p>
+                      <span className={cn('text-[10px] px-2 py-0.5 rounded-full font-medium whitespace-nowrap',
+                        v.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
+                      )}>{v.is_active ? 'Active' : 'Inactive'}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 flex-wrap text-xs text-hmuted">
+                      {v.contact_name && <span>{v.contact_name}</span>}
+                      {v.phone && <><span>·</span><span>{v.phone}</span></>}
+                      {v.email && <><span>·</span><span className="truncate">{v.email}</span></>}
+                    </div>
+                    <div className="flex items-center justify-between text-sm pt-1.5 border-t border-hborder/60">
+                      <span className="text-xs text-hmuted">Net {v.payment_terms}</span>
+                      <span className="font-semibold text-dark-navy">{formatCurrency(vendorBalance(v.id))}</span>
+                    </div>
+                    <div className="flex gap-2 pt-0.5">
+                      <Button size="sm" variant="ghost" className="flex-1" onClick={() => openEditVendor(v)}>Edit</Button>
+                      <Button size="sm" variant="ghost" className="flex-1" onClick={() => toggleVendorActive(v)}>
+                        {v.is_active ? 'Deactivate' : 'Activate'}
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="hidden md:block overflow-x-auto">
               <table className="w-full text-sm table-fixed">
                 <thead><tr className="bg-hsurface2">
                   {([['Vendor Name', 'w-[24%]'], ['Contact', 'w-[13%]'], ['Phone', 'w-[11%]'], ['Email', 'w-[17%]'], ['Terms', 'w-[8%]'], ['Outstanding', 'w-[10%]'], ['Status', 'w-[7%]'], ['Actions', 'w-[10%]']] as const).map(([h, w]) => (
@@ -1931,6 +2081,7 @@ export default function AccountingPage() {
                   ))}
                 </tbody>
               </table>
+              </div>
             </div>
           </div>
         )}
@@ -1977,6 +2128,97 @@ export default function AccountingPage() {
               </div>
             </div>
             <div className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
+
+              {/* ── Mobile card view ── */}
+              <div className="md:hidden divide-y divide-hborder">
+                {filteredEntries.length === 0 ? (
+                  <p className="px-5 py-10 text-center text-hmuted text-sm">
+                    {entries.length === 0 ? 'No journal entries. Entries auto-post when transactions are recorded.' : 'No entries match the current filters.'}
+                  </p>
+                ) : filteredEntries.map(e => {
+                  const isExpanded = expandedEntries.has(e.id)
+                  return (
+                    <div key={e.id} className={cn('p-4 space-y-2', e.is_void && 'opacity-50 bg-gray-50/60', e.status === 'draft' && !e.is_void && 'bg-amber-50/40')}>
+                      <div
+                        className="flex items-start justify-between gap-2 cursor-pointer"
+                        onClick={async () => {
+                          if (isExpanded) {
+                            setExpandedEntries(prev => { const s = new Set(prev); s.delete(e.id); return s })
+                          } else {
+                            setExpandedEntries(prev => new Set([...prev, e.id]))
+                            if (!entryLines[e.id]) await loadEntryLines(e.id)
+                          }
+                        }}
+                      >
+                        <div className="min-w-0">
+                          <p className="font-mono text-xs text-hmuted truncate">
+                            <span className={e.is_void ? 'line-through' : ''}>{e.entry_number}</span>
+                            {e.is_void && <span className="ml-1.5 text-[9px] bg-gray-200 text-gray-500 px-1.5 py-0.5 rounded-full font-bold uppercase">VOID</span>}
+                          </p>
+                          <p className="font-medium text-htext truncate" title={e.description}>{e.description}</p>
+                        </div>
+                        <div className="flex items-center gap-1.5 flex-shrink-0">
+                          {e.is_void
+                            ? <span className="text-[10px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full font-bold uppercase">Void</span>
+                            : e.status === 'draft'
+                              ? <span className="text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-bold uppercase">Draft</span>
+                              : <span className="text-[10px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-bold uppercase">Posted</span>
+                          }
+                          <span className="text-hmuted text-xs">{isExpanded ? '▾' : '▸'}</span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5 flex-wrap text-xs text-hmuted">
+                        <span>{formatDate(e.entry_date)}</span>
+                        {e.reference && <><span>·</span><span className="font-mono">{e.reference}</span></>}
+                        <span className="bg-hsurface2 text-hmuted text-[10px] px-2 py-0.5 rounded-full capitalize whitespace-nowrap">
+                          {(e.reference_type ?? 'manual').replace(/_/g, ' ')}
+                        </span>
+                      </div>
+
+                      {isExpanded && entryLines[e.id] && (
+                        <div className="rounded-lg bg-hsurface2/60 p-2.5 space-y-1.5 text-xs">
+                          {entryLines[e.id].map((l: any) => (
+                            <div key={l.id} className="flex items-center justify-between gap-2">
+                              <div className="min-w-0">
+                                <p className="font-mono text-navy truncate" title={l.account?.name}>{l.account?.code} — {l.account?.name}</p>
+                                {l.description && <p className="text-hmuted truncate">{l.description}</p>}
+                              </div>
+                              <div className="flex-shrink-0 text-right tabular-nums">
+                                {Number(l.debit)  > 0 && <p className="font-medium">{formatCurrency(l.debit)}</p>}
+                                {Number(l.credit) > 0 && <p className="font-medium">{formatCurrency(l.credit)}</p>}
+                              </div>
+                            </div>
+                          ))}
+                          <div className="flex items-center justify-between pt-1.5 border-t border-hborder/60 font-bold tabular-nums">
+                            <span className="uppercase text-[10px] text-hmuted">Totals</span>
+                            <span>DR {formatCurrency(entryLines[e.id].reduce((s: number, l: any) => s + Number(l.debit), 0))} / CR {formatCurrency(entryLines[e.id].reduce((s: number, l: any) => s + Number(l.credit), 0))}</span>
+                          </div>
+                        </div>
+                      )}
+
+                      {!e.is_void && (
+                        <div className="flex items-center gap-1.5 flex-wrap pt-1">
+                          {e.status === 'draft' && (
+                            <>
+                              {(isAdmin || !(e.reference_type && AUTO_JE_REFERENCE_TYPES.includes(e.reference_type))) && (
+                                <button onClick={() => openEditJe(e)} className="text-[11px] font-medium text-blue-600 border border-blue-200 bg-blue-50 hover:bg-blue-100 px-2 py-1 rounded transition-colors">Edit</button>
+                              )}
+                              <button onClick={() => postJournalEntry(e)} className="text-[11px] font-medium text-green-700 border border-green-200 bg-green-50 hover:bg-green-100 px-2 py-1 rounded transition-colors">Post</button>
+                            </>
+                          )}
+                          {e.status === 'posted' && (
+                            <button onClick={() => unpostJournalEntry(e)} className="text-[11px] font-medium text-amber-700 border border-amber-200 bg-amber-50 hover:bg-amber-100 px-2 py-1 rounded transition-colors">Unpost</button>
+                          )}
+                          <button onClick={() => openCorrectDate(e)} className="text-[11px] font-medium text-navy border border-blue-200 bg-blue-50 hover:bg-blue-100 px-2 py-1 rounded transition-colors">Correct Date</button>
+                          <button onClick={() => openCorrectCoa(e)} className="text-[11px] font-medium text-purple-700 border border-purple-200 bg-purple-50 hover:bg-purple-100 px-2 py-1 rounded transition-colors">Correct COA</button>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+
+              <div className="hidden md:block overflow-x-auto">
               <table className="w-full text-sm table-fixed">
                 <thead><tr className="bg-hsurface2">
                   {([['', 'w-[3%]'], ['Entry #', 'w-[11%]'], ['Date', 'w-[7%]'], ['Description', 'w-[26%]'], ['Reference', 'w-[10%]'], ['Type', 'w-[9%]'], ['Status', 'w-[8%]'], ['', 'w-[26%]']] as const).map(([h, w], i) => (
@@ -2089,6 +2331,7 @@ export default function AccountingPage() {
                   ))}
                 </tbody>
               </table>
+              </div>
             </div>
           </div>
           )
@@ -2135,6 +2378,34 @@ export default function AccountingPage() {
                       <h3 className="font-serif text-[17px] text-dark-navy">{account.code} — {account.name}</h3>
                       <p className="text-xs text-hmuted capitalize">{account.type} · Normal balance: {normalBalance(account.type)}</p>
                     </div>
+
+                    {/* ── Mobile card view ── */}
+                    <div className="md:hidden divide-y divide-hborder">
+                      {rows.map((r: any) => (
+                        <div key={r.id} className="p-3.5 space-y-1.5 text-sm">
+                          <div className="flex items-start justify-between gap-2">
+                            <p className="text-htext truncate" title={r.entry.description}>{r.entry.description}</p>
+                            <span className="font-bold text-dark-navy whitespace-nowrap">{formatCurrency(r.running_balance)}</span>
+                          </div>
+                          <div className="flex items-center justify-between gap-2 text-xs text-hmuted">
+                            <span className="truncate">{formatDate(r.entry.entry_date)} · <span className="font-mono">{r.entry.entry_number}</span>{r.entry.reference ? ` · ${r.entry.reference}` : ''}</span>
+                            <span className="flex-shrink-0 font-medium">
+                              {Number(r.debit)  > 0 && <span className="text-htext">DR {formatCurrency(r.debit)}</span>}
+                              {Number(r.credit) > 0 && <span className="text-htext">CR {formatCurrency(r.credit)}</span>}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                      <div className="p-3.5 flex items-center justify-between bg-dark-navy text-white text-sm">
+                        <span className="text-xs font-semibold uppercase tracking-wide">Totals</span>
+                        <div className="text-right text-xs">
+                          <div>DR {formatCurrency(rows.reduce((s: number, r: any) => s + Number(r.debit), 0))} · CR {formatCurrency(rows.reduce((s: number, r: any) => s + Number(r.credit), 0))}</div>
+                          <div className="font-bold text-sm mt-0.5">{formatCurrency(rows[rows.length - 1]?.running_balance ?? 0)}</div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="hidden md:block overflow-x-auto">
                     <table className="w-full text-sm table-fixed">
                       <thead><tr className="bg-hsurface2">
                         {([['Date', 'w-[10%]'], ['Entry #', 'w-[16%]'], ['Description', 'w-[30%]'], ['Reference', 'w-[16%]'], ['Debit', 'w-[10%]'], ['Credit', 'w-[10%]'], ['Balance', 'w-[8%]']] as const).map(([h, w]) => (
@@ -2163,6 +2434,7 @@ export default function AccountingPage() {
                         </tr>
                       </tfoot>
                     </table>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -2192,6 +2464,58 @@ export default function AccountingPage() {
                   <h3 className="font-serif text-[17px] text-dark-navy">Trial Balance</h3>
                   <p className="text-xs text-hmuted">{tbFrom} — {tbTo} · {activeBranch?.location}</p>
                 </div>
+
+                {/* ── Mobile card view ── */}
+                <div className="md:hidden divide-y divide-hborder">
+                  {tbRows.map(r => (
+                    <div key={r.id}>
+                      <div
+                        className="p-4 space-y-2 cursor-pointer active:bg-hbg/50"
+                        onClick={() => toggleAcctDrilldown(r.id, tbFrom, tbTo)}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="font-mono text-xs text-navy truncate">{r.code}</p>
+                            <p className="font-medium text-htext truncate" title={r.name}>{r.name}</p>
+                          </div>
+                          <div className="flex items-center gap-1.5 flex-shrink-0">
+                            <span className={cn('text-[10px] px-2 py-0.5 rounded-full font-medium', TYPE_COLOR[r.type as AccountType])}>{r.type}</span>
+                            <span className="text-hmuted text-xs">{expandedReportAccts.has(r.id) ? '▾' : '▸'}</span>
+                          </div>
+                        </div>
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="text-xs text-hmuted">
+                            {r.dr > 0 && <>DR {formatCurrency(r.dr)}</>}
+                            {r.dr > 0 && r.cr > 0 && ' · '}
+                            {r.cr > 0 && <>CR {formatCurrency(r.cr)}</>}
+                          </span>
+                          <span className={cn('font-semibold', r.balance < 0 ? 'text-red-600' : 'text-dark-navy')}>{formatCurrency(Math.abs(r.balance))}</span>
+                        </div>
+                      </div>
+                      {expandedReportAccts.has(r.id) && (
+                        <div className="px-4 pb-4 -mt-1 overflow-x-auto"><AcctDrilldown accountId={r.id} /></div>
+                      )}
+                    </div>
+                  ))}
+                  {(() => {
+                    const totDr = tbRows.reduce((s, r) => s + r.dr, 0)
+                    const totCr = tbRows.reduce((s, r) => s + r.cr, 0)
+                    const balanced = Math.abs(totDr - totCr) < 0.01
+                    return (
+                      <div className="p-4 bg-dark-navy text-white text-sm space-y-1">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold uppercase tracking-wide">Totals</span>
+                          {balanced ? <span className="text-green-300 text-xs">✓ Balanced</span> : <span className="text-red-300 text-xs">⚠ Unbalanced</span>}
+                        </div>
+                        <div className="flex items-center justify-between font-bold">
+                          <span className="text-xs font-normal">DR {formatCurrency(totDr)} · CR {formatCurrency(totCr)}</span>
+                        </div>
+                      </div>
+                    )
+                  })()}
+                </div>
+
+                <div className="hidden md:block overflow-x-auto">
                 <table className="w-full text-sm table-fixed">
                   <thead><tr className="bg-hsurface2">
                     {([['', 'w-[4%]'], ['Code','w-[10%]'],['Account Name','w-[34%]'],['Type','w-[14%]'],['Debit ($)','w-[13%]'],['Credit ($)','w-[13%]'],['Balance ($)','w-[12%]']] as const).map(([h, w]) => (
@@ -2240,6 +2564,7 @@ export default function AccountingPage() {
                     })()}
                   </tfoot>
                 </table>
+                </div>
               </div>
             ) : (
               <p className="text-center text-hmuted py-16">Select a date range and click Generate.</p>
@@ -2401,7 +2726,7 @@ export default function AccountingPage() {
               }
 
               return (
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
 
                   {/* ── LEFT: ASSETS ── */}
                   <div className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
@@ -2607,7 +2932,7 @@ export default function AccountingPage() {
               const diff        = clearedBal - stmtBal
               return (
                 <>
-                  <div className="grid grid-cols-4 gap-4 mb-5">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-5">
                     {[
                       { label: 'Book Balance',     value: bookBal,    color: 'text-dark-navy' },
                       { label: 'Cleared Balance',  value: clearedBal, color: 'text-dark-navy' },
@@ -2622,6 +2947,32 @@ export default function AccountingPage() {
                     ))}
                   </div>
                   <div className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
+
+                    {/* ── Mobile card view ── */}
+                    <div className="md:hidden divide-y divide-hborder">
+                      {reconLines.map((r: any) => (
+                        <div
+                          key={r.id}
+                          className={cn('p-4 flex items-start gap-3 cursor-pointer', r.is_reconciled ? 'bg-green-50/60' : '')}
+                          onClick={() => toggleReconciled(r.id, r.is_reconciled)}
+                        >
+                          <input type="checkbox" checked={r.is_reconciled} readOnly
+                            className="w-4 h-4 mt-0.5 accent-green-600 cursor-pointer flex-shrink-0" />
+                          <div className="flex-1 min-w-0 space-y-1">
+                            <div className="flex items-start justify-between gap-2">
+                              <p className="text-htext truncate">{r.entry?.description}</p>
+                              <div className="text-right flex-shrink-0 text-sm font-medium">
+                                {Number(r.debit)  > 0 && <p>DR {formatCurrency(r.debit)}</p>}
+                                {Number(r.credit) > 0 && <p>CR {formatCurrency(r.credit)}</p>}
+                              </div>
+                            </div>
+                            <p className="text-xs text-hmuted">{formatDate(r.entry?.entry_date)} · <span className="font-mono">{r.entry?.entry_number}</span></p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="hidden md:block overflow-x-auto">
                     <table className="w-full text-sm table-fixed">
                       <thead><tr className="bg-hsurface2">
                         <th className="px-3 py-3 w-[5%]" />
@@ -2646,6 +2997,7 @@ export default function AccountingPage() {
                         ))}
                       </tbody>
                     </table>
+                    </div>
                   </div>
                 </>
               )
@@ -2668,6 +3020,35 @@ export default function AccountingPage() {
               }}>+ New Template</Button>
             </div>
             <div className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
+
+              {/* ── Mobile card view ── */}
+              <div className="md:hidden divide-y divide-hborder">
+                {recurring.length === 0 ? (
+                  <p className="px-5 py-12 text-center text-hmuted text-sm">No recurring templates yet. Create one for monthly salary, rent, utilities, etc.</p>
+                ) : recurring.map(rec => (
+                  <div key={rec.id} className={cn('p-4 space-y-2', !rec.is_active && 'opacity-50')}>
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="font-medium text-htext truncate" title={rec.name}>{rec.name}</p>
+                      <span className={cn('text-[10px] px-2 py-0.5 rounded-full font-medium whitespace-nowrap', rec.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500')}>
+                        {rec.is_active ? 'Active' : 'Inactive'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-hmuted truncate">{rec.description}</p>
+                    <p className="text-xs text-hmuted capitalize">{rec.frequency} · Next due {formatDate(rec.next_due_date)}</p>
+                    <div className="flex gap-2 pt-0.5">
+                      <Button size="sm" variant="ghost" className="flex-1" onClick={() => postRecurring(rec)}>Post Now</Button>
+                      <Button size="sm" variant="ghost" className="flex-1" onClick={() => {
+                        setEditRecurId(rec.id)
+                        setRecurForm({ name: rec.name, description: rec.description, frequency: rec.frequency, next_due_date: rec.next_due_date })
+                        setRecurLines(rec.lines.length > 0 ? rec.lines.map((l: any) => ({ ...l, debit: l.debit || '', credit: l.credit || '' })) : [emptyJeLine(), emptyJeLine()])
+                        setRecurFormOpen(true)
+                      }}>Edit</Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="hidden md:block overflow-x-auto">
               <table className="w-full text-sm table-fixed">
                 <thead><tr className="bg-hsurface2">
                   {([['Template Name','w-[20%]'],['Description','w-[34%]'],['Frequency','w-[14%]'],['Next Due','w-[14%]'],['Active','w-[8%]'],['Actions','w-[10%]']] as const).map(([h, w]) => (
@@ -2703,6 +3084,7 @@ export default function AccountingPage() {
                   ))}
                 </tbody>
               </table>
+              </div>
             </div>
           </div>
         )}
@@ -2716,6 +3098,34 @@ export default function AccountingPage() {
           const columns = [allMonths.slice(0, 12), allMonths.slice(12, 24)]
           const renderPeriodsTable = (months: { year: number; month: number }[], key: string) => (
             <div key={key} className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
+
+              {/* ── Mobile card view ── */}
+              <div className="md:hidden divide-y divide-hborder">
+                {months.map(({ year, month }) => {
+                  const period = periods.find(p => p.year === year && p.month === month)
+                  const isClosed = period?.status === 'closed'
+                  return (
+                    <div key={`${year}-${month}`} className={cn('p-3.5 flex items-center justify-between gap-2', isClosed ? 'bg-gray-50/60' : '')}>
+                      <div className="min-w-0">
+                        <p className="font-medium text-htext truncate">{MONTH_NAMES[month - 1]} {year}</p>
+                        <p className="text-[11px] text-hmuted truncate">{period?.closed_at ? `Closed ${formatDate(period.closed_at)}` : ''}</p>
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <span className={cn('text-xs px-2 py-0.5 rounded-full font-medium whitespace-nowrap', isClosed ? 'bg-gray-100 text-gray-600' : 'bg-green-100 text-green-700')}>
+                          {isClosed ? '🔒 Closed' : '🔓 Open'}
+                        </span>
+                        {isClosed ? (
+                          <button onClick={() => reopenPeriod(period!.id, year, month)} className="text-xs text-navy hover:underline">Reopen</button>
+                        ) : (
+                          <button onClick={() => closePeriod(year, month)} disabled={periodSaving} className="text-xs text-red-500 hover:text-red-700 hover:underline disabled:opacity-50">Close</button>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+
+              <div className="hidden md:block overflow-x-auto">
               <table className="w-full text-sm table-fixed">
                 <thead><tr className="bg-hsurface2">
                   {([['Period','w-1/3'],['Status','w-1/4'],['Closed At','w-1/4'],['Action','w-1/6']] as const).map(([h, w]) => (
@@ -2747,6 +3157,7 @@ export default function AccountingPage() {
                   })}
                 </tbody>
               </table>
+              </div>
             </div>
           )
           return (
@@ -2754,7 +3165,7 @@ export default function AccountingPage() {
               <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-5 text-sm text-amber-800">
                 <strong>Period Close:</strong> Closing a period blocks new journal entries dated in that month. Reopen to make corrections. Year-end close entries (transferring P&L to Retained Earnings) should be posted manually as a closing-type journal entry.
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {columns.map((months, i) => renderPeriodsTable(months, `col-${i}`))}
               </div>
             </div>
@@ -2781,6 +3192,34 @@ export default function AccountingPage() {
                       <span className={cn('text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide', TYPE_COLOR[type])}>{type}</span>
                       <span className="text-xs text-hmuted">{group.length} accounts</span>
                     </div>
+
+                    {/* ── Mobile card view ── */}
+                    <div className="md:hidden divide-y divide-hborder">
+                      {group.map(acct => (
+                        <div key={acct.id} className={cn('p-3.5 space-y-1.5', !acct.is_active && 'opacity-50')}>
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="font-mono text-xs font-semibold text-navy">{acct.code}</p>
+                              <p className="font-medium text-htext truncate" title={acct.name}>{acct.name}</p>
+                            </div>
+                            <span className={cn('text-[10px] px-2 py-0.5 rounded-full font-medium whitespace-nowrap', acct.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500')}>
+                              {acct.is_active ? 'Active' : 'Inactive'}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs text-hmuted capitalize truncate">{acct.category.replace(/_/g, ' ')}</span>
+                            <div className="flex gap-3 flex-shrink-0">
+                              <button onClick={() => openEditAccount(acct)} className="text-xs text-navy hover:underline">Edit</button>
+                              <button onClick={() => toggleAccountActive(acct)} className="text-xs text-hmuted hover:text-htext hover:underline">
+                                {acct.is_active ? 'Deactivate' : 'Activate'}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="hidden md:block overflow-x-auto">
                     <table className="w-full text-sm table-fixed">
                       <thead><tr className="bg-hsurface2/50">
                         {([['Code', 'w-[12%]'], ['Name', 'w-[40%]'], ['Category', 'w-[24%]'], ['Status', 'w-[12%]'], ['Actions', 'w-[12%]']] as const).map(([h, w]) => (
@@ -2810,6 +3249,7 @@ export default function AccountingPage() {
                         ))}
                       </tbody>
                     </table>
+                    </div>
                   </div>
                 )
               })}
@@ -2825,11 +3265,11 @@ export default function AccountingPage() {
           return (
           <div>
             {/* ── Stats row ── */}
-            <div className="grid grid-cols-4 gap-4 mb-5">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-5">
               <div className="bg-white border border-hborder rounded-2xl p-5 shadow-card relative overflow-hidden">
                 <div className="absolute top-0 left-0 w-1 h-full rounded-l-2xl bg-gold" />
                 <p className="text-[11px] text-hmuted uppercase tracking-wide font-semibold pl-2">Balance</p>
-                <p className={cn('font-serif text-3xl mt-1 pl-2', pettyCashBalance < 0 ? 'text-red-600' : 'text-dark-navy')}>
+                <p className={cn('font-serif text-2xl sm:text-3xl mt-1 pl-2 truncate', pettyCashBalance < 0 ? 'text-red-600' : 'text-dark-navy')} title={formatCurrency(pettyCashBalance)}>
                   {formatCurrency(pettyCashBalance)}
                 </p>
                 <p className="text-[10px] text-hmuted pl-2 mt-1">{(() => { const a = accounts.find(x => x.code === '1011') ?? accounts.find(x => x.code === '1010'); return a ? `${a.code} — ${a.name}` : '1011 — Petty Cash' })()}</p>
@@ -2837,19 +3277,19 @@ export default function AccountingPage() {
               <div className="bg-white border border-hborder rounded-2xl p-5 shadow-card relative overflow-hidden">
                 <div className="absolute top-0 left-0 w-1 h-full rounded-l-2xl bg-green-400" />
                 <p className="text-[11px] text-hmuted uppercase tracking-wide font-semibold pl-2">Total In</p>
-                <p className="font-serif text-2xl text-green-700 mt-1 pl-2">+{formatCurrency(pcTotalIn)}</p>
+                <p className="font-serif text-xl sm:text-2xl text-green-700 mt-1 pl-2 truncate" title={`+${formatCurrency(pcTotalIn)}`}>+{formatCurrency(pcTotalIn)}</p>
                 <p className="text-[10px] text-hmuted pl-2 mt-1">Replenishments</p>
               </div>
               <div className="bg-white border border-hborder rounded-2xl p-5 shadow-card relative overflow-hidden">
                 <div className="absolute top-0 left-0 w-1 h-full rounded-l-2xl bg-red-400" />
                 <p className="text-[11px] text-hmuted uppercase tracking-wide font-semibold pl-2">Total Out</p>
-                <p className="font-serif text-2xl text-red-600 mt-1 pl-2">-{formatCurrency(pcTotalOut)}</p>
+                <p className="font-serif text-xl sm:text-2xl text-red-600 mt-1 pl-2 truncate" title={`-${formatCurrency(pcTotalOut)}`}>-{formatCurrency(pcTotalOut)}</p>
                 <p className="text-[10px] text-hmuted pl-2 mt-1">Expenses</p>
               </div>
               <div className="bg-white border border-hborder rounded-2xl p-5 shadow-card relative overflow-hidden">
                 <div className="absolute top-0 left-0 w-1 h-full rounded-l-2xl bg-blue-400" />
                 <p className="text-[11px] text-hmuted uppercase tracking-wide font-semibold pl-2">Linked</p>
-                <p className="font-serif text-2xl text-dark-navy mt-1 pl-2">{pcLinked}</p>
+                <p className="font-serif text-xl sm:text-2xl text-dark-navy mt-1 pl-2 truncate">{pcLinked}</p>
                 <p className="text-[10px] text-hmuted pl-2 mt-1">of {petty.length} tagged to reservation</p>
               </div>
             </div>
@@ -2873,6 +3313,47 @@ export default function AccountingPage() {
 
             {/* ── Table ── */}
             <div className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
+
+              {/* ── Mobile card view ── */}
+              <div className="md:hidden divide-y divide-hborder">
+                {filteredPetty.length === 0 ? (
+                  <p className="px-5 py-12 text-center text-hmuted text-sm">No petty cash transactions yet</p>
+                ) : filteredPetty.map(t => {
+                  const isIn = t.transaction_type === 'in'
+                  const res  = (t as any).reservation
+                  return (
+                    <div key={t.id} className="p-4 space-y-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="text-htext font-medium truncate" title={t.description}>{t.description}</p>
+                        <span className={cn('font-semibold tabular-nums whitespace-nowrap', isIn ? 'text-green-700' : 'text-red-600')}>
+                          {isIn ? '+' : '−'}{formatCurrency(t.amount)}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5 flex-wrap text-xs text-hmuted">
+                        <span>{formatDate(t.transaction_date)}</span>
+                        <span>·</span>
+                        <span className="bg-hsurface2 text-hmuted px-2 py-0.5 rounded-full whitespace-nowrap">{t.category}</span>
+                        <span className={cn('inline-flex items-center gap-1 font-semibold px-2 py-0.5 rounded-full whitespace-nowrap',
+                          isIn ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'
+                        )}>{isIn ? '↑ In' : '↓ Out'}</span>
+                        {t.reference && <span className="font-mono">{t.reference}</span>}
+                      </div>
+                      {res && (
+                        <p className="text-xs">
+                          <span className="text-blue-600 font-medium">{res.reservation_number}</span>
+                          {res.guest?.full_name && <span className="text-hmuted"> · {res.guest.full_name}</span>}
+                        </p>
+                      )}
+                      <div className="flex gap-2 pt-0.5">
+                        <Button size="sm" variant="ghost" className="flex-1" onClick={() => openEditPc(t)}>Edit</Button>
+                        <Button size="sm" variant="ghost" className="flex-1" onClick={() => deletePettyCash(t)}>Delete</Button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+
+              <div className="hidden md:block overflow-x-auto">
               <table className="w-full text-sm table-fixed">
                 <thead>
                   <tr className="bg-hsurface2 border-b border-hborder">
@@ -2942,6 +3423,7 @@ export default function AccountingPage() {
                   })}
                 </tbody>
               </table>
+              </div>
             </div>
           </div>
         )})()}
@@ -3035,7 +3517,7 @@ export default function AccountingPage() {
       {/* ── COA Modal ── */}
       <Modal open={coaFormOpen} onClose={() => setCoaFormOpen(false)} title={editAccountId ? 'Edit Account' : 'Add Account'} size="sm">
         <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-xs text-hmuted mb-1">Account Code *</label>
               <input value={coaForm.code} onChange={e => setCoaForm(f => ({ ...f, code: e.target.value }))} placeholder="e.g. 5900" className={input} />
@@ -3064,7 +3546,7 @@ export default function AccountingPage() {
           
           <div className="mt-4 pt-4 border-t border-hborder/50 space-y-3">
             <p className="text-xs font-semibold text-navy uppercase tracking-wide">Opening Balance</p>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs text-hmuted mb-1">Amount ($)</label>
                 <input type="number" min={0} step={0.01} value={coaForm.opening_balance} onChange={e => setCoaForm(f => ({ ...f, opening_balance: e.target.value }))} placeholder="0.00" className={input} />
@@ -3105,7 +3587,7 @@ export default function AccountingPage() {
       {/* ── Journal Entry Modal ── */}
       <Modal open={jeFormOpen} onClose={() => setJeFormOpen(false)} title={editJeId ? 'Edit Journal Entry' : 'New Journal Entry'} size="xl">
         <div className="space-y-4">
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label className="block text-xs text-hmuted mb-1">Entry Date</label>
               <input type="date" value={jeForm.date} onChange={e => setJeForm(f => ({ ...f, date: e.target.value }))} className={input} />
@@ -3122,7 +3604,7 @@ export default function AccountingPage() {
                 ))}
               </select>
             </div>
-            <div className="col-span-3">
+            <div className="col-span-1 sm:col-span-3">
               <label className="block text-xs text-hmuted mb-1">Description *</label>
               <input value={jeForm.description} onChange={e => setJeForm(f => ({ ...f, description: e.target.value }))} placeholder="e.g. Salary payment for June…" className={input} />
             </div>
@@ -3133,6 +3615,8 @@ export default function AccountingPage() {
               <button onClick={() => setJeLines(prev => [...prev, emptyJeLine()])} className="text-xs text-navy hover:underline font-medium">+ Add Line</button>
             </div>
             <div className="space-y-2">
+              <div className="overflow-x-auto">
+              <div className="min-w-[640px] space-y-2">
               <div className="grid grid-cols-12 gap-2 px-0.5 text-[10px] text-hmuted uppercase tracking-wide font-semibold">
                 <span className="col-span-6">Account</span><span className="col-span-2">Description</span>
                 <span className="col-span-2 text-right">Debit ($)</span><span className="col-span-2 text-right">Credit ($)</span>
@@ -3157,6 +3641,8 @@ export default function AccountingPage() {
                     : <span className="col-span-1" />}
                 </div>
               ))}
+              </div>
+              </div>
             </div>
             <div className={cn('mt-3 rounded-xl px-4 py-2.5 flex items-center justify-between text-sm', jeBalanced ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200')}>
               <span className={jeBalanced ? 'text-green-700 font-medium' : 'text-red-600 font-medium'}>
@@ -3185,7 +3671,7 @@ export default function AccountingPage() {
               {vendors.filter(v => v.is_active).map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
             </select>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-xs text-hmuted mb-1">Bill Date</label>
               <input type="date" value={billForm.bill_date} onChange={e => setBillForm(f => ({ ...f, bill_date: e.target.value }))} className={input} />
@@ -3232,7 +3718,7 @@ export default function AccountingPage() {
               ))}
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-xs text-hmuted mb-1">Subtotal ($)</label>
               <div className={cn(input, 'bg-hsurface2 flex items-center')}>{formatCurrency(billForm.lines.reduce((s, l) => s + (Number(l.amount) || 0), 0))}</div>
@@ -3333,14 +3819,14 @@ export default function AccountingPage() {
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={branchLogo(activeBranch?.location)} alt={hotelName} style={{ height: 64, width: 64, objectFit: 'contain', borderRadius: 8, background: 'white', padding: 4 }} />
                   <div>
-                    <div style={{ color: '#c89b3c', fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 2 }}>{branchBrandLabel(activeBranch?.location)}</div>
+                    <div style={{ color: '#F05830', fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 2 }}>{branchBrandLabel(activeBranch?.location)}</div>
                     {hotelPhone && <div style={{ color: '#a0aec0', fontSize: 12, marginTop: 3 }}>{hotelPhone}</div>}
                     {hotelAddress && <div style={{ color: '#a0aec0', fontSize: 11, marginTop: 2 }}>{hotelAddress}</div>}
                   </div>
                 </div>
                 <div style={{ textAlign: 'right' }}>
                   <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: 3, color: '#a0aec0', fontWeight: 600 }}>Bill</div>
-                  <div style={{ fontSize: 22, fontWeight: 800, color: '#c89b3c', letterSpacing: -0.5 }}>{b.bill_number}</div>
+                  <div style={{ fontSize: 22, fontWeight: 800, color: '#F05830', letterSpacing: -0.5 }}>{b.bill_number}</div>
                   <div style={{ fontSize: 12, color: '#a0aec0', marginTop: 2 }}>{formatDate(b.bill_date)}</div>
                 </div>
               </div>
@@ -3461,7 +3947,7 @@ export default function AccountingPage() {
                 {selectedBill.bill_number} · Balance: <strong>{formatCurrency(Number(selectedBill.total) - Number(selectedBill.amount_paid))}</strong>
               </p>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs text-hmuted mb-1">Payment Date</label>
                 <input type="date" value={billPayForm.payment_date} onChange={e => setBillPayForm(f => ({ ...f, payment_date: e.target.value }))} className={input} />
@@ -3511,8 +3997,8 @@ export default function AccountingPage() {
       {/* ── Vendor Modal ── */}
       <Modal open={vendorFormOpen} onClose={() => setVendorFormOpen(false)} title={editVendorId ? 'Edit Vendor' : 'Add Vendor'} size="md">
         <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <div className="col-span-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="col-span-1 sm:col-span-2">
               <label className="block text-xs text-hmuted mb-1">Vendor / Company Name *</label>
               <input value={vendorForm.name} onChange={e => setVendorForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. EDC Electricity, ABA Bank…" className={input} />
             </div>
@@ -3555,8 +4041,8 @@ export default function AccountingPage() {
       {/* ── Recurring Entry Modal ── */}
       <Modal open={recurFormOpen} onClose={() => setRecurFormOpen(false)} title={editRecurId ? 'Edit Template' : 'New Recurring Template'} size="xl">
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
-            <div className="col-span-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="col-span-1 sm:col-span-2">
               <label className="block text-xs text-hmuted mb-1">Template Name *</label>
               <input value={recurForm.name} onChange={e => setRecurForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Monthly Rent, Staff Salary…" className={input} />
             </div>
@@ -3572,7 +4058,7 @@ export default function AccountingPage() {
               <label className="block text-xs text-hmuted mb-1">Next Due Date</label>
               <input type="date" value={recurForm.next_due_date} onChange={e => setRecurForm(f => ({ ...f, next_due_date: e.target.value }))} className={input} />
             </div>
-            <div className="col-span-2">
+            <div className="col-span-1 sm:col-span-2">
               <label className="block text-xs text-hmuted mb-1">Description (used as JE description when posted) *</label>
               <input value={recurForm.description} onChange={e => setRecurForm(f => ({ ...f, description: e.target.value }))} placeholder="e.g. Monthly office rent payment" className={input} />
             </div>
@@ -3583,6 +4069,8 @@ export default function AccountingPage() {
               <button onClick={() => setRecurLines(prev => [...prev, emptyJeLine()])} className="text-xs text-navy hover:underline font-medium">+ Add Line</button>
             </div>
             <div className="space-y-2">
+              <div className="overflow-x-auto">
+              <div className="min-w-[640px] space-y-2">
               <div className="grid grid-cols-12 gap-2 px-0.5 text-[10px] text-hmuted uppercase tracking-wide font-semibold">
                 <span className="col-span-6">Account</span><span className="col-span-2">Note</span>
                 <span className="col-span-2 text-right">Debit ($)</span><span className="col-span-2 text-right">Credit ($)</span>
@@ -3611,6 +4099,8 @@ export default function AccountingPage() {
                     : <span className="col-span-1" />}
                 </div>
               ))}
+              </div>
+              </div>
             </div>
             {(() => {
               const dr = recurLines.reduce((s, l) => s + Number(l.debit || 0), 0)
@@ -3657,6 +4147,36 @@ export default function AccountingPage() {
               <div className="flex justify-end mb-3">
                 <Button variant="ghost" onClick={() => window.print()}>Print</Button>
               </div>
+
+              {/* ── Mobile card view ── */}
+              <div className="md:hidden rounded-2xl border border-hborder divide-y divide-hborder overflow-hidden">
+                {rows.map(([name, v]) => {
+                  const total = v.current + v.d30 + v.d60 + v.d60p
+                  return (
+                    <div key={name} className="p-3.5 space-y-1.5">
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="text-htext font-medium truncate" title={name}>{name}</p>
+                        <span className="font-bold text-dark-navy whitespace-nowrap">{formatCurrency(total)}</span>
+                      </div>
+                      <div className="flex items-center gap-2 flex-wrap text-xs">
+                        {v.current > 0 && <span className="text-green-700">Current {formatCurrency(v.current)}</span>}
+                        {v.d30 > 0 && <span className="text-yellow-700">1–30d {formatCurrency(v.d30)}</span>}
+                        {v.d60 > 0 && <span className="text-orange-600">31–60d {formatCurrency(v.d60)}</span>}
+                        {v.d60p > 0 && <span className="text-red-600">60+d {formatCurrency(v.d60p)}</span>}
+                      </div>
+                    </div>
+                  )
+                })}
+                <div className="p-3.5 flex items-center justify-between bg-dark-navy text-white">
+                  <span className="font-bold text-sm">Total</span>
+                  <div className="text-right text-xs">
+                    <div>{formatCurrency(tot('current'))} · {formatCurrency(tot('d30'))} · {formatCurrency(tot('d60'))} · {formatCurrency(tot('d60p'))}</div>
+                    <div className="font-bold text-sm mt-0.5">{formatCurrency(tot('current') + tot('d30') + tot('d60') + tot('d60p'))}</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="hidden md:block overflow-x-auto">
               <table className="w-full text-sm table-fixed">
                 <thead><tr className="bg-hsurface2">
                   {([['Customer',''],['Current','w-24'],['1–30 days','w-24'],['31–60 days','w-24'],['60+ days','w-24'],['Total','w-28']] as const).map(([h, w]) => (
@@ -3689,6 +4209,7 @@ export default function AccountingPage() {
                   </tr>
                 </tfoot>
               </table>
+              </div>
             </div>
           )
         })()}
@@ -3704,7 +4225,7 @@ export default function AccountingPage() {
               >{t === 'out' ? '↓ Cash Out (Expense)' : '↑ Cash In (Replenishment)'}</button>
             ))}
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-xs text-hmuted mb-1">Date</label>
               <input type="date" value={pcForm.date} onChange={e => setPcForm(f => ({ ...f, date: e.target.value }))} className={input} />
@@ -3718,7 +4239,7 @@ export default function AccountingPage() {
             <label className="block text-xs text-hmuted mb-1">Description *</label>
             <input value={pcForm.description} onChange={e => setPcForm(f => ({ ...f, description: e.target.value }))} placeholder="What was this for?" className={input} />
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-xs text-hmuted mb-1">Category</label>
               <select value={pcForm.category} onChange={e => setPcForm(f => ({ ...f, category: e.target.value }))} className={input}>

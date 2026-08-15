@@ -175,9 +175,9 @@ export default function HousekeepingPage() {
   return (
     <>
       <TopBar title="Housekeeping" subtitle={`Room status & task management — ${activeBranch?.location ?? ''}`} />
-      <div className="p-8 flex-1 section-enter">
-        <div className="flex items-center justify-between mb-5">
-          <div className="flex gap-1 bg-hsurface2 rounded-xl p-1">
+      <div className="p-4 sm:p-6 lg:p-8 flex-1 section-enter">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
+          <div className="flex flex-wrap gap-1 bg-hsurface2 rounded-xl p-1">
             {TABS.map(t => (
               <button
                 key={t}
@@ -196,7 +196,58 @@ export default function HousekeepingPage() {
           <Button onClick={() => setAddOpen(true)}>+ New Task</Button>
         </div>
 
-        <div className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
+        {/* Mobile card view — same data/actions as the table below, shown only
+            below md. The table (untouched) takes over at md+. */}
+        <div className="md:hidden bg-white border border-hborder rounded-2xl shadow-card overflow-hidden divide-y divide-hborder">
+          {loading ? (
+            <div className="px-5 py-10 text-center text-hmuted text-sm">Loading…</div>
+          ) : filtered.length === 0 ? (
+            <div className="px-5 py-10 text-center text-hmuted text-sm">No tasks found</div>
+          ) : filtered.map(task => {
+            const { primary, secondary } = getTaskLabel(task)
+            return (
+              <div key={task.id} className="p-4 space-y-2.5">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="font-medium text-htext truncate" title={primary}>{primary}</p>
+                    {secondary && <p className="text-xs text-hmuted truncate">{secondary}</p>}
+                  </div>
+                  <Badge status={task.status} />
+                </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="capitalize text-xs text-hmuted">{task.task_type}</span>
+                  <Badge status={task.priority} />
+                  {task.due_date && <span className="text-xs text-hmuted">Due {formatDate(task.due_date)}</span>}
+                </div>
+                {task.notes && !secondary.includes('From notes') && (
+                  <p className="text-xs text-hmuted/70 italic truncate">{task.notes}</p>
+                )}
+                <select
+                  value={task.assigned_to ?? ''}
+                  onChange={e => handleAssign(task.id, e.target.value)}
+                  className="w-full border border-hborder rounded-lg px-2 py-1.5 text-xs bg-white focus:outline-none focus:border-navy"
+                >
+                  <option value="">Unassigned</option>
+                  {staff.map(s => <option key={s.id} value={s.id}>{s.full_name}</option>)}
+                </select>
+                <div className="flex gap-2">
+                  {task.status === 'pending' && (
+                    <Button size="sm" variant="ghost" className="flex-1" onClick={() => updateStatus(task.id, 'in_progress')}>Start</Button>
+                  )}
+                  {task.status === 'in_progress' && (
+                    <Button size="sm" variant="success" className="flex-1" onClick={() => updateStatus(task.id, 'completed')}>Complete</Button>
+                  )}
+                  {task.status === 'pending' && (
+                    <Button size="sm" variant="ghost" className="flex-1" onClick={() => updateStatus(task.id, 'skipped')}>Skip</Button>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+
+        <div className="hidden md:block bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
+          <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-hsurface2">
@@ -257,14 +308,15 @@ export default function HousekeepingPage() {
               })}
             </tbody>
           </table>
+          </div>
         </div>
       </div>
 
       <Modal open={addOpen} onClose={() => setAddOpen(false)} title="New Housekeeping Task">
         <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {/* Property / Room selector */}
-            <div className="col-span-2">
+            <div className="col-span-1 sm:col-span-2">
               <label className="block text-xs text-hmuted mb-1">Property / Room *</label>
               <select
                 value={targetValue}

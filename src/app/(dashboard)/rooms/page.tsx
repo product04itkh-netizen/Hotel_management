@@ -357,7 +357,7 @@ export default function PropertiesPage() {
   // ── Summary stats ─────────────────────────────────────────────
   const stats = [
     { label: 'Available',   count: houses.filter(h => h.status === 'available').length,   color: '#1A7A4A' },
-    { label: 'Occupied',    count: houses.filter(h => h.status === 'occupied').length,    color: '#004AAD' },
+    { label: 'Occupied',    count: houses.filter(h => h.status === 'occupied').length,    color: '#583808' },
     { label: 'Maintenance', count: houses.filter(h => h.status === 'maintenance').length, color: '#B83232' },
     { label: 'Closed',      count: houses.filter(h => h.status === 'closed').length,      color: '#6B7280' },
   ]
@@ -368,11 +368,11 @@ export default function PropertiesPage() {
         title="Properties"
         subtitle={`Houses & rooms — ${activeBranch?.location ?? ''}`}
       />
-      <div className="p-8 flex-1 section-enter">
+      <div className="p-4 sm:p-6 lg:p-8 flex-1 section-enter">
 
         {/* Toolbar */}
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-5">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
+          <div className="flex flex-wrap items-center gap-3 sm:gap-5">
             {stats.map(s => (
               <button
                 key={s.label}
@@ -388,7 +388,7 @@ export default function PropertiesPage() {
               </button>
             ))}
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <select
               value={filterStatus}
               onChange={e => setFilterStatus(e.target.value)}
@@ -489,7 +489,7 @@ export default function PropertiesPage() {
           return (
             <div className="space-y-5">
               {/* Status + quick stats */}
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="bg-hsurface2 rounded-xl p-3 text-center">
                   <p className="text-xs text-hmuted mb-1">Status</p>
                   <span className={cn('text-xs font-semibold px-2 py-0.5 rounded-full capitalize whitespace-nowrap', c.badge)}>
@@ -718,7 +718,7 @@ export default function PropertiesPage() {
               className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg font-mono"
             />
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-xs text-hmuted mb-1">House Type</label>
               <select
@@ -738,7 +738,7 @@ export default function PropertiesPage() {
                 className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg"
               />
             </div>
-            <div className="col-span-2">
+            <div className="col-span-1 sm:col-span-2">
               <label className="block text-xs text-hmuted mb-1">Base Rate / Night ($)</label>
               <input
                 type="number" min={0} step={0.01}
@@ -807,7 +807,7 @@ export default function PropertiesPage() {
               </p>
             )}
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-xs text-hmuted mb-1">Start Date *</label>
               <input
@@ -859,7 +859,7 @@ export default function PropertiesPage() {
         size="md"
       >
         <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-xs text-hmuted mb-1">Room Name *</label>
               <input

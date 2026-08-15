@@ -715,25 +715,25 @@ export default function BillingPage() {
   return (
     <>
       <TopBar title="Billing & Payments" subtitle={`Invoices & transactions — ${activeBranch?.location ?? ''}`} />
-      <div className="p-8 flex-1 section-enter">
+      <div className="p-4 sm:p-6 lg:p-8 flex-1 section-enter">
 
         {/* Summary */}
-        <div className="grid grid-cols-4 gap-4 mb-6">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
           {[
             { label: 'Revenue Collected', value: formatCurrency(totalRevenue), color: '#1A7A4A' },
             { label: 'Outstanding Balance', value: formatCurrency(unpaidTotal), color: '#B83232' },
-            { label: 'Partial Payments', value: partialCount, color: '#C89B3C' },
-            { label: 'Total Invoices', value: invoices.length, color: '#004AAD' },
+            { label: 'Partial Payments', value: partialCount, color: '#F05830' },
+            { label: 'Total Invoices', value: invoices.length, color: '#583808' },
           ].map(s => (
             <div key={s.label} className="bg-white border border-hborder rounded-2xl p-4 shadow-card relative overflow-hidden">
               <div className="absolute top-0 left-0 w-1 h-full rounded-l-2xl" style={{ background: s.color }} />
               <p className="text-xs text-hmuted uppercase tracking-wide pl-2">{s.label}</p>
-              <p className="font-serif text-2xl text-dark-navy mt-1 pl-2">{s.value}</p>
+              <p className="font-serif text-xl sm:text-2xl text-dark-navy mt-1 pl-2 truncate" title={String(s.value)}>{s.value}</p>
             </div>
           ))}
         </div>
 
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
           <select
             value={statusFilter}
             onChange={e => setStatusFilter(e.target.value)}
@@ -871,7 +871,7 @@ export default function BillingPage() {
             const house = (res as any).house
             const nights = calculateNights(res.check_in_date, res.check_out_date)
             return (
-              <div className="bg-hsurface2 rounded-xl px-4 py-3 grid grid-cols-2 gap-x-6 gap-y-1.5 text-xs">
+              <div className="bg-hsurface2 rounded-xl px-4 py-3 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5 text-xs">
                 <div className="flex justify-between">
                   <span className="text-hmuted">Guest</span>
                   <span className="font-medium text-htext">{(res.guest as any)?.full_name ?? '—'}</span>
@@ -1231,10 +1231,10 @@ export default function BillingPage() {
             .receipt-header { background: #1a1a2e; color: white; padding: 24px 32px; border-radius: 12px 12px 0 0; display: flex; justify-content: space-between; align-items: center; }
             .header-left { display: flex; align-items: center; gap: 16px; }
             .logo { height: 64px; width: 64px; object-fit: contain; border-radius: 8px; background: white; padding: 4px; }
-            .branch-name { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 2px; color: #c89b3c; }
+            .branch-name { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 2px; color: #F05830; }
             .hotel-sub { font-size: 12px; color: #a0aec0; margin-top: 3px; }
             .receipt-label { font-size: 10px; text-transform: uppercase; letter-spacing: 3px; color: #a0aec0; font-weight: 600; }
-            .receipt-num { font-size: 22px; font-weight: 800; color: #c89b3c; letter-spacing: -0.5px; }
+            .receipt-num { font-size: 22px; font-weight: 800; color: #F05830; letter-spacing: -0.5px; }
             .receipt-date { font-size: 12px; color: #a0aec0; margin-top: 2px; }
             .body { border: 1px solid #e8edf3; border-top: none; border-radius: 0 0 12px 12px; padding: 28px 32px; }
             .billed-to { margin-bottom: 24px; }
@@ -1282,14 +1282,14 @@ export default function BillingPage() {
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={branchLogo(activeBranch?.location)} alt={settings?.hotel_name ?? 'OnlyOne Homestay'} style={{ height: 64, width: 64, objectFit: 'contain', borderRadius: 8, background: 'white', padding: 4 }} />
                   <div>
-                    <div style={{ color: '#c89b3c', fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 2 }}>{branchBrandLabel(activeBranch?.location)}</div>
+                    <div style={{ color: '#F05830', fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 2 }}>{branchBrandLabel(activeBranch?.location)}</div>
                     {hotelPhone && <div style={{ color: '#a0aec0', fontSize: 12, marginTop: 3 }}>{hotelPhone}</div>}
                     {hotelAddress && <div style={{ color: '#a0aec0', fontSize: 11, marginTop: 2 }}>{hotelAddress}</div>}
                   </div>
                 </div>
                 <div style={{ textAlign: 'right' }}>
                   <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: 3, color: '#a0aec0', fontWeight: 600 }}>Receipt</div>
-                  <div style={{ fontSize: 22, fontWeight: 800, color: '#c89b3c', letterSpacing: -0.5 }}>{inv.invoice_number}</div>
+                  <div style={{ fontSize: 22, fontWeight: 800, color: '#F05830', letterSpacing: -0.5 }}>{inv.invoice_number}</div>
                   <div style={{ fontSize: 12, color: '#a0aec0', marginTop: 2 }}>{formatDate(inv.invoice_date ?? inv.created_at)}</div>
                 </div>
               </div>

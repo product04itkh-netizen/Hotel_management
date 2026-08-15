@@ -10,7 +10,7 @@ interface StatCardProps {
   icon?: ReactNode
 }
 
-export function StatCard({ label, value, sub, accent = '#004AAD', progress, icon }: StatCardProps) {
+export function StatCard({ label, value, sub, accent = '#583808', progress, icon }: StatCardProps) {
   return (
     <div className="bg-white border border-hborder rounded-2xl p-5 shadow-card relative overflow-hidden">
       <div
@@ -22,7 +22,7 @@ export function StatCard({ label, value, sub, accent = '#004AAD', progress, icon
           <p className="text-xs font-semibold text-hmuted uppercase tracking-wide">{label}</p>
           {icon && <span className="text-xl">{icon}</span>}
         </div>
-        <p className="font-serif text-3xl text-dark-navy mt-1.5 leading-none">{value}</p>
+        <p className="font-serif text-2xl sm:text-3xl text-dark-navy mt-1.5 leading-none truncate" title={String(value)}>{value}</p>
         {progress !== undefined && (
           <div className="mt-2 h-1.5 bg-hsurface2 rounded-full overflow-hidden">
             <div

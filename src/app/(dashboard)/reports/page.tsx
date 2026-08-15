@@ -249,7 +249,7 @@ export default function ReportsPage() {
     const branchLocation = activeBranch?.location ?? ''
 
     // ── Header ──────────────────────────────────────────────
-    doc.setFillColor(0, 74, 173)        // #004AAD navy
+    doc.setFillColor(0, 74, 173)        // #583808 navy
     doc.rect(0, 0, pageW, 28, 'F')
     doc.setTextColor(255, 255, 255)
     doc.setFontSize(16)
@@ -389,18 +389,18 @@ export default function ReportsPage() {
   const totalSource = sourceStats.reduce((s, r) => s + r.count, 0)
 
   const HOUSE_TYPE_COLORS: Record<string, string> = {
-    villa: '#004AAD', bungalow: '#C89B3C', homestay: '#1A7A4A', cottage: '#7C3AED', cabin: '#B83232', chalet: '#0EA5E9',
+    villa: '#583808', bungalow: '#F05830', homestay: '#1A7A4A', cottage: '#7C3AED', cabin: '#B83232', chalet: '#0EA5E9',
   }
 
   return (
     <>
       <TopBar title="Reports & Analytics" subtitle={`Occupancy, revenue & KPIs — ${activeBranch?.location ?? ''}`} />
-      <div className="p-8 flex-1 section-enter">
+      <div className="p-4 sm:p-6 lg:p-8 flex-1 section-enter">
         {/* KPIs */}
-        <div className="grid grid-cols-6 gap-4 mb-6">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
           {[
-            { label: 'Total Revenue', value: formatCurrency(kpis.totalRevenue), accent: '#C89B3C' },
-            { label: 'Total Guests', value: kpis.totalGuests, accent: '#004AAD' },
+            { label: 'Total Revenue', value: formatCurrency(kpis.totalRevenue), accent: '#F05830' },
+            { label: 'Total Guests', value: kpis.totalGuests, accent: '#583808' },
             { label: 'Avg Stay (nights)', value: kpis.avgStay, accent: '#1A7A4A' },
             { label: 'Avg Daily Rate', value: formatCurrency(kpis.adr), accent: '#7C3AED' },
             { label: 'RevPAR (6mo)', value: formatCurrency(kpis.revpar), accent: '#B83232' },
@@ -408,7 +408,7 @@ export default function ReportsPage() {
             <div key={k.label} className="bg-white border border-hborder rounded-2xl p-4 shadow-card relative overflow-hidden">
               <div className="absolute top-0 left-0 w-1 h-full rounded-l-2xl" style={{ background: k.accent }} />
               <p className="text-[11px] text-hmuted uppercase tracking-wide pl-2">{k.label}</p>
-              <p className="font-serif text-2xl text-dark-navy mt-1 pl-2">{k.value}</p>
+              <p className="font-serif text-xl sm:text-2xl text-dark-navy mt-1 pl-2 truncate" title={String(k.value)}>{k.value}</p>
             </div>
           ))}
           {/* Customer Deposits — clickable drill-down */}
@@ -418,7 +418,7 @@ export default function ReportsPage() {
           >
             <div className="absolute top-0 left-0 w-1 h-full rounded-l-2xl" style={{ background: '#0EA5E9' }} />
             <p className="text-[11px] text-hmuted uppercase tracking-wide pl-2">Customer Deposits</p>
-            <p className="font-serif text-2xl text-dark-navy mt-1 pl-2">{formatCurrency(customerDeposits)}</p>
+            <p className="font-serif text-xl sm:text-2xl text-dark-navy mt-1 pl-2 truncate">{formatCurrency(customerDeposits)}</p>
             <span className="pl-2 text-[10px] font-medium text-[#0EA5E9] group-hover:underline">View {depositDetails.length} entr{depositDetails.length === 1 ? 'y' : 'ies'} →</span>
           </button>
         </div>
@@ -436,7 +436,7 @@ export default function ReportsPage() {
               </span>
               <button
                 onClick={exportBalancePDF}
-                className="flex items-center gap-1.5 text-xs font-semibold text-white bg-[#004AAD] hover:bg-[#003a8a] active:bg-[#002d6e] px-3 py-1.5 rounded-lg transition-colors"
+                className="flex items-center gap-1.5 text-xs font-semibold text-white bg-[#583808] hover:bg-[#492E07] active:bg-[#3A2505] px-3 py-1.5 rounded-lg transition-colors"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3M3 17V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
@@ -446,7 +446,7 @@ export default function ReportsPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-3 divide-x divide-hborder">
+          <div className="grid grid-cols-1 divide-y divide-hborder sm:grid-cols-3 sm:divide-x sm:divide-y-0">
             {/* Assets */}
             <div className="p-5">
               <p className="text-[11px] font-semibold tracking-widest text-[#1A7A4A] uppercase mb-3">Assets</p>
@@ -491,7 +491,7 @@ export default function ReportsPage() {
 
             {/* Net Position */}
             <div className="p-5 bg-hsurface2/40">
-              <p className="text-[11px] font-semibold tracking-widest text-[#004AAD] uppercase mb-3">Net Position</p>
+              <p className="text-[11px] font-semibold tracking-widest text-[#583808] uppercase mb-3">Net Position</p>
               <div className="space-y-2.5">
                 <div className="flex justify-between text-sm">
                   <span className="text-hmuted">Gross Billing</span>
@@ -506,15 +506,15 @@ export default function ReportsPage() {
                   <span className="font-semibold text-dark-navy">({formatCurrency(balance.refundsIssued)})</span>
                 </div>
                 <div className="flex justify-between text-sm border-t border-hborder pt-2.5 mt-1">
-                  <span className="font-semibold text-[#004AAD]">Net Revenue</span>
-                  <span className="font-bold text-[#004AAD] text-base">{formatCurrency(balance.netRevenue)}</span>
+                  <span className="font-semibold text-[#583808]">Net Revenue</span>
+                  <span className="font-bold text-[#583808] text-base">{formatCurrency(balance.netRevenue)}</span>
                 </div>
               </div>
             </div>
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-5 mb-5">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
           {/* Revenue chart */}
           <div className="bg-white border border-hborder rounded-2xl p-5 shadow-card">
             <h3 className="font-serif text-[17px] text-dark-navy mb-1">Monthly Revenue</h3>
@@ -565,7 +565,7 @@ export default function ReportsPage() {
           {pl.revenueByType.length === 0 && pl.expenseByCategory.length === 0 ? (
             <p className="text-hmuted text-sm text-center py-10">No GL entries yet. P&L populates automatically when invoices are paid.</p>
           ) : (
-            <div className="grid grid-cols-3 divide-x divide-hborder">
+            <div className="grid grid-cols-1 divide-y divide-hborder sm:grid-cols-3 sm:divide-x sm:divide-y-0">
               {/* Revenue */}
               <div className="p-5">
                 <p className="text-[11px] font-semibold tracking-widest text-[#1A7A4A] uppercase mb-3">Revenue</p>
@@ -652,7 +652,7 @@ export default function ReportsPage() {
 
               {/* Net Income */}
               <div className="p-5 bg-hsurface2/40">
-                <p className="text-[11px] font-semibold tracking-widest text-[#004AAD] uppercase mb-3">Net Income</p>
+                <p className="text-[11px] font-semibold tracking-widest text-[#583808] uppercase mb-3">Net Income</p>
                 <div className="space-y-4">
                   <div className="flex justify-between text-sm">
                     <span className="text-hmuted">Total Revenue</span>
@@ -663,7 +663,7 @@ export default function ReportsPage() {
                     <span className="font-semibold text-dark-navy">({formatCurrency(pl.totalExpenses)})</span>
                   </div>
                   <div className="flex justify-between text-sm border-t border-hborder pt-3 mt-1">
-                    <span className="font-semibold text-[#004AAD]">Net Income</span>
+                    <span className="font-semibold text-[#583808]">Net Income</span>
                     <span className={`font-bold text-base ${pl.netIncome >= 0 ? 'text-[#1A7A4A]' : 'text-[#B83232]'}`}>
                       {pl.netIncome < 0 ? `(${formatCurrency(Math.abs(pl.netIncome))})` : formatCurrency(pl.netIncome)}
                     </span>
@@ -680,7 +680,7 @@ export default function ReportsPage() {
           )}
         </div>
 
-        <div className="grid grid-cols-2 gap-5">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
           {/* House type distribution */}
           <div className="bg-white border border-hborder rounded-2xl p-5 shadow-card">
             <h3 className="font-serif text-[17px] text-dark-navy mb-1">House Type Bookings</h3>
@@ -716,7 +716,7 @@ export default function ReportsPage() {
             ) : (
               <div className="space-y-3">
                 {sourceStats.map((s, i) => {
-                  const colors = ['#004AAD','#C89B3C','#1A7A4A','#B83232','#7C3AED']
+                  const colors = ['#583808','#F05830','#1A7A4A','#B83232','#7C3AED']
                   return (
                     <div key={s.source} className="flex items-center gap-3">
                       <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: colors[i % colors.length] }} />

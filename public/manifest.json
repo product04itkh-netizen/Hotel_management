@@ -1,0 +1,16 @@
+{
+  "name": "OnlyOne Homestay — Management System",
+  "short_name": "OnlyOne PMS",
+  "description": "Property management system for OnlyOne Homestay — Kampot & Srae Ambel branches. Reservations, front desk, housekeeping, billing and more.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#F7F5F0",
+  "theme_color": "#3A2505",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

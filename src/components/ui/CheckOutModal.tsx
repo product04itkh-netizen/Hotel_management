@@ -86,7 +86,7 @@ export function CheckOutModal({ open, guestName, reservationNumber, houseName, c
       <div className="space-y-4">
 
         {/* Summary */}
-        <div className="bg-hsurface2 rounded-xl px-4 py-3 grid grid-cols-2 gap-x-6 gap-y-1 text-xs">
+        <div className="bg-hsurface2 rounded-xl px-4 py-3 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1 text-xs">
           <div className="flex justify-between">
             <span className="text-hmuted">Guest</span>
             <span className="font-semibold text-htext">{guestName}</span>
@@ -95,7 +95,7 @@ export function CheckOutModal({ open, guestName, reservationNumber, houseName, c
             <span className="text-hmuted">Property</span>
             <span className="font-semibold text-htext">{houseName || '—'}</span>
           </div>
-          <div className="flex justify-between col-span-2">
+          <div className="flex justify-between col-span-1 sm:col-span-2">
             <span className="text-hmuted">Reservation</span>
             <span className="font-medium text-htext">{reservationNumber} · Checkout {checkOutDate}</span>
           </div>
@@ -143,6 +143,11 @@ export function CheckOutModal({ open, guestName, reservationNumber, houseName, c
             <p className="text-xs text-hmuted italic">No extra charges — click "+ Add Charge" to add damage fees or additional costs.</p>
           ) : (
             <div className="space-y-2">
+              {/* Horizontal scroll below ~420px — a 5-field row (desc/account/
+                  amount/remove) can't compress further without breaking the
+                  inputs; swipe instead of squeezing them unusable. */}
+              <div className="overflow-x-auto">
+              <div className="min-w-[420px] space-y-2">
               <div className="grid grid-cols-12 gap-2 px-0.5">
                 <span className="col-span-5 text-[10px] text-hmuted uppercase tracking-wide">Description</span>
                 <span className="col-span-3 text-[10px] text-hmuted uppercase tracking-wide">Account</span>
@@ -175,6 +180,8 @@ export function CheckOutModal({ open, guestName, reservationNumber, houseName, c
                   <button onClick={() => removeCharge(idx)} className="col-span-1 text-red-400 hover:text-red-600 text-center text-lg leading-none">×</button>
                 </div>
               ))}
+              </div>
+              </div>
               {totalExtra > 0 && (
                 <div className="flex justify-between text-sm font-semibold text-red-700 border-t border-red-100 pt-2 mt-1">
                   <span>Total Extra Charges</span>

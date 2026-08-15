@@ -96,21 +96,21 @@ export default function DashboardPage() {
   return (
     <>
       <TopBar title="Dashboard" />
-      <div className="p-8 flex-1 section-enter">
+      <div className="p-4 sm:p-6 lg:p-8 flex-1 section-enter">
         {/* Stats */}
-        <div className="grid grid-cols-4 gap-4 mb-6">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
           <StatCard
             label="Occupancy Rate"
             value={`${occupancyRate}%`}
             sub={`${stats.occupiedHouses} / ${stats.totalHouses} houses`}
-            accent="#004AAD"
+            accent="#583808"
             progress={occupancyRate}
           />
           <StatCard
             label="Today's Revenue"
             value={formatCurrency(stats.todayRevenue)}
             sub="Payments received today"
-            accent="#C89B3C"
+            accent="#F05830"
           />
           <StatCard
             label="Check-ins Today"
@@ -126,7 +126,7 @@ export default function DashboardPage() {
           />
         </div>
 
-        <div className="grid grid-cols-2 gap-5 mb-5">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
           {/* Weekly Occupancy Chart */}
           <div className="bg-white border border-hborder rounded-2xl p-5 shadow-card">
             <h3 className="font-serif text-[17px] text-dark-navy">Weekly Occupancy</h3>
@@ -138,7 +138,7 @@ export default function DashboardPage() {
                     className="w-full rounded-t-sm transition-all duration-500"
                     style={{
                       height: `${(val / maxBar) * 88}px`,
-                      background: i >= 4 ? '#C89B3C' : '#004AAD',
+                      background: i >= 4 ? '#F05830' : '#583808',
                     }}
                   />
                   <span className="text-[10px] text-hmuted">{WEEK_DAYS[i]}</span>
@@ -154,7 +154,7 @@ export default function DashboardPage() {
             <div className="space-y-3">
               {[
                 { label: 'Available',   count: stats.availableHouses,   color: '#1A7A4A' },
-                { label: 'Occupied',    count: stats.occupiedHouses,    color: '#004AAD' },
+                { label: 'Occupied',    count: stats.occupiedHouses,    color: '#583808' },
                 { label: 'Maintenance', count: stats.maintenanceHouses, color: '#B83232' },
                 { label: 'Closed',      count: stats.totalHouses - stats.availableHouses - stats.occupiedHouses - stats.maintenanceHouses, color: '#6B7280' },
               ].map(row => (

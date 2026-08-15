@@ -173,8 +173,8 @@ export default function StaffPage() {
   }
 
   const roleColors: Record<string, string> = {
-    admin: '#B83232', manager: '#004AAD', receptionist: '#1A7A4A',
-    housekeeping: '#C89B3C', maintenance: '#7C3AED', accounting: '#0891B2',
+    admin: '#B83232', manager: '#583808', receptionist: '#1A7A4A',
+    housekeeping: '#F05830', maintenance: '#7C3AED', accounting: '#0891B2',
   }
 
   const roleStats = ROLES.map(r => ({ role: r, count: staff.filter(s => s.role === r && s.status === 'active').length }))
@@ -182,9 +182,9 @@ export default function StaffPage() {
   return (
     <>
       <TopBar title="Staff & Users" subtitle={`Roles & permissions — ${activeBranch?.location ?? ''}`} />
-      <div className="p-8 flex-1 section-enter">
+      <div className="p-4 sm:p-6 lg:p-8 flex-1 section-enter">
         {/* Role summary */}
-        <div className="grid grid-cols-6 gap-3 mb-6">
+        <div className="grid grid-cols-3 sm:grid-cols-6 gap-3 mb-6">
           {roleStats.map(r => (
             <div key={r.role} className="bg-white border border-hborder rounded-xl p-3 shadow-card text-center">
               <div className="w-2 h-2 rounded-full mx-auto mb-2" style={{ background: roleColors[r.role] }} />
@@ -195,13 +195,13 @@ export default function StaffPage() {
         </div>
 
         {/* Controls */}
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+          <div className="flex flex-wrap gap-3">
             <input
               value={search}
               onChange={e => setSearch(e.target.value)}
               placeholder="Search staff…"
-              className="border border-hborder rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-navy w-56"
+              className="border border-hborder rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-navy w-full sm:w-56"
             />
             <select
               value={roleFilter}
@@ -216,6 +216,7 @@ export default function StaffPage() {
         </div>
 
         <div className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
+          <div className="overflow-x-auto">
           <table className="w-full text-sm table-fixed">
             <thead>
               <tr className="bg-hsurface2">
@@ -283,6 +284,7 @@ export default function StaffPage() {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       </div>
 
@@ -298,8 +300,8 @@ export default function StaffPage() {
 
       <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={editId ? 'Edit Staff Member' : 'Add Staff Member'} size="md">
         <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <div className="col-span-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="col-span-1 sm:col-span-2">
               <label className="block text-xs text-hmuted mb-1">Full Name *</label>
               <input
                 value={form.full_name}

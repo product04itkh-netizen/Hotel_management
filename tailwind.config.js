@@ -8,10 +8,10 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        navy: '#004AAD',
-        'dark-navy': '#002D6E',
-        gold: '#C89B3C',
-        'gold-light': '#F0D080',
+        navy: '#583808',
+        'dark-navy': '#3A2505',
+        gold: '#F05830',
+        'gold-light': '#F9C0B0',
         'hbg': '#F7F5F0',
         'hsurface': '#FFFFFF',
         'hsurface2': '#F0EDE6',

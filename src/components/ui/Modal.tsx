@@ -16,11 +16,11 @@ export function Modal({ open, onClose, title, subtitle, children, size = 'md' }:
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-2 sm:p-4"
     >
       <div
         className={cn(
-          'bg-white rounded-2xl shadow-2xl w-full max-h-[90vh] overflow-y-auto',
+          'bg-white rounded-2xl shadow-2xl w-full max-h-[95vh] sm:max-h-[90vh] overflow-y-auto',
           {
             'max-w-sm': size === 'sm',
             'max-w-lg': size === 'md',

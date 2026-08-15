@@ -433,6 +433,11 @@ export default function FrontDeskPage() {
             </div>
           </div>
 
+          {/* Calendar grid — horizontal scroll below ~640px; a 7-column month
+              view can't compress further and stay usable, same pattern every
+              mobile calendar app uses. */}
+          <div className="overflow-x-auto">
+          <div className="min-w-[640px]">
           {/* Day-of-week header */}
           <div className="grid grid-cols-7 border-b border-hborder">
             {DAY_LABELS.map(d => (
@@ -522,6 +527,8 @@ export default function FrontDeskPage() {
               </div>
             ))
           )}
+          </div>
+          </div>
         </div>
       </div>
     )
@@ -536,7 +543,7 @@ export default function FrontDeskPage() {
   return (
     <>
       <TopBar title="Front Desk" subtitle={`Check-in & check-out — ${activeBranch?.location ?? ''}`} />
-      <div className="p-8 flex-1 section-enter">
+      <div className="p-4 sm:p-6 lg:p-8 flex-1 section-enter">
 
         {/* Header row */}
         <div className="flex justify-end mb-6">
@@ -544,7 +551,7 @@ export default function FrontDeskPage() {
         </div>
 
         {/* ── TODAY VIEW ── */}
-        <div className="grid grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Arrivals */}
             <div className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
               <div className="px-5 py-4 border-b border-hborder flex items-center justify-between">

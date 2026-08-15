@@ -324,32 +324,32 @@ export default function InventoryPage() {
   return (
     <>
       <TopBar title="Inventory" subtitle={`Stock & consumables — ${activeBranch?.location ?? ''}`} />
-      <div className="p-8 flex-1 section-enter">
-        <div className="grid grid-cols-3 gap-4 mb-5">
+      <div className="p-4 sm:p-6 lg:p-8 flex-1 section-enter">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-5">
           {[
-            { label: 'Active Items', value: String(activeItems.length), color: '#004AAD' },
+            { label: 'Active Items', value: String(activeItems.length), color: '#583808' },
             { label: 'Low Stock',    value: String(lowStock.length),    color: lowStock.length > 0 ? '#B83232' : '#1A7A4A' },
-            { label: 'Total Value',  value: formatCurrency(totalValue), color: '#C89B3C' },
+            { label: 'Total Value',  value: formatCurrency(totalValue), color: '#F05830' },
           ].map(s => (
             <div key={s.label} className="bg-white border border-hborder rounded-2xl p-4 shadow-card relative overflow-hidden">
               <div className="absolute top-0 left-0 w-1 h-full rounded-l-2xl" style={{ background: s.color }} />
               <p className="text-[11px] text-hmuted uppercase tracking-wide pl-2">{s.label}</p>
-              <p className="font-serif text-2xl text-dark-navy mt-1 pl-2">{s.value}</p>
+              <p className="font-serif text-xl sm:text-2xl text-dark-navy mt-1 pl-2 truncate" title={s.value}>{s.value}</p>
             </div>
           ))}
         </div>
 
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+          <div className="flex flex-wrap items-center gap-3">
             <input
               value={search}
               onChange={e => setSearch(e.target.value)}
               placeholder="Search items…"
-              className="border border-hborder rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-navy w-56"
+              className="border border-hborder rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-navy w-full sm:w-56"
             />
             <p className="text-sm text-hmuted whitespace-nowrap">{activeItems.length} active · {invItems.length - activeItems.length} inactive</p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             {invItems.length > 0 && <Button variant="ghost" onClick={() => openUsageModal()}>Record Usage</Button>}
             {invItems.length > 0 && <Button variant="ghost" onClick={() => openPurchaseModal()}>Record Purchase</Button>}
             <Button onClick={openAddInventoryItem}>+ Add Item</Button>
@@ -357,6 +357,7 @@ export default function InventoryPage() {
         </div>
 
         <div className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
+          <div className="overflow-x-auto">
           <table className="w-full text-sm table-fixed">
             <thead><tr className="bg-hsurface2">
               {([['Item', 'w-[19%]', 'left'], ['Category', 'w-[10%]', 'left'], ['On Hand', 'w-[11%]', 'right'], ['Unit Cost', 'w-[9%]', 'right'], ['Value', 'w-[10%]', 'right'], ['Expense Acct', 'w-[16%]', 'left'], ['Status', 'w-[7%]', 'left'], ['Actions', 'w-[18%]', 'left']] as const).map(([h, w, align]) => (
@@ -408,6 +409,7 @@ export default function InventoryPage() {
               })}
             </tbody>
           </table>
+          </div>
         </div>
       </div>
 
@@ -418,7 +420,7 @@ export default function InventoryPage() {
             <label className="block text-xs text-hmuted mb-1">Item Name *</label>
             <input value={invItemForm.name} onChange={e => setInvItemForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Toilet Paper" className={input} />
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-xs text-hmuted mb-1">Unit</label>
               <input value={invItemForm.unit} onChange={e => setInvItemForm(f => ({ ...f, unit: e.target.value }))} placeholder="pack, kg, bottle…" className={input} />
@@ -437,7 +439,7 @@ export default function InventoryPage() {
             </select>
             <p className="text-[10px] text-hmuted mt-1">Defaults from category — change if this item doesn't fit.</p>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-xs text-hmuted mb-1">Reorder Point</label>
               <input type="number" min={0} step={0.01} value={invItemForm.reorder_point} onChange={e => setInvItemForm(f => ({ ...f, reorder_point: e.target.value }))} placeholder="0" className={input} />
@@ -487,7 +489,7 @@ export default function InventoryPage() {
               {invItems.filter(i => i.is_active).map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
             </select>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-xs text-hmuted mb-1">Quantity</label>
               <input type="number" min={0} step={0.01} value={invPurchaseForm.quantity} onChange={e => setInvPurchaseForm(f => ({ ...f, quantity: e.target.value }))} placeholder="0" className={input} />
@@ -535,7 +537,7 @@ export default function InventoryPage() {
               {invItems.filter(i => i.is_active).map(i => <option key={i.id} value={i.id}>{i.name} ({invOnHand(i.id)} {i.unit} on hand)</option>)}
             </select>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-xs text-hmuted mb-1">Quantity</label>
               <input type="number" min={0} step={0.01} value={invUsageForm.quantity} onChange={e => setInvUsageForm(f => ({ ...f, quantity: e.target.value }))} placeholder="0" className={input} />

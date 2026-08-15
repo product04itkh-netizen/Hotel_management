@@ -121,7 +121,7 @@ export function CheckInModal(props: Props) {
 
         {/* ── RESERVATION MODE: summary banner ─────────────────────────── */}
         {props.mode === 'reservation' && (
-          <div className="bg-hsurface2 rounded-xl px-4 py-3 grid grid-cols-2 gap-x-6 gap-y-1 text-xs">
+          <div className="bg-hsurface2 rounded-xl px-4 py-3 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1 text-xs">
             <div className="flex justify-between">
               <span className="text-hmuted">Guest</span>
               <span className="font-semibold text-htext">{props.guestName}</span>
@@ -155,8 +155,8 @@ export function CheckInModal(props: Props) {
         {props.mode === 'walkin' && (
           <div className="space-y-3">
             <p className="text-xs font-semibold text-hmuted uppercase tracking-wide">Guest Details *</p>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="col-span-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="col-span-1 sm:col-span-2">
                 <label className="block text-xs text-hmuted mb-1">Full Name *</label>
                 <input
                   value={form.guest_name}
@@ -240,7 +240,7 @@ export function CheckInModal(props: Props) {
         {/* ── ID VERIFICATION (both modes) ─────────────────────────────── */}
         <div>
           <p className="text-xs font-semibold text-hmuted uppercase tracking-wide mb-2">ID Verification *</p>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-xs text-hmuted mb-1">ID Type</label>
               <select
@@ -282,7 +282,7 @@ export function CheckInModal(props: Props) {
         </div>
 
         {/* ── Vehicle & Notes (both modes) ─────────────────────────────── */}
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label className="block text-xs text-hmuted mb-1">Vehicle Plate</label>
             <input

@@ -4,6 +4,7 @@ import { usePathname } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
 import { cn, capitalize, branchLogo, branchBrand } from '@/lib/utils'
 import { useBranch } from '@/context/BranchContext'
+import { useMobileNav } from '@/context/MobileNavContext'
 import { createClient } from '@/lib/supabase/client'
 import type { Branch } from '@/types'
 
@@ -183,6 +184,7 @@ function useCurrentStaff() {
 export function Sidebar() {
   const pathname = usePathname()
   const { activeBranch } = useBranch()
+  const { open, setOpen } = useMobileNav()
   const [pendingHref, setPendingHref] = useState<string | null>(null)
   const currentUser = useCurrentStaff()
   const userName = currentUser?.name ?? '…'
@@ -190,17 +192,46 @@ export function Sidebar() {
 
   useEffect(() => {
     setPendingHref(null)
-  }, [pathname])
+    setOpen(false) // close the mobile drawer on navigation
+  }, [pathname]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <aside className="w-60 min-h-screen bg-dark-navy flex flex-col flex-shrink-0 sticky top-0 h-screen">
+    <>
+      {/* Mobile backdrop — tap to close. Never renders at lg+ (drawer is n/a there). */}
+      {open && (
+        <div
+          className="fixed inset-0 bg-black/50 z-40 lg:hidden"
+          onClick={() => setOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+      <aside
+        className={cn(
+          'w-60 bg-dark-navy flex flex-col flex-shrink-0',
+          // Mobile/tablet: fixed slide-over drawer, off-canvas by default.
+          'fixed inset-y-0 left-0 z-50 h-screen transform transition-transform duration-200 ease-out',
+          open ? 'translate-x-0' : '-translate-x-full',
+          // Desktop (lg+): back to the original always-visible, in-flow sidebar.
+          'lg:sticky lg:top-0 lg:translate-x-0 lg:min-h-screen'
+        )}
+      >
       {/* Logo */}
-      <div className="px-4 py-4 border-b border-white/10 flex items-center justify-center">
+      <div className="px-4 py-4 border-b border-white/10 flex items-center justify-center relative">
         <img
           src={branchLogo(activeBranch?.location)}
           alt={activeBranch?.location ?? 'OnlyOne Homestay'}
           className="h-16 w-auto object-contain rounded-xl bg-white px-2 py-1.5 shadow-sm"
         />
+        {/* Close button — mobile drawer only */}
+        <button
+          onClick={() => setOpen(false)}
+          className="lg:hidden absolute right-3 top-1/2 -translate-y-1/2 w-8 h-8 rounded-lg text-white/60 hover:text-white hover:bg-white/10 flex items-center justify-center transition-colors"
+          aria-label="Close menu"
+        >
+          <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
       </div>
 
       {/* Branch Switcher */}
@@ -259,6 +290,7 @@ export function Sidebar() {
           </div>
         </div>
       </div>
-    </aside>
+      </aside>
+    </>
   )
 }
