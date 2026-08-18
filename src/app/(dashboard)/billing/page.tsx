@@ -283,6 +283,7 @@ export default function BillingPage() {
     invoiceNumber: string,
     items: { account_code?: string; total: number }[],
     paymentAmount: number,
+    invoiceTotal: number,
   ): Promise<{ entry_id: string; account_id: string; debit: number; credit: number; description: string }[]> {
     if (!activeBranch || paymentAmount <= 0) return []
 
@@ -291,6 +292,18 @@ export default function BillingPage() {
       const code = (item as any).account_code || '4300'
       accountTotals[code] = (accountTotals[code] || 0) + Number(item.total)
     })
+    // Item totals are pre-invoice-level-discount (only per-item discounts are
+    // baked in), so their sum can exceed the invoice's actual net total —
+    // e.g. a negotiated $70 discount applied at invoice level, not per line.
+    // Scale every account's share down proportionally so the split reflects
+    // what was actually earned, instead of letting whichever account sorts
+    // first (always '4000' House Rental) silently absorb the whole payment
+    // and starve F&B/Activity/Other of any credit at all.
+    const rawSum = Object.values(accountTotals).reduce((s, v) => s + v, 0)
+    if (rawSum > 0.001 && Math.abs(rawSum - invoiceTotal) > 0.01) {
+      const scale = invoiceTotal / rawSum
+      for (const code of Object.keys(accountTotals)) accountTotals[code] = accountTotals[code] * scale
+    }
     const codes = Object.keys(accountTotals).sort()
     if (codes.length === 0) return []
 
@@ -406,7 +419,7 @@ export default function BillingPage() {
 
           if (jeErr) { toast(`Invoice created but JE failed: ${jeErr.message}`, 'error') }
           else if (je) {
-            const revenueLines = await buildRevenueLines(je.id, inv.invoice_number, form.items, initialPaid)
+            const revenueLines = await buildRevenueLines(je.id, inv.invoice_number, form.items, initialPaid, total)
             const lines = [{ entry_id: je.id, account_id: depositLiabilityAcc.id, debit: initialPaid, credit: 0, description: 'Deposit Applied — Liability Cleared' }, ...revenueLines]
 
             const { error: lineErr } = await supabase.from('journal_entry_lines').insert(lines)
@@ -528,7 +541,7 @@ export default function BillingPage() {
         toast(`Invoice created but JE failed: ${jeErr.message}`, 'error')
       } else if (je) {
         const debitLines = carriedForwardLines.map(l => ({ entry_id: je.id, account_id: l.account_id, debit: l.amount, credit: 0, description: 'Carried forward — unchanged' }))
-        const revenueLines = await buildRevenueLines(je.id, inv.invoice_number, form.items, carriedTotal)
+        const revenueLines = await buildRevenueLines(je.id, inv.invoice_number, form.items, carriedTotal, total)
 
         const { error: lineErr } = await supabase.from('journal_entry_lines').insert([...debitLines, ...revenueLines])
         if (lineErr) {
@@ -611,7 +624,7 @@ export default function BillingPage() {
         if (jeErr) throw jeErr
         if (je) {
           jeId = je.id
-          const revenueLines = await buildRevenueLines(je.id, selectedInvoice.invoice_number, selectedInvoice.items, amountReceived)
+          const revenueLines = await buildRevenueLines(je.id, selectedInvoice.invoice_number, selectedInvoice.items, amountReceived, Number(selectedInvoice.total))
           const lines = [
             { entry_id: je.id, account_id: cashAcct.id, description: `${capitalize(payForm.payment_method.replace('_', ' '))} received`, debit: amountReceived, credit: 0 },
             ...revenueLines,
@@ -643,7 +656,7 @@ export default function BillingPage() {
               }).select().single()
               if (depJeErr) throw depJeErr
               if (depJe) {
-                const revenueLines = await buildRevenueLines(depJe.id, selectedInvoice.invoice_number, selectedInvoice.items, res.deposit)
+                const revenueLines = await buildRevenueLines(depJe.id, selectedInvoice.invoice_number, selectedInvoice.items, res.deposit, Number(selectedInvoice.total))
                 const lines = [
                   { entry_id: depJe.id, account_id: depositLiabilityAcc.id, debit: res.deposit, credit: 0, description: 'Deposit Applied — Liability Cleared' },
                   ...revenueLines,
