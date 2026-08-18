@@ -3478,29 +3478,30 @@ export default function AccountingPage() {
       <Modal open={correctCoaOpen} onClose={() => setCorrectCoaOpen(false)} title={`Correct Account — ${correctCoaEntry?.entry_number ?? ''}`} size="sm">
         <div className="space-y-3">
           <p className="text-sm text-htext">
-            Reassign a line to a different account. Only accounts of the same type are offered, so debit/credit and reporting stay valid.
+            Reassign a line to any account in the Chart of Accounts. The debit/credit amount is unchanged — only the account this line posts to moves, so double check the account's type still makes sense for this line before saving.
           </p>
           <div className="space-y-2.5">
-            {correctCoaLines.map(l => {
-              const sameTypeAccounts = accounts.filter(a => a.is_active && a.type === l.account?.type)
-              return (
-                <div key={l.id} className="border border-hborder rounded-lg p-2.5 space-y-1.5">
-                  <div className="flex items-center justify-between text-xs text-hmuted">
-                    <span>{l.description || '—'}</span>
-                    <span className="font-semibold tabular-nums">{Number(l.debit) > 0 ? `Dr ${formatCurrency(l.debit)}` : `Cr ${formatCurrency(l.credit)}`}</span>
-                  </div>
-                  <select
-                    value={l.newAccountId}
-                    onChange={ev => setCorrectCoaLineAccount(l.id, ev.target.value)}
-                    className={input}
-                  >
-                    {sameTypeAccounts.map(a => (
-                      <option key={a.id} value={a.id}>{a.code} — {a.name}</option>
-                    ))}
-                  </select>
+            {correctCoaLines.map(l => (
+              <div key={l.id} className="border border-hborder rounded-lg p-2.5 space-y-1.5">
+                <div className="flex items-center justify-between text-xs text-hmuted">
+                  <span>{l.description || '—'}</span>
+                  <span className="font-semibold tabular-nums">{Number(l.debit) > 0 ? `Dr ${formatCurrency(l.debit)}` : `Cr ${formatCurrency(l.credit)}`}</span>
                 </div>
-              )
-            })}
+                <select
+                  value={l.newAccountId}
+                  onChange={ev => setCorrectCoaLineAccount(l.id, ev.target.value)}
+                  className={input}
+                >
+                  {ACCOUNT_TYPES.map(type => (
+                    <optgroup key={type} label={capitalize(type)}>
+                      {accountsByType[type].filter(a => a.is_active).map(a => (
+                        <option key={a.id} value={a.id}>{a.code} — {a.name}</option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+              </div>
+            ))}
           </div>
           <p className="text-[10px] text-hmuted border-t border-hborder pt-3">
             {correctCoaEntry?.reference_type && ['invoice', 'deposit_applied', 'invoice_correction'].includes(correctCoaEntry.reference_type)
