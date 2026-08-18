@@ -798,14 +798,21 @@ export default function AccountingPage() {
 
     const isInvoiceLinked = ['invoice', 'deposit_applied', 'invoice_correction'].includes(correctCoaEntry.reference_type ?? '')
     const revenueChanges = changed.filter(l => l.account?.type === 'revenue')
-    if (isInvoiceLinked && revenueChanges.length > 0 && correctCoaEntry.reference) {
+    // Only propagate to the invoice's line items when the line is STAYING within
+    // revenue (e.g. moved to a different revenue account) — buildRevenueLines()
+    // looks up whatever code sits in item.account_code with no type check, so
+    // pointing it at a non-revenue account (expense, asset, ...) would make
+    // future payments silently credit the wrong kind of account.
+    const revenueToRevenue = revenueChanges.filter(l => accounts.find(a => a.id === l.newAccountId)?.type === 'revenue')
+    const skippedCrossType = revenueChanges.length - revenueToRevenue.length
+    if (isInvoiceLinked && revenueToRevenue.length > 0 && correctCoaEntry.reference) {
       const { data: inv } = await supabase.from('invoices').select('id, items').eq('invoice_number', correctCoaEntry.reference).eq('branch_id', activeBranch.id).maybeSingle()
       if (inv?.items) {
-        const newAccounts = accounts.filter(a => revenueChanges.some(l => l.newAccountId === a.id))
-        const oldCodes = new Set(revenueChanges.map(l => l.account?.code).filter(Boolean))
+        const newAccounts = accounts.filter(a => revenueToRevenue.some(l => l.newAccountId === a.id))
+        const oldCodes = new Set(revenueToRevenue.map(l => l.account?.code).filter(Boolean))
         const items = (inv.items as any[]).map(item => {
           if (oldCodes.has(item.account_code)) {
-            const line = revenueChanges.find(l => l.account?.code === item.account_code)
+            const line = revenueToRevenue.find(l => l.account?.code === item.account_code)
             const newAcc = newAccounts.find(a => a.id === line?.newAccountId)
             if (newAcc) return { ...item, account_code: newAcc.code }
           }
@@ -816,7 +823,11 @@ export default function AccountingPage() {
     }
 
     setEntryLines(prev => { const next = { ...prev }; delete next[correctCoaEntry.id]; return next })
-    toast(`Account corrected for ${changed.length} line${changed.length > 1 ? 's' : ''} on ${correctCoaEntry.entry_number}`)
+    if (skippedCrossType > 0) {
+      toast(`Account corrected, but ${skippedCrossType} revenue line${skippedCrossType > 1 ? 's' : ''} moved to a non-revenue account — ${correctCoaEntry.reference ?? 'the invoice'}'s line item still points at the old revenue account for future payments. Update it directly on the reservation/invoice if that's not intended.`, 'error')
+    } else {
+      toast(`Account corrected for ${changed.length} line${changed.length > 1 ? 's' : ''} on ${correctCoaEntry.entry_number}`)
+    }
     setCorrectCoaSaving(false)
     setCorrectCoaOpen(false)
     setCorrectCoaEntry(null)
