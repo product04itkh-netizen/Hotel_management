@@ -80,6 +80,9 @@ export interface FixedAsset {
   quantity: number
   unit_cost: number
   total_cost: number
+  /** Source of truth for depreciation — months over which the asset depreciates. Null when non-depreciable. */
+  useful_life_months?: number | null
+  /** Database-generated from useful_life_months (12 / months); read-only, never written by the app. */
   depreciation_rate: number
   is_depreciable: boolean
   invoice_doc_ref?: string

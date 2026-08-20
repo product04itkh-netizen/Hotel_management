@@ -15,13 +15,27 @@ import type { FixedAsset, AssetCategory, AssetStatus } from '@/types'
 type Tab = 'overview' | 'register' | 'depreciation'
 
 // ─── Category config ──────────────────────────────────────────────────────────
-const CATEGORIES: { value: AssetCategory; label: string; rate: number; dot: string }[] = [
-  { value: 'land',           label: 'Land',                     rate: 0,    dot: '#6B7280' },
-  { value: 'building',       label: 'Buildings & Construction', rate: 0.05, dot: '#8B5CF6' },
-  { value: 'computer_office',label: 'Computer & Office',        rate: 0.20, dot: '#3B82F6' },
-  { value: 'furniture',      label: 'Furniture & Equipment',    rate: 0.20, dot: '#F59E0B' },
-  { value: 'machinery',      label: 'Machinery & Electrical',   rate: 0.10, dot: '#10B981' },
-  { value: 'vehicle',        label: 'Vehicle & Watercraft',     rate: 0.10, dot: '#EF4444' },
+// Useful life (months) is the only thing anyone edits — it's what the source
+// fixed-asset files actually specify, and depreciation_rate is a database-
+// generated column computed from it (12 / months), so the two can never
+// drift out of sync again. Defaults match Cambodian GDT depreciation classes,
+// confirmed against the source files' own rate table: Class 1 buildings =
+// 240mo (5%/yr), Class 2 computer/electronics = 24mo (50%/yr), Class 3
+// furniture = 48mo (25%/yr), Class 4 machinery/vehicle = 48mo (25%/yr).
+// 'computer_office' currently holds this branch's linen/housekeeping items
+// rather than literal computers — those depreciate on each item's own
+// useful life (set manually per item), not this category default.
+function rateFromMonths(months: number | null | undefined): number {
+  return months && months > 0 ? Math.round((12 / months) * 10000) / 10000 : 0
+}
+
+const CATEGORIES: { value: AssetCategory; label: string; usefulLifeMonths: number; dot: string }[] = [
+  { value: 'land',           label: 'Land',                     usefulLifeMonths: 0,   dot: '#6B7280' },
+  { value: 'building',       label: 'Buildings & Construction', usefulLifeMonths: 240, dot: '#8B5CF6' },
+  { value: 'computer_office',label: 'Computer & Office',        usefulLifeMonths: 24,  dot: '#3B82F6' },
+  { value: 'furniture',      label: 'Furniture & Equipment',    usefulLifeMonths: 48,  dot: '#F59E0B' },
+  { value: 'machinery',      label: 'Machinery & Electrical',   usefulLifeMonths: 48,  dot: '#10B981' },
+  { value: 'vehicle',        label: 'Vehicle & Watercraft',     usefulLifeMonths: 48,  dot: '#EF4444' },
 ]
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
@@ -38,7 +52,7 @@ const emptyForm = {
   quantity: 1,
   unit_cost: 0,
   total_cost: 0,
-  depreciation_rate: 0.20,
+  useful_life_months: 48 as number | null,
   is_depreciable: true,
   invoice_doc_ref: '',
   notes: '',
@@ -228,7 +242,7 @@ export default function AssetsPage() {
       quantity: a.quantity,
       unit_cost: a.unit_cost,
       total_cost: a.total_cost,
-      depreciation_rate: a.depreciation_rate,
+      useful_life_months: a.useful_life_months ?? (a.is_depreciable ? catInfo(a.category).usefulLifeMonths : null),
       is_depreciable: a.is_depreciable,
       invoice_doc_ref: a.invoice_doc_ref ?? '',
       notes: a.notes ?? '',
@@ -249,7 +263,7 @@ export default function AssetsPage() {
     const info = catInfo(cat)
     setForm(f => ({
       ...f, category: cat,
-      depreciation_rate: info.rate,
+      useful_life_months: cat === 'land' ? null : info.usefulLifeMonths,
       is_depreciable: cat !== 'land',
     }))
   }
@@ -266,11 +280,11 @@ export default function AssetsPage() {
       purchased_date:    form.purchased_date || null,
       location:          form.location || null,
       incharge:          form.incharge || null,
-      quantity:          Number(form.quantity),
-      unit_cost:         Number(form.unit_cost),
-      total_cost:        Number(form.total_cost),
-      depreciation_rate: Number(form.depreciation_rate),
-      is_depreciable:    form.is_depreciable,
+      quantity:           Number(form.quantity),
+      unit_cost:          Number(form.unit_cost),
+      total_cost:         Number(form.total_cost),
+      useful_life_months: form.is_depreciable ? (form.useful_life_months || null) : null,
+      is_depreciable:     form.is_depreciable,
       invoice_doc_ref:   form.invoice_doc_ref || null,
       notes:             form.notes || null,
       status:            form.status,
@@ -388,7 +402,7 @@ export default function AssetsPage() {
                       <td className="text-right px-3 py-2 text-hmuted">{c.count}</td>
                       <td className="text-right px-3 py-2 font-medium text-htext">{formatCurrency(c.cost)}</td>
                       <td className="text-right px-3 py-2 text-hmuted">
-                        {c.rate === 0 ? '—' : `${(c.rate * 100).toFixed(0)}%`}
+                        {c.usefulLifeMonths === 0 ? '—' : `${(rateFromMonths(c.usefulLifeMonths) * 100).toFixed(0)}%`}
                       </td>
                       <td className="text-right px-3 py-2 text-red-600">{c.dep > 0 ? formatCurrency(c.dep) : '—'}</td>
                       <td className="text-right px-6 py-3.5 font-semibold text-dark-navy">{formatCurrency(c.nbv)}</td>
@@ -819,24 +833,45 @@ export default function AssetsPage() {
               <p className="text-[10px] text-hmuted mt-0.5">Auto = Qty × Unit Cost. Override if needed.</p>
             </div>
 
-            {/* Depreciation Rate */}
+            {/* Useful Life — the only depreciation input. Rate is derived from
+                this (database-generated column), never entered directly, so
+                it can't drift out of sync with what this actually means. */}
             <div>
-              <label className="block text-xs text-hmuted mb-1">Depreciation Rate</label>
-              <select
-                value={form.is_depreciable ? String(form.depreciation_rate) : 'none'}
-                onChange={e => {
-                  const v = e.target.value
-                  if (v === 'none') setForm(f => ({ ...f, is_depreciable: false, depreciation_rate: 0 }))
-                  else setForm(f => ({ ...f, is_depreciable: true, depreciation_rate: Number(v) }))
-                }}
-                className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg"
-              >
-                <option value="none">Non-depreciable</option>
-                <option value="0.05">5% — Buildings</option>
-                <option value="0.1">10% — Machinery / Vehicle</option>
-                <option value="0.2">20% — Furniture / Equipment</option>
-                <option value="0.25">25% — Computer</option>
-              </select>
+              <label className="block text-xs text-hmuted mb-1">Useful Life</label>
+              <div className="flex items-center gap-2">
+                <label className="flex items-center gap-1.5 text-xs text-hmuted cursor-pointer select-none flex-shrink-0">
+                  <input
+                    type="checkbox"
+                    checked={form.is_depreciable}
+                    onChange={e => setForm(f => ({ ...f, is_depreciable: e.target.checked, useful_life_months: e.target.checked ? (f.useful_life_months || 48) : null }))}
+                    className="rounded border-hborder"
+                  />
+                  Depreciable
+                </label>
+                <input
+                  type="number" min={1} step={1}
+                  disabled={!form.is_depreciable}
+                  value={form.is_depreciable ? (form.useful_life_months ?? '') : ''}
+                  onChange={e => setForm(f => ({ ...f, useful_life_months: Number(e.target.value) || null }))}
+                  placeholder="e.g. 48"
+                  className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg disabled:bg-hsurface2 disabled:text-hmuted"
+                />
+                <span className="text-xs text-hmuted flex-shrink-0">months</span>
+              </div>
+              <div className="flex gap-1.5 mt-1.5">
+                {([['240mo Building', 240], ['48mo Furn/Mach/Veh', 48], ['24mo Computer', 24]] as const).map(([label, months]) => (
+                  <button
+                    key={label} type="button"
+                    onClick={() => setForm(f => ({ ...f, is_depreciable: true, useful_life_months: months }))}
+                    className="text-[10px] px-2 py-1 rounded-full border border-hborder text-hmuted hover:border-navy hover:text-navy transition-colors"
+                  >{label}</button>
+                ))}
+              </div>
+              {form.is_depreciable && form.useful_life_months ? (
+                <p className="text-[10px] text-hmuted mt-1">= {(rateFromMonths(form.useful_life_months) * 100).toFixed(2)}% / yr straight-line. Linen/housekeeping items: enter that specific item's own useful life, not a preset.</p>
+              ) : (
+                <p className="text-[10px] text-hmuted mt-1">Linen/housekeeping items: enter that specific item's own useful life in months, not a preset.</p>
+              )}
             </div>
 
             {/* Location */}
@@ -885,22 +920,22 @@ export default function AssetsPage() {
           </div>
 
           {/* Summary preview */}
-          {form.total_cost > 0 && form.is_depreciable && (
+          {form.total_cost > 0 && form.is_depreciable && form.useful_life_months ? (
             <div className="bg-hsurface2 rounded-xl px-4 py-3 text-sm">
               <div className="flex justify-between">
                 <span className="text-hmuted">Annual Depreciation</span>
                 <span className="font-semibold text-dark-navy">
-                  {formatCurrency(Number(form.total_cost) * Number(form.depreciation_rate))} / yr
+                  {formatCurrency(Number(form.total_cost) * rateFromMonths(form.useful_life_months))} / yr
                 </span>
               </div>
               <div className="flex justify-between mt-1">
                 <span className="text-hmuted">Monthly</span>
                 <span className="text-htext">
-                  {formatCurrency((Number(form.total_cost) * Number(form.depreciation_rate)) / 12)} / mo
+                  {formatCurrency(Number(form.total_cost) / form.useful_life_months)} / mo
                 </span>
               </div>
             </div>
-          )}
+          ) : null}
 
           <div className="flex justify-end gap-3 pt-2">
             <Button variant="ghost" onClick={() => setModalOpen(false)}>Cancel</Button>
