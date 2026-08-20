@@ -290,6 +290,29 @@ export default function ReservationsPage() {
       ? await supabase.from('deposit_receipts').select('receipt_date').eq('reservation_id', resRow.id).order('receipt_date', { ascending: true }).limit(1).maybeSingle()
       : { data: null }
 
+    // ── Guard ──
+    // This keeps exactly ONE deposit entry per reservation, rebuilt from the
+    // amount passed in. deposit_receipts, though, allows several receipts per
+    // reservation with independent held/applied/refunded statuses. When a
+    // second deposit is taken after the first has been applied, the single
+    // entry can't represent both and the newly held one silently ends up with
+    // no liability posting — the ledger then understates guest deposits.
+    // Nothing errors when that happens, so say so at the moment it is created.
+    if (resRow) {
+      const { data: allReceipts } = await supabase.from('deposit_receipts')
+        .select('amount, status').eq('reservation_id', resRow.id)
+      const held = (allReceipts ?? []).filter(r => r.status === 'held')
+      const heldSum = held.reduce((s, r) => s + Number(r.amount), 0)
+      if ((allReceipts?.length ?? 0) > 1 && Math.abs(heldSum - depositAmt) > 0.005) {
+        toast(
+          `Heads up: ${resNum} has ${allReceipts!.length} deposit receipts (${formatCurrency(heldSum)} still held) but the ` +
+          `ledger entry is being written for ${formatCurrency(depositAmt)}. Check Guest Deposits (2200) in Reports — ` +
+          `it may need a correcting entry.`,
+          'error',
+        )
+      }
+    }
+
     const { data: existingJes } = await supabase.from('journal_entries').select('id, entry_date').eq('reference', resNum).eq('reference_type', 'deposit')
     const priorDate = existingJes && existingJes.length > 0 ? existingJes[0].entry_date : null
     const depositDate = receipt?.receipt_date || priorDate || todayISO()

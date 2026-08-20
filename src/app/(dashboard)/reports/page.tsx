@@ -73,6 +73,8 @@ export default function ReportsPage() {
   const [customerDeposits, setCustomerDeposits] = useState(0)
   const [depositDetails, setDepositDetails] = useState<{ entry_number: string; entry_date: string; description: string; debit: number; credit: number }[]>([])
   const [depositModalOpen, setDepositModalOpen] = useState(false)
+  // Reconciliation of GL 2200 against the deposit receipts that back it.
+  const [depositCheck, setDepositCheck] = useState<{ receiptsHeld: number; gl: number; ok: boolean } | null>(null)
 
   useEffect(() => { if (activeBranch) loadReports() }, [activeBranch]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -296,11 +298,26 @@ export default function ReportsPage() {
         const je = jeMeta[l.entry_id] ?? {}
         return { entry_number: je.entry_number ?? '', entry_date: je.entry_date ?? '', description: je.description ?? '', debit: Number(l.debit), credit: Number(l.credit) }
       }).sort((a, b) => (a.entry_date || '').localeCompare(b.entry_date || ''))
-      setCustomerDeposits(rows.reduce((s, r) => s + r.credit - r.debit, 0))
+      const glHeld = rows.reduce((s, r) => s + r.credit - r.debit, 0)
+      setCustomerDeposits(glHeld)
       setDepositDetails(rows)
+
+      // ── Guard: the ledger and the deposit receipts must agree ──
+      // The GL keeps one deposit entry per RESERVATION, rebuilt from its
+      // deposit field, while deposit_receipts allows several receipts per
+      // reservation with independent held/applied/refunded statuses. Those two
+      // models can drift — a second deposit taken after the first is applied
+      // leaves the newly held one with no liability entry. Nothing errors when
+      // that happens, so surface it here rather than let it be found in a
+      // reconciliation months later.
+      const { data: receipts } = await supabase.from('deposit_receipts')
+        .select('amount, status').eq('branch_id', activeBranch.id).eq('status', 'held')
+      const receiptsHeld = (receipts ?? []).reduce((s: number, r: any) => s + Number(r.amount), 0)
+      setDepositCheck({ receiptsHeld, gl: glHeld, ok: Math.abs(receiptsHeld - glHeld) < 0.005 })
     } else {
       setCustomerDeposits(0)
       setDepositDetails([])
+      setDepositCheck(null)
     }
 
     setLoading(false)
@@ -884,6 +901,26 @@ export default function ReportsPage() {
             <span className="text-sm text-hmuted">Current balance — Guest Deposits Received (2200)</span>
             <span className="font-serif text-xl text-dark-navy">{formatCurrency(customerDeposits)}</span>
           </div>
+          {depositCheck && (
+            <div className={`rounded-xl px-4 py-3 text-xs ${depositCheck.ok ? 'bg-green-50 text-green-800' : 'bg-amber-50 text-amber-900'}`}>
+              <div className="flex items-center justify-between gap-4">
+                <span className="font-semibold">
+                  {depositCheck.ok ? '✓ Agrees with deposit receipts' : '⚠ Does not agree with deposit receipts'}
+                </span>
+                <span className="tabular-nums whitespace-nowrap">
+                  receipts held {formatCurrency(depositCheck.receiptsHeld)} · ledger {formatCurrency(depositCheck.gl)}
+                </span>
+              </div>
+              {!depositCheck.ok && (
+                <p className="mt-1.5">
+                  Out by {formatCurrency(Math.abs(depositCheck.receiptsHeld - depositCheck.gl))}. The ledger keeps one
+                  deposit entry per reservation while receipts are tracked individually, so a second deposit taken after
+                  the first was applied can leave the newly held one without a liability entry. Check reservations with
+                  more than one receipt, and post a correcting entry for the difference.
+                </p>
+              )}
+            </div>
+          )}
           {depositDetails.length === 0 ? (
             <p className="text-sm text-hmuted text-center py-8">No deposit activity yet.</p>
           ) : (
