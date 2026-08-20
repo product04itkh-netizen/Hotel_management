@@ -84,6 +84,8 @@ export interface FixedAsset {
   useful_life_months?: number | null
   /** Database-generated from useful_life_months (12 / months); read-only, never written by the app. */
   depreciation_rate: number
+  /** Running total of depreciation posted so far. NBV = total_cost - accumulated_depreciation. */
+  accumulated_depreciation: number
   is_depreciable: boolean
   invoice_doc_ref?: string
   notes?: string
@@ -101,6 +103,17 @@ export interface DepreciationRun {
   total_amount: number
   asset_count: number
   branch_id?: string
+  created_at: string
+}
+
+export interface DepreciationEntry {
+  id: string
+  asset_id: string
+  depreciation_run_id: string
+  run_year: number
+  run_month: number
+  amount: number
+  nbv_after: number
   created_at: string
 }
 

@@ -10,7 +10,7 @@ import { toast } from '@/components/ui/Toast'
 import { useBranch } from '@/context/BranchContext'
 import { cn } from '@/lib/utils'
 import { generateJournalEntryNumber } from '@/lib/utils'
-import type { FixedAsset, AssetCategory, AssetStatus } from '@/types'
+import type { FixedAsset, AssetCategory, AssetStatus, DepreciationEntry } from '@/types'
 
 type Tab = 'overview' | 'register' | 'depreciation'
 
@@ -27,6 +27,56 @@ type Tab = 'overview' | 'register' | 'depreciation'
 // useful life (set manually per item), not this category default.
 function rateFromMonths(months: number | null | undefined): number {
   return months && months > 0 ? Math.round((12 / months) * 10000) / 10000 : 0
+}
+
+// ─── Depreciation method ──────────────────────────────────────────────────────
+// Buildings (GDT Class 1) depreciate straight-line on ORIGINAL cost.
+// Every other category (GDT Classes 2-4) depreciates DECLINING BALANCE on
+// current net book value — the rate is applied to what's left, not the
+// original cost, so the monthly amount shrinks as the asset ages. Confirmed
+// with finance; this is the single formula both the actual posting run and
+// the schedule preview use, so they can never diverge.
+function monthlyDepAmount(asset: FixedAsset, nbv: number): number {
+  if (!asset.is_depreciable || nbv <= 0.005) return 0
+  const rate = Number(asset.depreciation_rate)
+  const base = asset.category === 'building' ? Number(asset.total_cost) : nbv
+  return Math.min((base * rate) / 12, nbv)
+}
+
+function purchasedAfter(asset: FixedAsset, year: number, month1to12: number): boolean {
+  if (!asset.purchased_date) return false
+  const pd = new Date(asset.purchased_date)
+  return pd.getFullYear() > year || (pd.getFullYear() === year && pd.getMonth() + 1 > month1to12)
+}
+
+// Projects an asset's full-year schedule for targetYear by simulating forward
+// from its purchase date, using ACTUAL posted amounts wherever a ledger entry
+// exists for that month, and the declining-balance/straight-line formula
+// above for any month not yet posted (past-due or future).
+function buildAssetSchedule(asset: FixedAsset, entries: DepreciationEntry[], targetYear: number): number[] {
+  const result = new Array(12).fill(0)
+  if (!asset.is_depreciable || Number(asset.total_cost) <= 0) return result
+  const entryMap = new Map(entries.map(e => [`${e.run_year}-${e.run_month}`, e]))
+  const pd = asset.purchased_date ? new Date(asset.purchased_date) : null
+  const startYear = pd ? pd.getFullYear() : targetYear
+  const endYear = Math.max(targetYear, startYear)
+  let nbv = Number(asset.total_cost)
+  for (let y = startYear; y <= endYear; y++) {
+    const mStart = (pd && y === startYear) ? pd.getMonth() + 1 : 1
+    for (let m = mStart; m <= 12; m++) {
+      const posted = entryMap.get(`${y}-${m}`)
+      let amount: number
+      if (posted) {
+        amount = Number(posted.amount)
+        nbv = Number(posted.nbv_after)
+      } else {
+        amount = monthlyDepAmount(asset, nbv)
+        nbv = Math.max(0, nbv - amount)
+      }
+      if (y === targetYear) result[m - 1] = amount
+    }
+  }
+  return result
 }
 
 const CATEGORIES: { value: AssetCategory; label: string; usefulLifeMonths: number; dot: string }[] = [
@@ -89,6 +139,7 @@ export default function AssetsPage() {
 
   // Depreciation run (auto-post)
   const [depRuns,      setDepRuns]      = useState<any[]>([])
+  const [depEntries,   setDepEntries]   = useState<DepreciationEntry[]>([])
   const [depRunYear,   setDepRunYear]   = useState(new Date().getFullYear())
   const [depRunMonth,  setDepRunMonth]  = useState(new Date().getMonth() + 1)
   const [depRunSaving, setDepRunSaving] = useState(false)
@@ -114,6 +165,11 @@ export default function AssetsPage() {
       .select('*').eq('branch_id', activeBranch.id)
       .order('run_year', { ascending: false }).order('run_month', { ascending: false })
     setDepRuns(data ?? [])
+    const runIds = (data ?? []).map(r => r.id)
+    if (runIds.length === 0) { setDepEntries([]); return }
+    const { data: entries } = await supabase.from('depreciation_entries')
+      .select('*').in('depreciation_run_id', runIds)
+    setDepEntries((entries ?? []) as DepreciationEntry[])
   }
 
   async function runDepreciation() {
@@ -147,18 +203,21 @@ export default function AssetsPage() {
 
     let totalAmount = 0
     const lines: any[] = []
+    // Per-asset amount + resulting NBV — declining balance means each asset's
+    // rate applies to its OWN current net book value (total_cost minus what's
+    // already been depreciated), not its original cost. Buildings stay
+    // straight-line on original cost. See monthlyDepAmount().
+    const postings: { asset: FixedAsset; amount: number; nbvAfter: number }[] = []
     for (const asset of depAssetList) {
-      const monthly = (Number(asset.total_cost) * Number(asset.depreciation_rate)) / 12
+      if (purchasedAfter(asset, depRunYear, depRunMonth)) continue
+      const nbv = Number(asset.total_cost) - Number(asset.accumulated_depreciation || 0)
+      const monthly = monthlyDepAmount(asset, nbv)
       if (monthly <= 0) continue
-      // Skip if asset was purchased after the run month
-      if (asset.purchased_date) {
-        const pd = new Date(asset.purchased_date)
-        if (pd.getFullYear() > depRunYear || (pd.getFullYear() === depRunYear && pd.getMonth() + 1 > depRunMonth)) continue
-      }
       const accumCode = accumMap[asset.category]
       const accumAcct = accumCode ? findAcct(accumCode) : null
       if (!accumAcct) continue
       totalAmount += monthly
+      postings.push({ asset, amount: monthly, nbvAfter: nbv - monthly })
       lines.push(
         { entry_id: je.id, account_id: depExpAcct.id, description: asset.description, debit: monthly, credit: 0 },
         { entry_id: je.id, account_id: accumAcct.id,  description: asset.description, debit: 0, credit: monthly },
@@ -166,13 +225,28 @@ export default function AssetsPage() {
     }
     if (lines.length === 0) { toast('No valid depreciation lines — check COA accounts 1501/1511/1521/1531/1541 and 5750', 'error'); setDepRunSaving(false); return }
     await supabase.from('journal_entry_lines').insert(lines)
-    await supabase.from('depreciation_runs').insert({
+    const { data: run, error: runErr } = await supabase.from('depreciation_runs').insert({
       run_year: depRunYear, run_month: depRunMonth,
       journal_entry_id: je.id, total_amount: totalAmount,
-      asset_count: lines.length / 2, branch_id: activeBranch.id,
-    })
+      asset_count: postings.length, branch_id: activeBranch.id,
+    }).select().single()
+    if (runErr || !run) { toast(runErr?.message ?? 'Error creating depreciation run', 'error'); setDepRunSaving(false); return }
+
+    await supabase.from('depreciation_entries').insert(postings.map(p => ({
+      asset_id: p.asset.id, depreciation_run_id: run.id,
+      run_year: depRunYear, run_month: depRunMonth,
+      amount: p.amount, nbv_after: p.nbvAfter,
+    })))
+    // Advance each asset's running NBV so next month's declining-balance calc starts from here.
+    await Promise.all(postings.map(p =>
+      supabase.from('fixed_assets')
+        .update({ accumulated_depreciation: Number(p.asset.accumulated_depreciation || 0) + p.amount })
+        .eq('id', p.asset.id)
+    ))
+
     toast(`Depreciation posted: ${je.entry_number} · ${formatCurrency(totalAmount)}`)
     setDepRunSaving(false)
+    load()
     loadDepRuns()
   }
 
@@ -210,15 +284,22 @@ export default function AssetsPage() {
   const depAssets = useMemo(() =>
     assets.filter(a => a.is_depreciable && Number(a.total_cost) > 0), [assets])
 
+  // Per-asset 12-month schedule for the selected year — actual posted amounts
+  // where a ledger entry exists, projected declining-balance/straight-line
+  // otherwise. Built once per (assets, depEntries, depYear) change, not per cell.
+  const depSchedule = useMemo(() => {
+    const byId = new Map(depEntries.reduce((m, e) => {
+      if (!m.has(e.asset_id)) m.set(e.asset_id, [])
+      m.get(e.asset_id)!.push(e)
+      return m
+    }, new Map<string, DepreciationEntry[]>()))
+    const out = new Map<string, number[]>()
+    depAssets.forEach(a => out.set(a.id, buildAssetSchedule(a, byId.get(a.id) ?? [], depYear)))
+    return out
+  }, [depAssets, depEntries, depYear])
+
   function monthlyDep(asset: FixedAsset, monthIdx: number): number {
-    if (!asset.is_depreciable) return 0
-    const monthly = (Number(asset.total_cost) * Number(asset.depreciation_rate)) / 12
-    if (asset.purchased_date) {
-      const pd = new Date(asset.purchased_date)
-      if (pd.getFullYear() > depYear) return 0
-      if (pd.getFullYear() === depYear && pd.getMonth() > monthIdx) return 0
-    }
-    return monthly
+    return depSchedule.get(asset.id)?.[monthIdx] ?? 0
   }
 
   // ── CRUD ──────────────────────────────────────────────────────────────────
