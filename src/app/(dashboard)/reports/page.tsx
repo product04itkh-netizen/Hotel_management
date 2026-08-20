@@ -13,19 +13,30 @@ interface MonthlyData {
   reservations: number
 }
 
+interface AcctLine { code: string; name: string; balance: number }
+
+// Balances come from the general ledger (all posted, non-void entries, all
+// time) so this reports the same position the Accounting balance sheet does.
+// It used to be derived from invoices, which showed unpaid invoices as
+// LIABILITIES when they are receivables, summed all-time cash collected as if
+// it were a cash balance, and omitted loans, payables and equity entirely.
 interface BalanceSheet {
-  cashCollected: number
+  cashBank: number
   accountsReceivable: number
+  otherCurrentAssets: number
   fixedAssetsCost: number
   accumulatedDep: number
   fixedAssetsNBV: number
   totalAssets: number
-  unpaidTotal: number
-  partialBalance: number
-  refundsIssued: number
+  liabilities: AcctLine[]
   totalLiabilities: number
+  equity: AcctLine[]
+  netIncome: number
+  totalEquity: number
+  // Operational billing figures — flows, not balances. Kept separate.
   grossBilling: number
   totalDiscounts: number
+  refundsIssued: number
   netRevenue: number
 }
 
@@ -48,10 +59,11 @@ export default function ReportsPage() {
   const [loading, setLoading] = useState(true)
   const [kpis, setKpis] = useState({ totalRevenue: 0, totalGuests: 0, avgStay: 0, adr: 0, revpar: 0 })
   const [balance, setBalance] = useState<BalanceSheet>({
-    cashCollected: 0, accountsReceivable: 0,
+    cashBank: 0, accountsReceivable: 0, otherCurrentAssets: 0,
     fixedAssetsCost: 0, accumulatedDep: 0, fixedAssetsNBV: 0, totalAssets: 0,
-    unpaidTotal: 0, partialBalance: 0, refundsIssued: 0, totalLiabilities: 0,
-    grossBilling: 0, totalDiscounts: 0, netRevenue: 0,
+    liabilities: [], totalLiabilities: 0,
+    equity: [], netIncome: 0, totalEquity: 0,
+    grossBilling: 0, totalDiscounts: 0, refundsIssued: 0, netRevenue: 0,
   })
   const [pl, setPl] = useState<PLData>({
     revenueByType: [], expenseByCategory: [], totalRevenue: 0, totalExpenses: 0, netIncome: 0,
@@ -70,13 +82,12 @@ export default function ReportsPage() {
     sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 5)
     const startDate = sixMonthsAgo.toISOString().split('T')[0]
 
-    const [invRes, resRes, houseRes, allInvRes, coaRes, faRes] = await Promise.all([
+    const [invRes, resRes, houseRes, allInvRes, coaRes] = await Promise.all([
       supabase.from('invoices').select('total, paid_at').eq('status', 'paid').eq('branch_id', activeBranch.id).gte('paid_at', startDate),
       supabase.from('reservations').select('source, check_in_date, check_out_date, status, house:houses(house_type)').eq('branch_id', activeBranch.id).gte('created_at', startDate),
       supabase.from('houses').select('house_type, status').eq('branch_id', activeBranch.id),
       supabase.from('invoices').select('total, amount_paid, status, discount_amount').eq('branch_id', activeBranch.id),
       supabase.from('chart_of_accounts').select('code, name, type').eq('branch_id', activeBranch.id).eq('is_active', true).in('type', ['revenue', 'expense']).order('code'),
-      supabase.from('fixed_assets').select('total_cost, accumulated_depreciation, status').eq('branch_id', activeBranch.id),
     ])
     // 2-step: get this branch's JE IDs first, then fetch their lines (journal_entry_lines has no branch_id)
     const { data: jeIdData } = await supabase.from('journal_entries')
@@ -139,19 +150,55 @@ export default function ReportsPage() {
 
     setKpis({ totalRevenue, totalGuests, avgStay: Math.round(avgStay * 10) / 10, adr, revpar })
 
-    // Balance sheet
-    const cashCollected = allInvoices
-      .filter(i => !['void'].includes(i.status))
-      .reduce((s, i) => s + Number(i.amount_paid), 0)
-    const accountsReceivable = allInvoices
-      .filter(i => ['unpaid', 'partial'].includes(i.status))
-      .reduce((s, i) => s + (Number(i.total) - Number(i.amount_paid)), 0)
-    const unpaidTotal = allInvoices
-      .filter(i => i.status === 'unpaid')
-      .reduce((s, i) => s + Number(i.total), 0)
-    const partialBalance = allInvoices
-      .filter(i => i.status === 'partial')
-      .reduce((s, i) => s + (Number(i.total) - Number(i.amount_paid)), 0)
+    // ── Balance sheet, from the general ledger ──
+    // All posted, non-void entries, all time — a balance sheet is cumulative,
+    // so this deliberately ignores the 6-month window the P&L below uses.
+    const { data: bsIdData } = await supabase.from('journal_entries')
+      .select('id').eq('branch_id', activeBranch.id).eq('status', 'posted').eq('is_void', false)
+    const bsIds = (bsIdData ?? []).map((e: any) => e.id)
+    const bsLines: any[] = []
+    // Chunked: a branch can carry more entry ids than one .in() should take.
+    for (let i = 0; i < bsIds.length; i += 200) {
+      const { data } = await supabase.from('journal_entry_lines')
+        .select('debit, credit, account:chart_of_accounts(code, name, type, category)')
+        .in('entry_id', bsIds.slice(i, i + 200))
+      bsLines.push(...(data ?? []))
+    }
+    const acctBal: Record<string, { code: string; name: string; type: string; category: string; balance: number }> = {}
+    for (const l of bsLines) {
+      const a = l.account
+      if (!a) continue
+      if (!acctBal[a.code]) acctBal[a.code] = { code: a.code, name: a.name, type: a.type, category: a.category ?? '', balance: 0 }
+      // Assets and expenses are debit-positive; liabilities, equity and revenue credit-positive.
+      const signed = ['asset', 'expense'].includes(a.type)
+        ? Number(l.debit) - Number(l.credit)
+        : Number(l.credit) - Number(l.debit)
+      acctBal[a.code].balance += signed
+    }
+    const bsAll = Object.values(acctBal)
+    const codeNum = (c: string) => Number(c)
+    const sumWhere = (fn: (a: typeof bsAll[number]) => boolean) =>
+      bsAll.filter(fn).reduce((s, a) => s + a.balance, 0)
+
+    const cashBank = sumWhere(a => a.type === 'asset' && (a.category.toLowerCase() === 'bank' || codeNum(a.code) < 1030))
+    const accountsReceivable = sumWhere(a => a.type === 'asset' && a.category.toLowerCase() !== 'bank' && codeNum(a.code) >= 1100 && codeNum(a.code) < 1200)
+    const otherCurrentAssets = sumWhere(a => a.type === 'asset' && a.category.toLowerCase() !== 'bank'
+      && codeNum(a.code) >= 1030 && codeNum(a.code) < 1500 && !(codeNum(a.code) >= 1100 && codeNum(a.code) < 1200))
+
+    const liabilities: AcctLine[] = bsAll.filter(a => a.type === 'liability')
+      .sort((a, b) => a.code.localeCompare(b.code))
+      .map(a => ({ code: a.code, name: a.name, balance: a.balance }))
+    const totalLiabilities = liabilities.reduce((s, a) => s + a.balance, 0)
+
+    const glRevenue  = sumWhere(a => a.type === 'revenue')
+    const glExpenses = sumWhere(a => a.type === 'expense')
+    const bsNetIncome = glRevenue - glExpenses
+    const equity: AcctLine[] = bsAll.filter(a => a.type === 'equity')
+      .sort((a, b) => a.code.localeCompare(b.code))
+      .map(a => ({ code: a.code, name: a.name, balance: a.balance }))
+    const totalEquity = equity.reduce((s, a) => s + a.balance, 0) + bsNetIncome
+
+    // ── Operational billing figures (flows, shown separately) ──
     const refundsIssued = allInvoices
       .filter(i => i.status === 'refunded')
       .reduce((s, i) => s + Number(i.amount_paid), 0)
@@ -165,28 +212,33 @@ export default function ReportsPage() {
       .filter(i => !['void'].includes(i.status))
       .reduce((s, i) => s + Number(i.total), 0) - refundsIssued
 
-    // ── Fixed assets ──
-    // From the asset register, which ties to GL 1500-1799 exactly (the opening
-    // capitalisation posted in migration 048). Disposed assets are off the
-    // books, so only active/maintenance rows count.
-    const faRows = (faRes.data ?? []).filter((a: any) => a.status !== 'disposed')
-    const fixedAssetsCost = faRows.reduce((s: number, a: any) => s + Number(a.total_cost), 0)
-    const accumulatedDep = faRows.reduce((s: number, a: any) => s + Number(a.accumulated_depreciation ?? 0), 0)
+    // ── Fixed assets, also from the GL ──
+    // Accumulated-depreciation accounts are contra-assets, so they carry credit
+    // balances and come through negative. Splitting on sign avoids depending on
+    // account naming or the 1500/1501 code-parity convention.
+    const faAccts = bsAll.filter(a => a.type === 'asset' && a.category.toLowerCase() !== 'bank'
+      && codeNum(a.code) >= 1500 && codeNum(a.code) < 1800)
+    const fixedAssetsCost = faAccts.filter(a => a.balance > 0).reduce((s, a) => s + a.balance, 0)
+    // `|| 0` normalises negative zero, which would otherwise render as "-$0.00".
+    const accumulatedDep = -faAccts.filter(a => a.balance < 0).reduce((s, a) => s + a.balance, 0) || 0
     const fixedAssetsNBV = fixedAssetsCost - accumulatedDep
 
     setBalance({
-      cashCollected,
+      cashBank,
       accountsReceivable,
+      otherCurrentAssets,
       fixedAssetsCost,
       accumulatedDep,
       fixedAssetsNBV,
-      totalAssets: cashCollected + accountsReceivable + fixedAssetsNBV,
-      unpaidTotal,
-      partialBalance,
-      refundsIssued,
-      totalLiabilities: unpaidTotal + partialBalance + refundsIssued,
+      totalAssets: cashBank + accountsReceivable + otherCurrentAssets + fixedAssetsNBV,
+      liabilities,
+      totalLiabilities,
+      equity,
+      netIncome: bsNetIncome,
+      totalEquity,
       grossBilling,
       totalDiscounts,
+      refundsIssued,
       netRevenue,
     })
 
@@ -334,8 +386,9 @@ export default function ReportsPage() {
 
     // ── ASSETS ───────────────────────────────────────────────
     sectionTitle('Assets', 26, 122, 74)          // green
-    row('Cash Collected', formatCurrency(balance.cashCollected))
+    row('Cash & Bank', formatCurrency(balance.cashBank))
     row('Accounts Receivable', formatCurrency(balance.accountsReceivable))
+    if (balance.otherCurrentAssets !== 0) row('Other Current Assets', formatCurrency(balance.otherCurrentAssets))
     row('Fixed Assets (at cost)', formatCurrency(balance.fixedAssetsCost))
     row('  Less: Accumulated Depreciation', `(${formatCurrency(balance.accumulatedDep)})`)
     row('  Net Book Value', formatCurrency(balance.fixedAssetsNBV))
@@ -344,14 +397,31 @@ export default function ReportsPage() {
 
     // ── LIABILITIES ──────────────────────────────────────────
     sectionTitle('Liabilities', 184, 50, 50)     // red
-    row('Outstanding (Unpaid)', formatCurrency(balance.unpaidTotal))
-    row('Partial Balance Due', formatCurrency(balance.partialBalance))
-    row('Refunds Issued', formatCurrency(balance.refundsIssued))
+    if (balance.liabilities.length === 0) row('No liability accounts with activity', '')
+    balance.liabilities.forEach(l => row(l.name, formatCurrency(l.balance)))
     divider()
     totalRow('Total Liabilities', formatCurrency(balance.totalLiabilities), 184, 50, 50)
 
-    // ── NET POSITION ─────────────────────────────────────────
-    sectionTitle('Net Position', 0, 74, 173)     // navy blue
+    // ── EQUITY ───────────────────────────────────────────────
+    sectionTitle('Equity', 88, 56, 8)            // brown
+    balance.equity.forEach(e => row(e.name, formatCurrency(e.balance)))
+    row('Net Income (to date)', balance.netIncome < 0
+      ? `(${formatCurrency(Math.abs(balance.netIncome))})`
+      : formatCurrency(balance.netIncome))
+    divider()
+    totalRow('Total Equity', formatCurrency(balance.totalEquity), 88, 56, 8)
+
+    // ── BALANCE CHECK ────────────────────────────────────────
+    const leTotal = balance.totalLiabilities + balance.totalEquity
+    const isBalanced = Math.abs(balance.totalAssets - leTotal) < 0.01
+    totalRow(
+      isBalanced ? 'Liabilities + Equity  (balanced)' : 'Liabilities + Equity  (OUT OF BALANCE)',
+      formatCurrency(leTotal),
+      isBalanced ? 26 : 184, isBalanced ? 122 : 50, isBalanced ? 74 : 50,
+    )
+
+    // ── BILLING SUMMARY (flows, not balances) ────────────────
+    sectionTitle('Billing Summary (all-time)', 0, 74, 173)   // navy blue
     row('Gross Billing', formatCurrency(balance.grossBilling))
     row('Less: Discounts', `(${formatCurrency(balance.totalDiscounts)})`)
     row('Less: Refunds', `(${formatCurrency(balance.refundsIssued)})`)
@@ -472,13 +542,19 @@ export default function ReportsPage() {
               <p className="text-[11px] font-semibold tracking-widest text-[#1A7A4A] uppercase mb-3">Assets</p>
               <div className="space-y-2.5">
                 <div className="flex justify-between text-sm">
-                  <span className="text-hmuted">Cash Collected</span>
-                  <span className="font-semibold text-dark-navy">{formatCurrency(balance.cashCollected)}</span>
+                  <span className="text-hmuted">Cash &amp; Bank</span>
+                  <span className="font-semibold text-dark-navy">{formatCurrency(balance.cashBank)}</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-hmuted">Accounts Receivable</span>
                   <span className="font-semibold text-dark-navy">{formatCurrency(balance.accountsReceivable)}</span>
                 </div>
+                {balance.otherCurrentAssets !== 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-hmuted">Other Current Assets</span>
+                    <span className="font-semibold text-dark-navy">{formatCurrency(balance.otherCurrentAssets)}</span>
+                  </div>
+                )}
                 <div className="flex justify-between text-sm">
                   <span className="text-hmuted">Fixed Assets (at cost)</span>
                   <span className="font-semibold text-dark-navy">{formatCurrency(balance.fixedAssetsCost)}</span>
@@ -502,18 +578,14 @@ export default function ReportsPage() {
             <div className="p-5">
               <p className="text-[11px] font-semibold tracking-widest text-[#B83232] uppercase mb-3">Liabilities</p>
               <div className="space-y-2.5">
-                <div className="flex justify-between text-sm">
-                  <span className="text-hmuted">Outstanding (Unpaid)</span>
-                  <span className="font-semibold text-dark-navy">{formatCurrency(balance.unpaidTotal)}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-hmuted">Partial Balance Due</span>
-                  <span className="font-semibold text-dark-navy">{formatCurrency(balance.partialBalance)}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-hmuted">Refunds Issued</span>
-                  <span className="font-semibold text-dark-navy">{formatCurrency(balance.refundsIssued)}</span>
-                </div>
+                {balance.liabilities.length === 0 ? (
+                  <p className="text-sm text-hmuted italic">No liability accounts with activity.</p>
+                ) : balance.liabilities.map(l => (
+                  <div key={l.code} className="flex justify-between text-sm gap-3">
+                    <span className="text-hmuted truncate" title={`${l.code} · ${l.name}`}>{l.name}</span>
+                    <span className="font-semibold text-dark-navy whitespace-nowrap">{formatCurrency(l.balance)}</span>
+                  </div>
+                ))}
                 <div className="flex justify-between text-sm border-t border-hborder pt-2.5 mt-1">
                   <span className="font-semibold text-[#B83232]">Total Liabilities</span>
                   <span className="font-bold text-[#B83232] text-base">{formatCurrency(balance.totalLiabilities)}</span>
@@ -521,28 +593,66 @@ export default function ReportsPage() {
               </div>
             </div>
 
-            {/* Net Position */}
+            {/* Equity */}
             <div className="p-5 bg-hsurface2/40">
-              <p className="text-[11px] font-semibold tracking-widest text-[#583808] uppercase mb-3">Net Position</p>
+              <p className="text-[11px] font-semibold tracking-widest text-[#583808] uppercase mb-3">Equity</p>
               <div className="space-y-2.5">
-                <div className="flex justify-between text-sm">
-                  <span className="text-hmuted">Gross Billing</span>
-                  <span className="font-semibold text-dark-navy">{formatCurrency(balance.grossBilling)}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-hmuted">Less: Discounts</span>
-                  <span className="font-semibold text-dark-navy">({formatCurrency(balance.totalDiscounts)})</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-hmuted">Less: Refunds</span>
-                  <span className="font-semibold text-dark-navy">({formatCurrency(balance.refundsIssued)})</span>
+                {balance.equity.map(e => (
+                  <div key={e.code} className="flex justify-between text-sm gap-3">
+                    <span className="text-hmuted truncate" title={`${e.code} · ${e.name}`}>{e.name}</span>
+                    <span className="font-semibold text-dark-navy whitespace-nowrap">{formatCurrency(e.balance)}</span>
+                  </div>
+                ))}
+                <div className="flex justify-between text-sm gap-3">
+                  <span className="text-hmuted italic">Net Income (to date)</span>
+                  <span className={`font-semibold whitespace-nowrap ${balance.netIncome < 0 ? 'text-[#B83232]' : 'text-dark-navy'}`}>
+                    {balance.netIncome < 0 ? `(${formatCurrency(Math.abs(balance.netIncome))})` : formatCurrency(balance.netIncome)}
+                  </span>
                 </div>
                 <div className="flex justify-between text-sm border-t border-hborder pt-2.5 mt-1">
-                  <span className="font-semibold text-[#583808]">Net Revenue</span>
-                  <span className="font-bold text-[#583808] text-base">{formatCurrency(balance.netRevenue)}</span>
+                  <span className="font-semibold text-[#583808]">Total Equity</span>
+                  <span className="font-bold text-[#583808] text-base">{formatCurrency(balance.totalEquity)}</span>
                 </div>
               </div>
             </div>
+          </div>
+
+          {/* Balance check — assets must equal liabilities + equity */}
+          {(() => {
+            const le = balance.totalLiabilities + balance.totalEquity
+            const balanced = Math.abs(balance.totalAssets - le) < 0.01
+            return (
+              <div className={`px-6 py-3 border-t border-hborder flex items-center justify-between text-sm ${balanced ? 'bg-green-50' : 'bg-red-50'}`}>
+                <span className={`font-semibold ${balanced ? 'text-green-800' : 'text-red-800'}`}>Liabilities + Equity</span>
+                <span className="flex items-center gap-3">
+                  <span className={`font-bold ${balanced ? 'text-green-800' : 'text-red-800'}`}>{formatCurrency(le)}</span>
+                  <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${balanced ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                    {balanced ? '✓ Balanced' : `Out by ${formatCurrency(balance.totalAssets - le)}`}
+                  </span>
+                </span>
+              </div>
+            )
+          })()}
+        </div>
+
+        {/* Billing summary — flows over all time, not balance-sheet figures */}
+        <div className="bg-white border border-hborder rounded-2xl shadow-card mb-5 overflow-hidden">
+          <div className="px-6 py-4 border-b border-hborder">
+            <h3 className="font-serif text-[17px] text-dark-navy">Billing Summary</h3>
+            <p className="text-xs text-hmuted mt-0.5">What has been billed and given away — all-time totals, not balances</p>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 divide-y divide-hborder sm:divide-y-0 sm:divide-x">
+            {[
+              { label: 'Gross Billing', value: formatCurrency(balance.grossBilling) },
+              { label: 'Less: Discounts', value: `(${formatCurrency(balance.totalDiscounts)})` },
+              { label: 'Less: Refunds', value: `(${formatCurrency(balance.refundsIssued)})` },
+              { label: 'Net Revenue', value: formatCurrency(balance.netRevenue), accent: true },
+            ].map(m => (
+              <div key={m.label} className="p-5">
+                <p className="text-[11px] text-hmuted uppercase tracking-wide mb-1">{m.label}</p>
+                <p className={`text-lg font-bold ${m.accent ? 'text-[#583808]' : 'text-dark-navy'}`}>{m.value}</p>
+              </div>
+            ))}
           </div>
         </div>
 
