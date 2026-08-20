@@ -64,5 +64,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, error: staffErr.message }, { status: 400 })
   }
 
+  // The audit trigger on `staff` fired for this insert, but under the
+  // service-role connection auth.uid() is NULL — correct it to the real
+  // caller resolved above, so this doesn't show as an unattributed "System" row.
+  await admin.from('audit_logs').update({ performed_by: user.id })
+    .eq('table_name', 'staff').eq('record_id', staffRow.id).eq('action', 'INSERT').is('performed_by', null)
+
   return NextResponse.json({ ok: true, staff: staffRow, tempPassword })
 }

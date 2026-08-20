@@ -54,5 +54,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, error: updateErr.message }, { status: 400 })
   }
 
+  // Correct the audit trigger's row (service-role connection has no auth.uid()) to the real caller.
+  await admin.from('audit_logs').update({ performed_by: user.id })
+    .eq('table_name', 'staff').eq('record_id', staffId).eq('action', 'UPDATE').is('performed_by', null)
+    .gte('created_at', new Date(Date.now() - 60_000).toISOString())
+
   return NextResponse.json({ ok: true, tempPassword })
 }

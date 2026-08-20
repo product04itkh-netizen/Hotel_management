@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react'
 import { cn, capitalize, branchLogo, branchBrand } from '@/lib/utils'
 import { useBranch } from '@/context/BranchContext'
 import { useMobileNav } from '@/context/MobileNavContext'
-import { createClient } from '@/lib/supabase/client'
+import { useCurrentStaff } from '@/hooks/useCurrentStaff'
 import type { Branch } from '@/types'
 
 // ─── Navigation items ─────────────────────────────────────────────────────────
@@ -158,37 +158,14 @@ function BranchSwitcher() {
 
 // ─── Sidebar ──────────────────────────────────────────────────────────────────
 
-function useCurrentStaff() {
-  const [info, setInfo] = useState<{ name: string; role: string } | null>(null)
-
-  useEffect(() => {
-    let active = true
-    async function load() {
-      const supabase = createClient()
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
-      const { data } = await supabase.from('staff').select('full_name, role').eq('auth_user_id', user.id).maybeSingle()
-      if (!active) return
-      setInfo(data
-        ? { name: data.full_name, role: capitalize(data.role) }
-        : { name: user.email ?? 'User', role: 'Admin' }
-      )
-    }
-    load()
-    return () => { active = false }
-  }, [])
-
-  return info
-}
-
 export function Sidebar() {
   const pathname = usePathname()
   const { activeBranch } = useBranch()
   const { open, setOpen } = useMobileNav()
   const [pendingHref, setPendingHref] = useState<string | null>(null)
-  const currentUser = useCurrentStaff()
-  const userName = currentUser?.name ?? '…'
-  const userRole = currentUser?.role ?? ''
+  const { staff: currentStaff, loading: staffLoading } = useCurrentStaff()
+  const userName = currentStaff?.fullName ?? (staffLoading ? '…' : 'User')
+  const userRole = currentStaff ? capitalize(currentStaff.role) : ''
 
   useEffect(() => {
     setPendingHref(null)

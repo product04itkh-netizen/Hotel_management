@@ -106,6 +106,20 @@ export interface DepreciationRun {
   created_at: string
 }
 
+export type AuditAction = 'INSERT' | 'UPDATE' | 'DELETE'
+
+export interface AuditLog {
+  id: string
+  table_name: string
+  record_id?: string
+  action: AuditAction
+  old_data?: Record<string, any> | null
+  new_data?: Record<string, any> | null
+  performed_by?: string | null
+  branch_id?: string | null
+  created_at: string
+}
+
 export interface DepreciationEntry {
   id: string
   asset_id: string

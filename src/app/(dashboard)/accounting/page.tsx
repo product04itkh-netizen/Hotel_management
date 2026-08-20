@@ -9,6 +9,7 @@ import { formatCurrency, formatDate, generateJournalEntryNumber, capitalize, bra
 import { exportXlsx } from '@/lib/excel'
 import { toast } from '@/components/ui/Toast'
 import { useBranch } from '@/context/BranchContext'
+import { useCurrentStaff } from '@/hooks/useCurrentStaff'
 import { cn } from '@/lib/utils'
 import type { ChartOfAccount, AccountType, JournalEntry, PettyCashTransaction, Vendor, Bill } from '@/types'
 
@@ -111,7 +112,7 @@ export default function AccountingPage() {
   const [coaSaving, setCoaSaving] = useState(false)
 
   // Current user role — admins may override the auto-JE unpost/edit guardrail.
-  const [isAdmin, setIsAdmin] = useState(false)
+  const { isAdmin } = useCurrentStaff()
 
   // Journal Entries
   const [entries, setEntries] = useState<JournalEntry[]>([])
@@ -265,15 +266,6 @@ export default function AccountingPage() {
   useEffect(() => {
     if (tab === 'ledger' && activeBranch) loadLedger()
   }, [tab, activeBranch]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    (async () => {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
-      const { data } = await supabase.from('staff').select('role').eq('auth_user_id', user.id).maybeSingle()
-      setIsAdmin(data?.role === 'admin')
-    })()
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadPaymentMethods() {
     if (!activeBranch) return

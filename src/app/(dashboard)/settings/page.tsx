@@ -1,14 +1,41 @@
 'use client'
-import { useEffect, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { TopBar } from '@/components/layout/TopBar'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from '@/components/ui/Toast'
-import { formatCurrency } from '@/lib/utils'
-import type { HotelSettings, ServiceCatalogItem, ServiceCatalogCategory } from '@/types'
+import { formatCurrency, formatDateTime } from '@/lib/utils'
+import type { HotelSettings, ServiceCatalogItem, ServiceCatalogCategory, AuditLog, AuditAction } from '@/types'
 import { useBranch } from '@/context/BranchContext'
+import { useCurrentStaff } from '@/hooks/useCurrentStaff'
+
+// v1 audited tables — matches migration 045_audit_logs.sql's trigger list.
+const AUDITED_TABLES = [
+  'journal_entries', 'invoices', 'reservations', 'fixed_assets',
+  'bills', 'bill_payments', 'deposit_receipts', 'petty_cash_transactions',
+  'payment_transactions', 'chart_of_accounts', 'accounting_periods',
+  'staff', 'depreciation_runs', 'depreciation_entries',
+]
+const AUDIT_PAGE_SIZE = 50
+
+function diffFields(oldData: Record<string, any> | null | undefined, newData: Record<string, any> | null | undefined) {
+  const keys = new Set([...(oldData ? Object.keys(oldData) : []), ...(newData ? Object.keys(newData) : [])])
+  const out: { key: string; oldVal: any; newVal: any }[] = []
+  keys.forEach(k => {
+    const ov = oldData?.[k]
+    const nv = newData?.[k]
+    if (JSON.stringify(ov) !== JSON.stringify(nv)) out.push({ key: k, oldVal: ov, newVal: nv })
+  })
+  return out.sort((a, b) => a.key.localeCompare(b.key))
+}
+
+function fmtAuditVal(v: any): string {
+  if (v === null || v === undefined) return '—'
+  if (typeof v === 'object') return JSON.stringify(v)
+  return String(v)
+}
 
 const NOTIFICATION_EVENTS = [
   { key: 'new_reservation', label: 'New Reservation' },
@@ -33,6 +60,8 @@ interface PaymentMethod {
 export default function SettingsPage() {
   const supabase = createClient()
   const { activeBranch, refreshHotelSettings } = useBranch()
+  const { isAdmin } = useCurrentStaff()
+  const [settingsTab, setSettingsTab] = useState<'general' | 'audit'>('general')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [confirmDialog, setConfirmDialog] = useState<{ title: string; message?: string; confirmLabel?: string; variant?: 'default' | 'danger'; onConfirm: () => void } | null>(null)
@@ -61,6 +90,18 @@ export default function SettingsPage() {
   const [scSaving, setScSaving] = useState(false)
   const [revenueAccounts, setRevenueAccounts] = useState<{ id: string; code: string; name: string }[]>([])
   const [expenseAccounts, setExpenseAccounts] = useState<{ id: string; code: string; name: string }[]>([])
+
+  // Audit Log state
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([])
+  const [auditLoading, setAuditLoading] = useState(false)
+  const [auditStaff, setAuditStaff] = useState<{ id: string; full_name: string; auth_user_id: string | null }[]>([])
+  const [auditTotal, setAuditTotal] = useState(0)
+  const [auditPage, setAuditPage] = useState(0)
+  const [expandedAuditId, setExpandedAuditId] = useState<string | null>(null)
+  const [auditFilter, setAuditFilter] = useState({
+    table: 'all', action: 'all' as 'all' | AuditAction, performedBy: 'all',
+    dateFrom: '', dateTo: '',
+  })
   const [form, setForm] = useState({
     hotel_name: 'OnlyOne Homestay',
     hotel_address: '',
@@ -80,6 +121,46 @@ export default function SettingsPage() {
   })
 
   useEffect(() => { if (activeBranch) { loadSettings(); loadPaymentMethods(); loadCoaAccounts(); loadServiceCatalog(); loadRevenueExpenseAccounts() } }, [activeBranch]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (settingsTab === 'audit' && isAdmin && activeBranch) loadAuditLogs()
+  }, [settingsTab, isAdmin, activeBranch, auditFilter, auditPage]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (settingsTab === 'audit' && isAdmin) {
+      supabase.from('staff').select('id, full_name, auth_user_id').order('full_name')
+        .then(({ data }) => setAuditStaff((data ?? []) as any))
+    }
+  }, [settingsTab, isAdmin]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => { setAuditPage(0) }, [auditFilter])
+
+  async function loadAuditLogs() {
+    if (!activeBranch) return
+    setAuditLoading(true)
+    let query = supabase.from('audit_logs').select('*', { count: 'exact' }).eq('branch_id', activeBranch.id)
+    if (auditFilter.table !== 'all') query = query.eq('table_name', auditFilter.table)
+    if (auditFilter.action !== 'all') query = query.eq('action', auditFilter.action)
+    if (auditFilter.performedBy === 'system') query = query.is('performed_by', null)
+    else if (auditFilter.performedBy !== 'all') query = query.eq('performed_by', auditFilter.performedBy)
+    if (auditFilter.dateFrom) query = query.gte('created_at', `${auditFilter.dateFrom}T00:00:00`)
+    if (auditFilter.dateTo) query = query.lte('created_at', `${auditFilter.dateTo}T23:59:59`)
+    const from = auditPage * AUDIT_PAGE_SIZE
+    const { data, count, error } = await query
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .range(from, from + AUDIT_PAGE_SIZE - 1)
+    if (error) { toast(`Failed to load audit log: ${error.message}`, 'error'); setAuditLoading(false); return }
+    setAuditLogs((data ?? []) as AuditLog[])
+    setAuditTotal(count ?? 0)
+    setAuditLoading(false)
+  }
+
+  function auditStaffName(performedBy: string | null | undefined): string {
+    if (!performedBy) return 'System (direct correction)'
+    const s = auditStaff.find(st => st.auth_user_id === performedBy)
+    return s?.full_name ?? 'Unknown user'
+  }
 
   async function loadRevenueExpenseAccounts() {
     if (!activeBranch) return
@@ -435,6 +516,22 @@ export default function SettingsPage() {
     <>
       <TopBar title="Settings" subtitle="Property configuration & integrations" />
       <div className="p-4 sm:p-6 flex-1 section-enter overflow-auto">
+        {isAdmin && (
+          <div className="flex gap-2 mb-6">
+            {(['general', 'audit'] as const).map(t => (
+              <button
+                key={t}
+                onClick={() => setSettingsTab(t)}
+                className={`text-sm font-semibold px-4 py-2 rounded-full transition-colors ${settingsTab === t ? 'bg-navy text-white' : 'bg-hsurface2 text-hmuted hover:text-navy'}`}
+              >
+                {t === 'general' ? 'General' : 'Audit Log'}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {settingsTab === 'general' && (
+        <>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
 
           {/* LEFT COLUMN */}
@@ -804,6 +901,169 @@ export default function SettingsPage() {
             </table>
           </div>
         </div>
+        </>
+        )}
+
+        {settingsTab === 'audit' && isAdmin && (
+          <div className="bg-white border border-hborder rounded-2xl p-6 shadow-card">
+            <div className="mb-4">
+              <h3 className="font-serif text-lg text-dark-navy">Audit Log</h3>
+              <p className="text-xs text-hmuted mt-0.5">
+                Every change to journal entries, invoices, reservations, fixed assets, bills, deposits, petty cash,
+                chart of accounts, accounting periods, staff records and depreciation for this branch. Entries made
+                directly against the database outside the app (e.g. a one-off data correction) show as
+                "System (direct correction)" since there's no logged-in staff identity to attach.
+              </p>
+            </div>
+
+            {/* Filters */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-4">
+              <div>
+                <label className="block text-[11px] text-hmuted mb-1">Table</label>
+                <select
+                  value={auditFilter.table}
+                  onChange={e => setAuditFilter(f => ({ ...f, table: e.target.value }))}
+                  className="w-full border border-hborder rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:border-navy bg-hbg"
+                >
+                  <option value="all">All tables</option>
+                  {AUDITED_TABLES.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-[11px] text-hmuted mb-1">Action</label>
+                <select
+                  value={auditFilter.action}
+                  onChange={e => setAuditFilter(f => ({ ...f, action: e.target.value as any }))}
+                  className="w-full border border-hborder rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:border-navy bg-hbg"
+                >
+                  <option value="all">All actions</option>
+                  <option value="INSERT">Created</option>
+                  <option value="UPDATE">Updated</option>
+                  <option value="DELETE">Deleted</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-[11px] text-hmuted mb-1">Performed by</label>
+                <select
+                  value={auditFilter.performedBy}
+                  onChange={e => setAuditFilter(f => ({ ...f, performedBy: e.target.value }))}
+                  className="w-full border border-hborder rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:border-navy bg-hbg"
+                >
+                  <option value="all">Everyone</option>
+                  <option value="system">System (direct correction)</option>
+                  {auditStaff.filter(s => s.auth_user_id).map(s => (
+                    <option key={s.id} value={s.auth_user_id!}>{s.full_name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-[11px] text-hmuted mb-1">From</label>
+                <input
+                  type="date"
+                  value={auditFilter.dateFrom}
+                  onChange={e => setAuditFilter(f => ({ ...f, dateFrom: e.target.value }))}
+                  className="w-full border border-hborder rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:border-navy bg-hbg"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] text-hmuted mb-1">To</label>
+                <input
+                  type="date"
+                  value={auditFilter.dateTo}
+                  onChange={e => setAuditFilter(f => ({ ...f, dateTo: e.target.value }))}
+                  className="w-full border border-hborder rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:border-navy bg-hbg"
+                />
+              </div>
+            </div>
+
+            {/* Results */}
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-hsurface2">
+                    {['When', 'By', 'Table', 'Action', 'Record', ''].map(h => (
+                      <th key={h} className="px-3 py-2 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide whitespace-nowrap">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {auditLoading ? (
+                    <tr><td colSpan={6} className="px-4 py-8 text-center text-hmuted text-sm">Loading…</td></tr>
+                  ) : auditLogs.length === 0 ? (
+                    <tr><td colSpan={6} className="px-4 py-8 text-center text-hmuted text-sm">No matching activity yet.</td></tr>
+                  ) : auditLogs.map(log => {
+                    const diffs = diffFields(log.old_data, log.new_data)
+                    const expanded = expandedAuditId === log.id
+                    const actionColor = log.action === 'INSERT' ? 'bg-emerald-100 text-emerald-700' : log.action === 'DELETE' ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-700'
+                    return (
+                      <React.Fragment key={log.id}>
+                        <tr className="border-t border-hborder hover:bg-hbg/40 transition-colors cursor-pointer" onClick={() => setExpandedAuditId(expanded ? null : log.id)}>
+                          <td className="px-3 py-2 text-xs text-hmuted whitespace-nowrap">{formatDateTime(log.created_at)}</td>
+                          <td className="px-3 py-2 text-xs text-htext whitespace-nowrap">{auditStaffName(log.performed_by)}</td>
+                          <td className="px-3 py-2 text-xs font-mono text-hmuted whitespace-nowrap">{log.table_name}</td>
+                          <td className="px-3 py-2">
+                            <span className={`text-xs font-semibold px-2 py-0.5 rounded-full whitespace-nowrap ${actionColor}`}>
+                              {log.action === 'INSERT' ? 'Created' : log.action === 'DELETE' ? 'Deleted' : 'Updated'}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2 text-xs font-mono text-hmuted whitespace-nowrap">{log.record_id?.slice(0, 8) ?? '—'}</td>
+                          <td className="px-3 py-2 text-xs text-navy whitespace-nowrap">{expanded ? '▲ Hide' : diffs.length > 0 ? `▼ ${diffs.length} field${diffs.length === 1 ? '' : 's'}` : ''}</td>
+                        </tr>
+                        {expanded && (
+                          <tr className="border-t border-hborder bg-hbg/30">
+                            <td colSpan={6} className="px-4 py-3">
+                              {diffs.length === 0 ? (
+                                <p className="text-xs text-hmuted italic">No field-level changes recorded.</p>
+                              ) : (
+                                <table className="text-xs w-full max-w-2xl">
+                                  <thead>
+                                    <tr className="text-hmuted">
+                                      <th className="text-left pr-4 py-1 font-semibold">Field</th>
+                                      <th className="text-left pr-4 py-1 font-semibold">Before</th>
+                                      <th className="text-left py-1 font-semibold">After</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {diffs.map(d => (
+                                      <tr key={d.key} className="border-t border-hborder/50">
+                                        <td className="pr-4 py-1 font-mono text-hmuted whitespace-nowrap align-top">{d.key}</td>
+                                        <td className="pr-4 py-1 text-red-600 align-top break-all">{fmtAuditVal(d.oldVal)}</td>
+                                        <td className="py-1 text-emerald-700 align-top break-all">{fmtAuditVal(d.newVal)}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              )}
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Pagination */}
+            {auditTotal > AUDIT_PAGE_SIZE && (
+              <div className="flex items-center justify-between mt-4 text-xs text-hmuted">
+                <span>{auditPage * AUDIT_PAGE_SIZE + 1}–{Math.min((auditPage + 1) * AUDIT_PAGE_SIZE, auditTotal)} of {auditTotal}</span>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setAuditPage(p => Math.max(0, p - 1))}
+                    disabled={auditPage === 0}
+                    className="px-3 py-1.5 rounded-lg border border-hborder disabled:opacity-30 hover:border-navy hover:text-navy transition-colors"
+                  >Prev</button>
+                  <button
+                    onClick={() => setAuditPage(p => p + 1)}
+                    disabled={(auditPage + 1) * AUDIT_PAGE_SIZE >= auditTotal}
+                    className="px-3 py-1.5 rounded-lg border border-hborder disabled:opacity-30 hover:border-navy hover:text-navy transition-colors"
+                  >Next</button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
       </div>
 

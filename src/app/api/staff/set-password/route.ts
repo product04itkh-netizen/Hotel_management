@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, error: 'Password must be at least 8 characters' }, { status: 400 })
   }
 
-  const { data: staffRow, error: fetchErr } = await admin.from('staff').select('auth_user_id').eq('id', staffId).single()
+  const { data: staffRow, error: fetchErr } = await admin.from('staff').select('auth_user_id, branch_id').eq('id', staffId).single()
   if (fetchErr || !staffRow) {
     return NextResponse.json({ ok: false, error: 'Staff member not found' }, { status: 404 })
   }
@@ -33,6 +33,14 @@ export async function POST(request: NextRequest) {
   if (updateErr) {
     return NextResponse.json({ ok: false, error: updateErr.message }, { status: 400 })
   }
+
+  // Password changes land in auth.users, which the audit trigger doesn't cover
+  // (it's only attached to app tables) — log it explicitly instead.
+  await admin.from('audit_logs').insert({
+    table_name: 'staff', record_id: staffId, action: 'UPDATE',
+    new_data: { note: 'Password reset by admin' },
+    performed_by: user.id, branch_id: staffRow.branch_id,
+  })
 
   return NextResponse.json({ ok: true })
 }
