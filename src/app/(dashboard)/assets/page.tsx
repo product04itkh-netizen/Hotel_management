@@ -164,6 +164,14 @@ export default function AssetsPage() {
   const [depRunMonth,  setDepRunMonth]  = useState(new Date().getMonth() + 1)
   const [depRunSaving, setDepRunSaving] = useState(false)
 
+  // Recording a depreciation journal entry the accounts team wrote themselves
+  const [linkYear,  setLinkYear]  = useState(new Date().getFullYear())
+  const [linkMonth, setLinkMonth] = useState(new Date().getMonth() + 1)
+  const [linkJeId,  setLinkJeId]  = useState('')
+  const [linkCandidates, setLinkCandidates] = useState<{ id: string; entry_number: string; entry_date: string; description: string; amount: number }[]>([])
+  const [linkComputed, setLinkComputed] = useState<number | null>(null)
+  const [linkSaving, setLinkSaving] = useState(false)
+
   useEffect(() => { if (activeBranch) { load(); loadDepRuns() } }, [activeBranch]) // eslint-disable-line
 
   async function load() {
@@ -192,53 +200,53 @@ export default function AssetsPage() {
     setDepEntries((entries ?? []) as DepreciationEntry[])
   }
 
-  async function runDepreciation() {
-    if (!activeBranch) return
-    const alreadyRun = depRuns.find(r => r.run_year === depRunYear && r.run_month === depRunMonth)
-    if (alreadyRun) { toast(`Depreciation for ${MONTHS[depRunMonth - 1]} ${depRunYear} already posted`, 'error'); return }
-    const depAssetList = assets.filter(a => a.is_depreciable && a.status === 'active' && Number(a.total_cost) > 0)
-    if (depAssetList.length === 0) { toast('No depreciable active assets found', 'error'); return }
+  // Category → accumulated-depreciation account. One account per category,
+  // matching the cost accounts migration 048 renamed to these same groups.
+  // Land is non-depreciable and has none.
+  const ACCUM_MAP: Record<AssetCategory, string> = {
+    land:              '',
+    building:          '1501',
+    operating_linen:   '1511',
+    furniture_fixture: '1521',
+    kitchen_equipment: '1531',
+    machinery_vehicle: '1541',
+  }
 
-    // Category → accumulated-depreciation account. One account per category,
-    // matching the cost accounts migration 048 renamed to these same groups.
-    // Land is non-depreciable and has none.
-    const accumMap: Record<AssetCategory, string> = {
-      land:              '',
-      building:          '1501',
-      operating_linen:   '1511',
-      furniture_fixture: '1521',
-      kitchen_equipment: '1531',
-      machinery_vehicle: '1541',
-    }
+  type Posting = { asset: FixedAsset; amount: number; nbvAfter: number; accumId: string }
+
+  // Works out what each asset should depreciate for a period, and checks it,
+  // WITHOUT writing anything. Shared by the built-in run and by recording a
+  // journal entry the accounts team wrote themselves, so the two can never
+  // allocate differently.
+  async function buildPostings(year: number, month: number): Promise<
+    { ok: true; postings: Posting[]; total: number; depExpAcctId: string } | { ok: false; error: string }
+  > {
+    if (!activeBranch) return { ok: false, error: 'No branch selected' }
+    const depAssetList = assets.filter(a => a.is_depreciable && a.status === 'active' && Number(a.total_cost) > 0)
+    if (depAssetList.length === 0) return { ok: false, error: 'No depreciable active assets found' }
+
     const { data: coaData } = await supabase.from('chart_of_accounts')
       .select('id, code').eq('branch_id', activeBranch.id)
     const coa = coaData ?? []
     const findAcct = (code: string) => coa.find((a: any) => a.code === code)
     const depExpAcct = findAcct('5750')
-    if (!depExpAcct) { toast('Account 5750 Depreciation Expense not found in COA', 'error'); return }
+    if (!depExpAcct) return { ok: false, error: 'Account 5750 Depreciation Expense not found in COA' }
 
-    setDepRunSaving(true)
-    const entryDate = `${depRunYear}-${String(depRunMonth).padStart(2, '0')}-01`
-
-    // Work the whole run out and check it BEFORE writing anything. The journal
-    // entry used to be created first, so any bail-out below left an orphan
-    // entry behind with no lines against it.
-    let totalAmount = 0
-    // Per-asset amount + resulting NBV — declining balance means each asset's
-    // rate applies to its OWN current net book value (total_cost minus what's
-    // already been depreciated), not its original cost. Operating/linen stays
-    // straight-line on original cost. See monthlyDepAmount().
-    const postings: { asset: FixedAsset; amount: number; nbvAfter: number; accumId: string }[] = []
+    let total = 0
+    // Declining balance means each asset's rate applies to its OWN current net
+    // book value (cost minus what's already been depreciated), not its original
+    // cost. Operating/linen stays straight-line on cost. See monthlyDepAmount().
+    const postings: Posting[] = []
     const missingAccts = new Set<string>()
     for (const asset of depAssetList) {
-      if (startsAfter(asset, depRunYear, depRunMonth)) continue
+      if (startsAfter(asset, year, month)) continue
       const nbv = Number(asset.total_cost) - Number(asset.accumulated_depreciation || 0)
       const monthly = monthlyDepAmount(asset, nbv)
       if (monthly <= 0) continue
-      const accumCode = accumMap[asset.category]
+      const accumCode = ACCUM_MAP[asset.category]
       const accumAcct = accumCode ? findAcct(accumCode) : null
       if (!accumAcct) { missingAccts.add(accumCode || asset.category); continue }
-      totalAmount += monthly
+      total += monthly
       postings.push({ asset, amount: monthly, nbvAfter: nbv - monthly, accumId: accumAcct.id })
     }
 
@@ -247,18 +255,145 @@ export default function AssetsPage() {
     // anything that violates an invariant rather than leaving it to be found
     // in a reconciliation months later.
     const overrun = postings.filter(p => p.nbvAfter < -0.005)
+    if (overrun.length) return { ok: false, error: `${overrun.length} asset(s) would depreciate past cost, e.g. "${overrun[0].asset.description}"` }
+    if (missingAccts.size) return { ok: false, error: `No accumulated-depreciation account for ${[...missingAccts].join(', ')} — check the Chart of Accounts` }
+    if (postings.length === 0) return { ok: false, error: `No assets are depreciating in ${MONTHS[month - 1]} ${year} — check their depreciation start dates` }
+    return { ok: true, postings, total, depExpAcctId: depExpAcct.id }
+  }
+
+  // Journal entries in the chosen month that debit 5750 Depreciation Expense
+  // and aren't already tied to a run — i.e. depreciation someone posted by hand.
+  async function loadLinkCandidates() {
+    if (!activeBranch) return
+    setLinkJeId('')
+    const from = `${linkYear}-${String(linkMonth).padStart(2, '0')}-01`
+    const to = new Date(linkYear, linkMonth, 0)
+    const toStr = `${linkYear}-${String(linkMonth).padStart(2, '0')}-${String(to.getDate()).padStart(2, '0')}`
+    const { data: jes } = await supabase.from('journal_entries')
+      .select('id, entry_number, entry_date, description')
+      .eq('branch_id', activeBranch.id).eq('status', 'posted').eq('is_void', false)
+      .gte('entry_date', from).lte('entry_date', toStr).order('entry_date')
+    const ids = (jes ?? []).map(e => e.id)
+    if (ids.length === 0) { setLinkCandidates([]); return }
+
+    const { data: acct } = await supabase.from('chart_of_accounts')
+      .select('id').eq('branch_id', activeBranch.id).eq('code', '5750').maybeSingle()
+    if (!acct) { setLinkCandidates([]); return }
+    const { data: lines } = await supabase.from('journal_entry_lines')
+      .select('entry_id, debit').in('entry_id', ids).eq('account_id', acct.id)
+    const byEntry: Record<string, number> = {}
+    for (const l of lines ?? []) byEntry[l.entry_id] = (byEntry[l.entry_id] ?? 0) + Number(l.debit)
+
+    const linked = new Set(depRuns.map(r => r.journal_entry_id).filter(Boolean))
+    setLinkCandidates((jes ?? [])
+      .filter(e => (byEntry[e.id] ?? 0) > 0 && !linked.has(e.id))
+      .map(e => ({ ...e, amount: byEntry[e.id] })))
+  }
+
+  useEffect(() => { if (activeBranch) loadLinkCandidates() }, [activeBranch, linkYear, linkMonth, depRuns]) // eslint-disable-line
+
+  // Preview what the register would allocate for the chosen period, so the
+  // difference against the hand-written entry is visible before recording.
+  useEffect(() => {
+    let live = true
+    if (!activeBranch || assets.length === 0) { setLinkComputed(null); return }
+    buildPostings(linkYear, linkMonth).then(r => { if (live) setLinkComputed(r.ok ? r.total : null) })
+    return () => { live = false }
+  }, [activeBranch, assets, linkYear, linkMonth]) // eslint-disable-line
+
+  // Records an externally-posted depreciation JE against the register: writes
+  // the run + per-asset ledger and advances each asset's accumulated
+  // depreciation, WITHOUT creating a journal entry (one already exists).
+  // Amounts are scaled to the entry's actual total so the register and the GL
+  // always agree, even if the accountant's figure differs from the computed one.
+  async function recordManualDepreciation() {
+    if (!activeBranch || !linkJeId) return
+    const je = linkCandidates.find(c => c.id === linkJeId)
+    if (!je) { toast('Select a journal entry to record', 'error'); return }
+    if (depRuns.find(r => r.run_year === linkYear && r.run_month === linkMonth)) {
+      toast(`${MONTHS[linkMonth - 1]} ${linkYear} is already recorded against the register`, 'error'); return
+    }
+
+    setLinkSaving(true)
+    const built = await buildPostings(linkYear, linkMonth)
+    if (!built.ok) { toast(`Aborted: ${built.error}`, 'error'); setLinkSaving(false); return }
+    const { postings, total: computed } = built
+    if (computed <= 0) { toast('Aborted: computed depreciation is zero', 'error'); setLinkSaving(false); return }
+
+    // Scale each asset's share to the entry's actual amount, then absorb any
+    // rounding remainder into the largest line so the parts sum to the whole.
+    const factor = je.amount / computed
+    const scaled = postings.map(p => ({ ...p, amount: Math.round(p.amount * factor * 100) / 100 }))
+    const drift = Math.round((je.amount - scaled.reduce((s, p) => s + p.amount, 0)) * 100) / 100
+    if (drift !== 0 && scaled.length > 0) {
+      const biggest = scaled.reduce((a, b) => (a.amount >= b.amount ? a : b))
+      biggest.amount = Math.round((biggest.amount + drift) * 100) / 100
+    }
+    const final = scaled
+      .map(p => ({ ...p, nbvAfter: Number(p.asset.total_cost) - Number(p.asset.accumulated_depreciation || 0) - p.amount }))
+      .filter(p => p.amount > 0)
+
+    const overrun = final.filter(p => p.nbvAfter < -0.005)
     if (overrun.length) {
-      toast(`Aborted: ${overrun.length} asset(s) would depreciate past cost, e.g. "${overrun[0].asset.description}"`, 'error')
-      setDepRunSaving(false); return
+      toast(`Aborted: scaling to ${formatCurrency(je.amount)} would push ${overrun.length} asset(s) past cost, e.g. "${overrun[0].asset.description}"`, 'error')
+      setLinkSaving(false); return
     }
-    if (missingAccts.size) {
-      toast(`Aborted: no accumulated-depreciation account for ${[...missingAccts].join(', ')} — check the Chart of Accounts`, 'error')
-      setDepRunSaving(false); return
+    const sum = Math.round(final.reduce((s, p) => s + p.amount, 0) * 100) / 100
+    if (Math.abs(sum - je.amount) > 0.005) {
+      toast(`Aborted: allocation ${formatCurrency(sum)} does not match the entry's ${formatCurrency(je.amount)}`, 'error')
+      setLinkSaving(false); return
     }
-    if (postings.length === 0) {
-      toast(`No assets are depreciating in ${MONTHS[depRunMonth - 1]} ${depRunYear} — check their depreciation start dates`, 'error')
-      setDepRunSaving(false); return
+
+    const { data: run, error: runErr } = await supabase.from('depreciation_runs').insert({
+      run_year: linkYear, run_month: linkMonth,
+      journal_entry_id: je.id, total_amount: sum,
+      asset_count: final.length, branch_id: activeBranch.id,
+    }).select().single()
+    if (runErr || !run) { toast(runErr?.message ?? 'Could not create the depreciation run', 'error'); setLinkSaving(false); return }
+
+    const { error: entErr } = await supabase.from('depreciation_entries').insert(final.map(p => ({
+      asset_id: p.asset.id, depreciation_run_id: run.id,
+      run_year: linkYear, run_month: linkMonth,
+      amount: p.amount, nbv_after: p.nbvAfter,
+    })))
+    if (entErr) {
+      await supabase.from('depreciation_runs').delete().eq('id', run.id)
+      toast(`Aborted and rolled back: ${entErr.message}`, 'error'); setLinkSaving(false); return
     }
+
+    const updates = await Promise.all(final.map(p =>
+      supabase.from('fixed_assets')
+        .update({ accumulated_depreciation: Number(p.asset.accumulated_depreciation || 0) + p.amount })
+        .eq('id', p.asset.id)
+    ))
+    const failed = updates.filter(u => u.error)
+    if (failed.length) {
+      toast(`Recorded ${je.entry_number}, but ${failed.length} asset balance(s) did not update: ${failed[0].error?.message}`, 'error')
+    } else {
+      toast(`Recorded ${je.entry_number} against the register · ${formatCurrency(sum)} across ${final.length} assets`)
+    }
+    setLinkSaving(false)
+    setLinkJeId('')
+    load()
+    loadDepRuns()
+  }
+
+  async function runDepreciation() {
+    if (!activeBranch) return
+    const alreadyRun = depRuns.find(r => r.run_year === depRunYear && r.run_month === depRunMonth)
+    if (alreadyRun) { toast(`Depreciation for ${MONTHS[depRunMonth - 1]} ${depRunYear} already posted`, 'error'); return }
+
+    setDepRunSaving(true)
+    const entryDate = `${depRunYear}-${String(depRunMonth).padStart(2, '0')}-01`
+
+    // Work the whole run out and check it BEFORE writing anything. The journal
+    // entry used to be created first, so any bail-out below left an orphan
+    // entry behind with no lines against it.
+    const built = await buildPostings(depRunYear, depRunMonth)
+    if (!built.ok) { toast(`Aborted: ${built.error}`, 'error'); setDepRunSaving(false); return }
+    const { postings, total: totalAmount, depExpAcctId } = built
+    const depExpAcct = { id: depExpAcctId }
+
     const lines: any[] = []
     for (const p of postings) {
       lines.push(
@@ -756,6 +891,69 @@ export default function AssetsPage() {
                   {depRunSaving ? 'Posting…' : depRuns.find(r => r.run_year === depRunYear && r.run_month === depRunMonth) ? '✓ Already Posted' : 'Run Depreciation'}
                 </Button>
               </div>
+              {/* ── Record a hand-written depreciation entry ── */}
+              <div className="mt-4 border-t border-hborder pt-4">
+                <p className="font-semibold text-dark-navy text-[14px]">Already posted the entry yourself?</p>
+                <p className="text-xs text-hmuted mt-0.5 mb-3">
+                  Record it against the register instead. This creates no journal entry — it allocates the
+                  amount across assets and advances their accumulated depreciation, so net book value keeps
+                  up with the ledger. Without it, declining balance keeps recomputing off full cost.
+                </p>
+                <div className="flex items-end gap-3 flex-wrap">
+                  <div>
+                    <label className="block text-xs text-hmuted mb-1">Month</label>
+                    <select value={linkMonth} onChange={e => setLinkMonth(Number(e.target.value))}
+                      className="border border-hborder rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-navy">
+                      {MONTHS.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-hmuted mb-1">Year</label>
+                    <select value={linkYear} onChange={e => setLinkYear(Number(e.target.value))}
+                      className="border border-hborder rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-navy">
+                      {[2024, 2025, 2026, 2027].map(y => <option key={y} value={y}>{y}</option>)}
+                    </select>
+                  </div>
+                  <div className="flex-1 min-w-[260px]">
+                    <label className="block text-xs text-hmuted mb-1">Journal Entry (debits 5750)</label>
+                    <select value={linkJeId} onChange={e => setLinkJeId(e.target.value)}
+                      disabled={linkCandidates.length === 0}
+                      className="w-full border border-hborder rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-navy disabled:bg-hsurface2 disabled:text-hmuted">
+                      <option value="">
+                        {linkCandidates.length === 0 ? 'No unrecorded depreciation entries this month' : 'Select an entry…'}
+                      </option>
+                      {linkCandidates.map(c => (
+                        <option key={c.id} value={c.id}>{c.entry_number} · {formatCurrency(c.amount)} · {c.description.slice(0, 40)}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    onClick={recordManualDepreciation}
+                    disabled={linkSaving || !linkJeId || !!depRuns.find(r => r.run_year === linkYear && r.run_month === linkMonth)}
+                  >
+                    {linkSaving ? 'Recording…'
+                      : depRuns.find(r => r.run_year === linkYear && r.run_month === linkMonth) ? '✓ Already Recorded'
+                      : 'Record Against Register'}
+                  </Button>
+                </div>
+                {linkJeId && (() => {
+                  const c = linkCandidates.find(x => x.id === linkJeId)
+                  if (!c || linkComputed === null) return null
+                  const diff = c.amount - linkComputed
+                  const off = Math.abs(diff) > 0.005
+                  return (
+                    <div className={`mt-3 text-xs rounded-lg px-3 py-2 ${off ? 'bg-amber-50 text-amber-900' : 'bg-green-50 text-green-800'}`}>
+                      Entry {formatCurrency(c.amount)} · register expects {formatCurrency(linkComputed)}
+                      {off ? (
+                        <> · differs by {formatCurrency(Math.abs(diff))}. Each asset&apos;s share will be scaled to the
+                          entry&apos;s amount so the register and the ledger still agree — check the entry is right before recording.</>
+                      ) : <> · matches exactly.</>}
+                    </div>
+                  )
+                })()}
+              </div>
+
               {depRuns.length > 0 && (
                 <div className="mt-4 border-t border-hborder pt-4">
                   <p className="text-xs font-semibold text-hmuted uppercase tracking-wide mb-2">Run History</p>
