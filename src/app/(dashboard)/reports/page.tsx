@@ -16,6 +16,9 @@ interface MonthlyData {
 interface BalanceSheet {
   cashCollected: number
   accountsReceivable: number
+  fixedAssetsCost: number
+  accumulatedDep: number
+  fixedAssetsNBV: number
   totalAssets: number
   unpaidTotal: number
   partialBalance: number
@@ -45,7 +48,8 @@ export default function ReportsPage() {
   const [loading, setLoading] = useState(true)
   const [kpis, setKpis] = useState({ totalRevenue: 0, totalGuests: 0, avgStay: 0, adr: 0, revpar: 0 })
   const [balance, setBalance] = useState<BalanceSheet>({
-    cashCollected: 0, accountsReceivable: 0, totalAssets: 0,
+    cashCollected: 0, accountsReceivable: 0,
+    fixedAssetsCost: 0, accumulatedDep: 0, fixedAssetsNBV: 0, totalAssets: 0,
     unpaidTotal: 0, partialBalance: 0, refundsIssued: 0, totalLiabilities: 0,
     grossBilling: 0, totalDiscounts: 0, netRevenue: 0,
   })
@@ -66,12 +70,13 @@ export default function ReportsPage() {
     sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 5)
     const startDate = sixMonthsAgo.toISOString().split('T')[0]
 
-    const [invRes, resRes, houseRes, allInvRes, coaRes] = await Promise.all([
+    const [invRes, resRes, houseRes, allInvRes, coaRes, faRes] = await Promise.all([
       supabase.from('invoices').select('total, paid_at').eq('status', 'paid').eq('branch_id', activeBranch.id).gte('paid_at', startDate),
       supabase.from('reservations').select('source, check_in_date, check_out_date, status, house:houses(house_type)').eq('branch_id', activeBranch.id).gte('created_at', startDate),
       supabase.from('houses').select('house_type, status').eq('branch_id', activeBranch.id),
       supabase.from('invoices').select('total, amount_paid, status, discount_amount').eq('branch_id', activeBranch.id),
       supabase.from('chart_of_accounts').select('code, name, type').eq('branch_id', activeBranch.id).eq('is_active', true).in('type', ['revenue', 'expense']).order('code'),
+      supabase.from('fixed_assets').select('total_cost, accumulated_depreciation, status').eq('branch_id', activeBranch.id),
     ])
     // 2-step: get this branch's JE IDs first, then fetch their lines (journal_entry_lines has no branch_id)
     const { data: jeIdData } = await supabase.from('journal_entries')
@@ -160,10 +165,22 @@ export default function ReportsPage() {
       .filter(i => !['void'].includes(i.status))
       .reduce((s, i) => s + Number(i.total), 0) - refundsIssued
 
+    // ── Fixed assets ──
+    // From the asset register, which ties to GL 1500-1799 exactly (the opening
+    // capitalisation posted in migration 048). Disposed assets are off the
+    // books, so only active/maintenance rows count.
+    const faRows = (faRes.data ?? []).filter((a: any) => a.status !== 'disposed')
+    const fixedAssetsCost = faRows.reduce((s: number, a: any) => s + Number(a.total_cost), 0)
+    const accumulatedDep = faRows.reduce((s: number, a: any) => s + Number(a.accumulated_depreciation ?? 0), 0)
+    const fixedAssetsNBV = fixedAssetsCost - accumulatedDep
+
     setBalance({
       cashCollected,
       accountsReceivable,
-      totalAssets: cashCollected + accountsReceivable,
+      fixedAssetsCost,
+      accumulatedDep,
+      fixedAssetsNBV,
+      totalAssets: cashCollected + accountsReceivable + fixedAssetsNBV,
       unpaidTotal,
       partialBalance,
       refundsIssued,
@@ -319,6 +336,9 @@ export default function ReportsPage() {
     sectionTitle('Assets', 26, 122, 74)          // green
     row('Cash Collected', formatCurrency(balance.cashCollected))
     row('Accounts Receivable', formatCurrency(balance.accountsReceivable))
+    row('Fixed Assets (at cost)', formatCurrency(balance.fixedAssetsCost))
+    row('  Less: Accumulated Depreciation', `(${formatCurrency(balance.accumulatedDep)})`)
+    row('  Net Book Value', formatCurrency(balance.fixedAssetsNBV))
     divider()
     totalRow('Total Assets', formatCurrency(balance.totalAssets), 26, 122, 74)
 
@@ -458,6 +478,18 @@ export default function ReportsPage() {
                 <div className="flex justify-between text-sm">
                   <span className="text-hmuted">Accounts Receivable</span>
                   <span className="font-semibold text-dark-navy">{formatCurrency(balance.accountsReceivable)}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-hmuted">Fixed Assets (at cost)</span>
+                  <span className="font-semibold text-dark-navy">{formatCurrency(balance.fixedAssetsCost)}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-hmuted pl-3">Less: Accumulated Depreciation</span>
+                  <span className="font-semibold text-dark-navy">({formatCurrency(balance.accumulatedDep)})</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-hmuted pl-3">Net Book Value</span>
+                  <span className="font-semibold text-dark-navy">{formatCurrency(balance.fixedAssetsNBV)}</span>
                 </div>
                 <div className="flex justify-between text-sm border-t border-hborder pt-2.5 mt-1">
                   <span className="font-semibold text-[#1A7A4A]">Total Assets</span>
