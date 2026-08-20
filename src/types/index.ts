@@ -62,7 +62,9 @@ export interface BillPayment {
 }
 
 // ─── Fixed Assets ─────────────────────────────────────────────────────────
-export type AssetCategory = 'land' | 'building' | 'computer_office' | 'furniture' | 'machinery' | 'vehicle'
+// Matches the six categories on the source workbooks' "FA ( WP) 2026" sheets,
+// which is the taxonomy the accounting team actually files these under.
+export type AssetCategory = 'land' | 'building' | 'furniture_fixture' | 'machinery_vehicle' | 'kitchen_equipment' | 'operating_linen'
 export type AssetStatus = 'active' | 'disposed' | 'maintenance'
 
 export interface FixedAsset {

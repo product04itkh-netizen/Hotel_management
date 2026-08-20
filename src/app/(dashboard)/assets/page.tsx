@@ -15,31 +15,33 @@ import type { FixedAsset, AssetCategory, AssetStatus, DepreciationEntry } from '
 type Tab = 'overview' | 'register' | 'depreciation'
 
 // ─── Category config ──────────────────────────────────────────────────────────
-// Useful life (months) is the only thing anyone edits — it's what the source
-// fixed-asset files actually specify, and depreciation_rate is a database-
-// generated column computed from it (12 / months), so the two can never
-// drift out of sync again. Defaults match Cambodian GDT depreciation classes,
-// confirmed against the source files' own rate table: Class 1 buildings =
-// 240mo (5%/yr), Class 2 computer/electronics = 24mo (50%/yr), Class 3
-// furniture = 48mo (25%/yr), Class 4 machinery/vehicle = 48mo (25%/yr).
-// 'computer_office' currently holds this branch's linen/housekeeping items
-// rather than literal computers — those depreciate on each item's own
-// useful life (set manually per item), not this category default.
+// These six mirror the source fixed-asset workbooks' "FA ( WP) 2026" sheets
+// exactly — the taxonomy accounting actually files under — so the register
+// groups and totals line up with the working papers without re-mapping.
+//
+// Useful life (months) is the only thing anyone edits; depreciation_rate is a
+// database-generated column computed from it (12 / months), so the two can
+// never drift out of sync. Defaults follow the Class column on those same
+// sheets: Class 1 buildings = 240mo (5%/yr), Class 3 furniture/kitchen = 48mo
+// (25%/yr), Class 4 machinery/vehicle = 48mo (25%/yr). Operating equipment /
+// linen has no single class — each item carries its own useful life, so its
+// default is deliberately short and expected to be overridden per item.
 function rateFromMonths(months: number | null | undefined): number {
   return months && months > 0 ? Math.round((12 / months) * 10000) / 10000 : 0
 }
 
 // ─── Depreciation method ──────────────────────────────────────────────────────
-// Buildings (GDT Class 1) depreciate straight-line on ORIGINAL cost.
-// Every other category (GDT Classes 2-4) depreciates DECLINING BALANCE on
-// current net book value — the rate is applied to what's left, not the
-// original cost, so the monthly amount shrinks as the asset ages. Confirmed
-// with finance; this is the single formula both the actual posting run and
-// the schedule preview use, so they can never diverge.
+// Per the Method column on both source workbooks' "FA ( WP) 2026" sheets:
+// Operating Equipment / Linen is STRAIGHT-LINE on original cost (each item
+// carries its own useful life — 24, 60 or 84 months). Every other
+// depreciable category — buildings included — is DECLINING BALANCE on
+// current net book value, so the monthly amount shrinks as the asset ages.
+// This is the single formula both the actual posting run and the schedule
+// preview use, so they can never diverge.
 function monthlyDepAmount(asset: FixedAsset, nbv: number): number {
   if (!asset.is_depreciable || nbv <= 0.005) return 0
   const rate = Number(asset.depreciation_rate)
-  const base = asset.category === 'building' ? Number(asset.total_cost) : nbv
+  const base = asset.category === 'operating_linen' ? Number(asset.total_cost) : nbv
   return Math.min((base * rate) / 12, nbv)
 }
 
@@ -80,19 +82,19 @@ function buildAssetSchedule(asset: FixedAsset, entries: DepreciationEntry[], tar
 }
 
 const CATEGORIES: { value: AssetCategory; label: string; usefulLifeMonths: number; dot: string }[] = [
-  { value: 'land',           label: 'Land',                     usefulLifeMonths: 0,   dot: '#6B7280' },
-  { value: 'building',       label: 'Buildings & Construction', usefulLifeMonths: 240, dot: '#8B5CF6' },
-  { value: 'computer_office',label: 'Computer & Office',        usefulLifeMonths: 24,  dot: '#3B82F6' },
-  { value: 'furniture',      label: 'Furniture & Equipment',    usefulLifeMonths: 48,  dot: '#F59E0B' },
-  { value: 'machinery',      label: 'Machinery & Electrical',   usefulLifeMonths: 48,  dot: '#10B981' },
-  { value: 'vehicle',        label: 'Vehicle & Watercraft',     usefulLifeMonths: 48,  dot: '#EF4444' },
+  { value: 'land',              label: 'Land',                                usefulLifeMonths: 0,   dot: '#6B7280' },
+  { value: 'building',          label: 'Buildings, Const. & Renovations',     usefulLifeMonths: 240, dot: '#8B5CF6' },
+  { value: 'furniture_fixture', label: 'Furniture Fixture & Other Equipment', usefulLifeMonths: 48,  dot: '#F59E0B' },
+  { value: 'machinery_vehicle', label: 'Machinery, Vehicle, Truck & Others',  usefulLifeMonths: 48,  dot: '#EF4444' },
+  { value: 'kitchen_equipment', label: 'Kitchen Equipment',                   usefulLifeMonths: 48,  dot: '#10B981' },
+  { value: 'operating_linen',   label: 'Operating Equipment / Linen',         usefulLifeMonths: 24,  dot: '#3B82F6' },
 ]
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 
 const emptyForm = {
   description: '',
-  category: 'furniture' as AssetCategory,
+  category: 'furniture_fixture' as AssetCategory,
   type_brand: '',
   asset_code: '',
   series_code: '',
@@ -179,9 +181,17 @@ export default function AssetsPage() {
     const depAssetList = assets.filter(a => a.is_depreciable && a.status === 'active' && Number(a.total_cost) > 0)
     if (depAssetList.length === 0) { toast('No depreciable active assets found', 'error'); return }
 
-    // Map category → accumulated depreciation account code
-    const accumMap: Record<string, string> = {
-      building: '1501', computer_office: '1511', furniture: '1521', machinery: '1531', vehicle: '1541',
+    // Map category → accumulated depreciation account code. The COA predates
+    // the workbook-aligned categories, so kitchen equipment shares Furniture's
+    // accumulated-dep account (1521) and linen shares 1511 — matching how each
+    // group is presented on the balance sheet.
+    const accumMap: Record<AssetCategory, string> = {
+      land:              '',
+      building:          '1501',
+      furniture_fixture: '1521',
+      machinery_vehicle: '1541',
+      kitchen_equipment: '1521',
+      operating_linen:   '1511',
     }
     const { data: coaData } = await supabase.from('chart_of_accounts')
       .select('id, code').eq('branch_id', activeBranch.id)
@@ -205,7 +215,7 @@ export default function AssetsPage() {
     const lines: any[] = []
     // Per-asset amount + resulting NBV — declining balance means each asset's
     // rate applies to its OWN current net book value (total_cost minus what's
-    // already been depreciated), not its original cost. Buildings stay
+    // already been depreciated), not its original cost. Operating/linen stays
     // straight-line on original cost. See monthlyDepAmount().
     const postings: { asset: FixedAsset; amount: number; nbvAfter: number }[] = []
     for (const asset of depAssetList) {
@@ -437,7 +447,7 @@ export default function AssetsPage() {
             <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
               {[
                 { label: 'Total FA Value',        value: formatCurrency(totalFA),          sub: `${assets.length} assets total` },
-                { label: 'Annual Depreciation',   value: formatCurrency(totalDepAnnual),   sub: 'Straight-line method' },
+                { label: 'Annual Depreciation',   value: formatCurrency(totalDepAnnual),   sub: 'Declining balance · linen straight-line' },
                 { label: 'Net Book Value',        value: formatCurrency(nbv),              sub: 'After annual dep.' },
                 { label: 'Active Assets',         value: activeCount.toString(),           sub: `${assets.length - activeCount} disposed/maintenance` },
               ].map(c => (
@@ -940,7 +950,7 @@ export default function AssetsPage() {
                 <span className="text-xs text-hmuted flex-shrink-0">months</span>
               </div>
               <div className="flex gap-1.5 mt-1.5">
-                {([['240mo Building', 240], ['48mo Furn/Mach/Veh', 48], ['24mo Computer', 24]] as const).map(([label, months]) => (
+                {([['240mo Building', 240], ['48mo Furn/Mach/Kitchen', 48], ['24mo Linen', 24]] as const).map(([label, months]) => (
                   <button
                     key={label} type="button"
                     onClick={() => setForm(f => ({ ...f, is_depreciable: true, useful_life_months: months }))}
@@ -949,9 +959,13 @@ export default function AssetsPage() {
                 ))}
               </div>
               {form.is_depreciable && form.useful_life_months ? (
-                <p className="text-[10px] text-hmuted mt-1">= {(rateFromMonths(form.useful_life_months) * 100).toFixed(2)}% / yr straight-line. Linen/housekeeping items: enter that specific item's own useful life, not a preset.</p>
+                <p className="text-[10px] text-hmuted mt-1">
+                  = {(rateFromMonths(form.useful_life_months) * 100).toFixed(2)}% / yr,{' '}
+                  {form.category === 'operating_linen' ? 'straight-line' : 'declining balance'}.
+                  {form.category === 'operating_linen' && ' Enter this item\'s own useful life, not a preset.'}
+                </p>
               ) : (
-                <p className="text-[10px] text-hmuted mt-1">Linen/housekeeping items: enter that specific item's own useful life in months, not a preset.</p>
+                <p className="text-[10px] text-hmuted mt-1">Operating equipment / linen items: enter that specific item's own useful life in months, not a preset.</p>
               )}
             </div>
 
