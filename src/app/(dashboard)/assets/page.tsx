@@ -181,17 +181,16 @@ export default function AssetsPage() {
     const depAssetList = assets.filter(a => a.is_depreciable && a.status === 'active' && Number(a.total_cost) > 0)
     if (depAssetList.length === 0) { toast('No depreciable active assets found', 'error'); return }
 
-    // Map category → accumulated depreciation account code. The COA predates
-    // the workbook-aligned categories, so kitchen equipment shares Furniture's
-    // accumulated-dep account (1521) and linen shares 1511 — matching how each
-    // group is presented on the balance sheet.
+    // Category → accumulated-depreciation account. One account per category,
+    // matching the cost accounts migration 048 renamed to these same groups.
+    // Land is non-depreciable and has none.
     const accumMap: Record<AssetCategory, string> = {
       land:              '',
       building:          '1501',
-      furniture_fixture: '1521',
-      machinery_vehicle: '1541',
-      kitchen_equipment: '1521',
       operating_linen:   '1511',
+      furniture_fixture: '1521',
+      kitchen_equipment: '1531',
+      machinery_vehicle: '1541',
     }
     const { data: coaData } = await supabase.from('chart_of_accounts')
       .select('id, code').eq('branch_id', activeBranch.id)
