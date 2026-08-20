@@ -455,21 +455,42 @@ export default function ReservationsPage() {
       if (error) { toast(error.message, 'error'); setSaving(false); return }
 
       // Sync deposit receipt: update existing held receipt, create new, or mark refunded
-      const { data: existingReceipt } = await supabase
-        .from('deposit_receipts').select('id, amount, payment_method').eq('reservation_id', editId).eq('status', 'held').maybeSingle()
+      //
+      // A new receipt is only written when the deposit exceeds what has ALREADY
+      // been receipted for this reservation. This used to create one whenever
+      // there was no 'held' receipt — so re-saving a reservation whose deposit
+      // had already been applied to an invoice minted a fresh held receipt for
+      // money the guest never paid a second time. DR-KAM-202608-005 came from
+      // exactly that: $250 already receipted and applied, the reservation
+      // edited at checkout, and a phantom $250 "held" receipt created against
+      // a fully-settled invoice.
+      const { data: allReceipts } = await supabase
+        .from('deposit_receipts').select('id, amount, status, payment_method').eq('reservation_id', editId)
+      const existingReceipt = (allReceipts ?? []).find(r => r.status === 'held') ?? null
+      const alreadyReceipted = (allReceipts ?? [])
+        .filter(r => r.id !== existingReceipt?.id)
+        .reduce((s, r) => s + Number(r.amount), 0)
+
       if (depositNum > 0) {
         if (existingReceipt) {
-          await supabase.from('deposit_receipts').update({
-            amount: depositNum, payment_method: depositMethod, updated_at: new Date().toISOString(),
-          }).eq('id', existingReceipt.id)
-        } else {
+          // The held receipt covers whatever the other receipts don't.
+          const target = Math.round((depositNum - alreadyReceipted) * 100) / 100
+          if (target > 0.005) {
+            await supabase.from('deposit_receipts').update({
+              amount: target, payment_method: depositMethod, updated_at: new Date().toISOString(),
+            }).eq('id', existingReceipt.id)
+          }
+        } else if (depositNum - alreadyReceipted > 0.005) {
+          // Genuinely more deposit than has been receipted — receipt the difference only.
           const receiptNum = await generateDepositReceiptNumber()
           await supabase.from('deposit_receipts').insert({
             receipt_number: receiptNum, reservation_id: editId, branch_id: activeBranch.id,
-            amount: depositNum, payment_method: depositMethod,
+            amount: Math.round((depositNum - alreadyReceipted) * 100) / 100,
+            payment_method: depositMethod,
             receipt_date: todayISO(), status: 'held',
           })
         }
+        // else: the deposit is already fully receipted — nothing to create.
         const resNum = reservations.find(r => r.id === editId)?.reservation_number || ''
         await syncDepositJournalEntry(resNum, form.guest_name, depositNum, depositMethod)
       } else if (existingReceipt) {
