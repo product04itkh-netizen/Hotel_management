@@ -38,29 +38,47 @@ function rateFromMonths(months: number | null | undefined): number {
 // current net book value, so the monthly amount shrinks as the asset ages.
 // This is the single formula both the actual posting run and the schedule
 // preview use, so they can never diverge.
+//
+// Divide by useful_life_months rather than going through depreciation_rate.
+// The two are algebraically the same, but depreciation_rate is stored to four
+// decimals, so a life that doesn't divide 12 evenly (84 months -> 0.142857…
+// stored as 0.1429) drifts. Checked against the workbooks' August-2026
+// column: via the rate, Kampot came out $0.005175 high; dividing by months
+// matches both branches to six decimal places.
 function monthlyDepAmount(asset: FixedAsset, nbv: number): number {
   if (!asset.is_depreciable || nbv <= 0.005) return 0
-  const rate = Number(asset.depreciation_rate)
+  const months = Number(asset.useful_life_months)
+  if (!months || months <= 0) return 0
   const base = asset.category === 'operating_linen' ? Number(asset.total_cost) : nbv
-  return Math.min((base * rate) / 12, nbv)
+  return Math.min(base / months, nbv)
 }
 
-function purchasedAfter(asset: FixedAsset, year: number, month1to12: number): boolean {
-  if (!asset.purchased_date) return false
-  const pd = new Date(asset.purchased_date)
-  return pd.getFullYear() > year || (pd.getFullYear() === year && pd.getMonth() + 1 > month1to12)
+// When depreciation begins. The workbooks carry an explicit "Start date"
+// per asset, which is NOT the purchase date — most of these were bought in
+// 2025 or early 2026 but only start depreciating in August 2026. Falls back
+// to the purchase date for anything without one.
+function depStart(asset: FixedAsset): Date | null {
+  const d = asset.depreciation_start_date ?? asset.purchased_date
+  return d ? new Date(d) : null
+}
+
+function startsAfter(asset: FixedAsset, year: number, month1to12: number): boolean {
+  const sd = depStart(asset)
+  if (!sd) return false
+  return sd.getFullYear() > year || (sd.getFullYear() === year && sd.getMonth() + 1 > month1to12)
 }
 
 // Projects an asset's full-year schedule for targetYear by simulating forward
-// from its purchase date, using ACTUAL posted amounts wherever a ledger entry
-// exists for that month, and the declining-balance/straight-line formula
-// above for any month not yet posted (past-due or future).
+// from its depreciation start date, using ACTUAL posted amounts wherever a
+// ledger entry exists for that month, and the declining-balance/straight-line
+// formula above for any month not yet posted (past-due or future).
 function buildAssetSchedule(asset: FixedAsset, entries: DepreciationEntry[], targetYear: number): number[] {
   const result = new Array(12).fill(0)
   if (!asset.is_depreciable || Number(asset.total_cost) <= 0) return result
   const entryMap = new Map(entries.map(e => [`${e.run_year}-${e.run_month}`, e]))
-  const pd = asset.purchased_date ? new Date(asset.purchased_date) : null
+  const pd = depStart(asset)
   const startYear = pd ? pd.getFullYear() : targetYear
+  if (startYear > targetYear) return result   // hasn't started depreciating yet
   const endYear = Math.max(targetYear, startYear)
   let nbv = Number(asset.total_cost)
   for (let y = startYear; y <= endYear; y++) {
@@ -201,57 +219,115 @@ export default function AssetsPage() {
 
     setDepRunSaving(true)
     const entryDate = `${depRunYear}-${String(depRunMonth).padStart(2, '0')}-01`
+
+    // Work the whole run out and check it BEFORE writing anything. The journal
+    // entry used to be created first, so any bail-out below left an orphan
+    // entry behind with no lines against it.
+    let totalAmount = 0
+    // Per-asset amount + resulting NBV — declining balance means each asset's
+    // rate applies to its OWN current net book value (total_cost minus what's
+    // already been depreciated), not its original cost. Operating/linen stays
+    // straight-line on original cost. See monthlyDepAmount().
+    const postings: { asset: FixedAsset; amount: number; nbvAfter: number; accumId: string }[] = []
+    const missingAccts = new Set<string>()
+    for (const asset of depAssetList) {
+      if (startsAfter(asset, depRunYear, depRunMonth)) continue
+      const nbv = Number(asset.total_cost) - Number(asset.accumulated_depreciation || 0)
+      const monthly = monthlyDepAmount(asset, nbv)
+      if (monthly <= 0) continue
+      const accumCode = accumMap[asset.category]
+      const accumAcct = accumCode ? findAcct(accumCode) : null
+      if (!accumAcct) { missingAccts.add(accumCode || asset.category); continue }
+      totalAmount += monthly
+      postings.push({ asset, amount: monthly, nbvAfter: nbv - monthly, accumId: accumAcct.id })
+    }
+
+    // ── Guards. Depreciation errors are silent by nature — a wrong figure
+    // posts and balances just as happily as a right one — so refuse to write
+    // anything that violates an invariant rather than leaving it to be found
+    // in a reconciliation months later.
+    const overrun = postings.filter(p => p.nbvAfter < -0.005)
+    if (overrun.length) {
+      toast(`Aborted: ${overrun.length} asset(s) would depreciate past cost, e.g. "${overrun[0].asset.description}"`, 'error')
+      setDepRunSaving(false); return
+    }
+    if (missingAccts.size) {
+      toast(`Aborted: no accumulated-depreciation account for ${[...missingAccts].join(', ')} — check the Chart of Accounts`, 'error')
+      setDepRunSaving(false); return
+    }
+    if (postings.length === 0) {
+      toast(`No assets are depreciating in ${MONTHS[depRunMonth - 1]} ${depRunYear} — check their depreciation start dates`, 'error')
+      setDepRunSaving(false); return
+    }
+    const lines: any[] = []
+    for (const p of postings) {
+      lines.push(
+        { account_id: depExpAcct.id, description: p.asset.description, debit: p.amount, credit: 0 },
+        { account_id: p.accumId,     description: p.asset.description, debit: 0, credit: p.amount },
+      )
+    }
+    const drTotal = lines.reduce((s, l) => s + Number(l.debit), 0)
+    const crTotal = lines.reduce((s, l) => s + Number(l.credit), 0)
+    if (Math.abs(drTotal - crTotal) > 0.005 || Math.abs(drTotal - totalAmount) > 0.005) {
+      toast(`Aborted: entry does not balance (DR ${formatCurrency(drTotal)} / CR ${formatCurrency(crTotal)})`, 'error')
+      setDepRunSaving(false); return
+    }
+
     const { data: je, error: jeErr } = await supabase.from('journal_entries').insert({
       entry_number: generateJournalEntryNumber(),
       entry_date: entryDate,
+      reference: `DEP-${depRunYear}-${String(depRunMonth).padStart(2, '0')}`,
       description: `Depreciation — ${MONTHS[depRunMonth - 1]} ${depRunYear}`,
       reference_type: 'depreciation',
       branch_id: activeBranch.id,
     }).select().single()
     if (jeErr || !je) { toast(jeErr?.message ?? 'Error creating journal entry', 'error'); setDepRunSaving(false); return }
 
-    let totalAmount = 0
-    const lines: any[] = []
-    // Per-asset amount + resulting NBV — declining balance means each asset's
-    // rate applies to its OWN current net book value (total_cost minus what's
-    // already been depreciated), not its original cost. Operating/linen stays
-    // straight-line on original cost. See monthlyDepAmount().
-    const postings: { asset: FixedAsset; amount: number; nbvAfter: number }[] = []
-    for (const asset of depAssetList) {
-      if (purchasedAfter(asset, depRunYear, depRunMonth)) continue
-      const nbv = Number(asset.total_cost) - Number(asset.accumulated_depreciation || 0)
-      const monthly = monthlyDepAmount(asset, nbv)
-      if (monthly <= 0) continue
-      const accumCode = accumMap[asset.category]
-      const accumAcct = accumCode ? findAcct(accumCode) : null
-      if (!accumAcct) continue
-      totalAmount += monthly
-      postings.push({ asset, amount: monthly, nbvAfter: nbv - monthly })
-      lines.push(
-        { entry_id: je.id, account_id: depExpAcct.id, description: asset.description, debit: monthly, credit: 0 },
-        { entry_id: je.id, account_id: accumAcct.id,  description: asset.description, debit: 0, credit: monthly },
-      )
+    const { error: linesErr } = await supabase.from('journal_entry_lines')
+      .insert(lines.map(l => ({ ...l, entry_id: je.id })))
+    if (linesErr) {
+      // Don't leave a headless entry behind if the lines fail to land.
+      await supabase.from('journal_entries').delete().eq('id', je.id)
+      toast(`Aborted: ${linesErr.message}`, 'error'); setDepRunSaving(false); return
     }
-    if (lines.length === 0) { toast('No valid depreciation lines — check COA accounts 1501/1511/1521/1531/1541 and 5750', 'error'); setDepRunSaving(false); return }
-    await supabase.from('journal_entry_lines').insert(lines)
+    // From here on, roll the journal entry back on any failure rather than
+    // leaving the GL carrying a charge the register has no record of.
+    const rollback = async (msg: string) => {
+      await supabase.from('journal_entry_lines').delete().eq('entry_id', je.id)
+      await supabase.from('journal_entries').delete().eq('id', je.id)
+      toast(`Aborted and rolled back: ${msg}`, 'error')
+      setDepRunSaving(false)
+    }
+
     const { data: run, error: runErr } = await supabase.from('depreciation_runs').insert({
       run_year: depRunYear, run_month: depRunMonth,
       journal_entry_id: je.id, total_amount: totalAmount,
       asset_count: postings.length, branch_id: activeBranch.id,
     }).select().single()
-    if (runErr || !run) { toast(runErr?.message ?? 'Error creating depreciation run', 'error'); setDepRunSaving(false); return }
+    if (runErr || !run) { await rollback(runErr?.message ?? 'could not create the depreciation run'); return }
 
-    await supabase.from('depreciation_entries').insert(postings.map(p => ({
+    const { error: entErr } = await supabase.from('depreciation_entries').insert(postings.map(p => ({
       asset_id: p.asset.id, depreciation_run_id: run.id,
       run_year: depRunYear, run_month: depRunMonth,
       amount: p.amount, nbv_after: p.nbvAfter,
     })))
+    if (entErr) {
+      await supabase.from('depreciation_runs').delete().eq('id', run.id)
+      await rollback(entErr.message)
+      return
+    }
+
     // Advance each asset's running NBV so next month's declining-balance calc starts from here.
-    await Promise.all(postings.map(p =>
+    const updates = await Promise.all(postings.map(p =>
       supabase.from('fixed_assets')
         .update({ accumulated_depreciation: Number(p.asset.accumulated_depreciation || 0) + p.amount })
         .eq('id', p.asset.id)
     ))
+    const failed = updates.filter(u => u.error)
+    if (failed.length) {
+      toast(`Posted ${je.entry_number}, but ${failed.length} asset balance(s) did not update: ${failed[0].error?.message}. Re-check before running next month.`, 'error')
+      setDepRunSaving(false); load(); loadDepRuns(); return
+    }
 
     toast(`Depreciation posted: ${je.entry_number} · ${formatCurrency(totalAmount)}`)
     setDepRunSaving(false)
@@ -310,6 +386,14 @@ export default function AssetsPage() {
   function monthlyDep(asset: FixedAsset, monthIdx: number): number {
     return depSchedule.get(asset.id)?.[monthIdx] ?? 0
   }
+
+  // What the schedule below actually adds up to for the selected year. Not the
+  // same as totalDepAnnual, which is a full-12-month run rate — in a year where
+  // assets start part-way through (these all start August 2026) only the months
+  // from the start date onward carry a charge.
+  const scheduleYearTotal = useMemo(
+    () => Array.from(depSchedule.values()).reduce((s, months) => s + months.reduce((t, v) => t + v, 0), 0),
+    [depSchedule])
 
   // ── CRUD ──────────────────────────────────────────────────────────────────
   function openAdd() {
@@ -700,7 +784,8 @@ export default function AssetsPage() {
                 {[2024, 2025, 2026, 2027].map(y => <option key={y} value={y}>{y}</option>)}
               </select>
               <span className="text-sm text-hmuted ml-2">
-                Annual depreciation: <span className="font-semibold text-dark-navy">{formatCurrency(totalDepAnnual)}</span>
+                {depYear} depreciation: <span className="font-semibold text-dark-navy">{formatCurrency(scheduleYearTotal)}</span>
+                <span className="text-hlight ml-2">· full-year run rate {formatCurrency(totalDepAnnual)}</span>
               </span>
             </div>
 
@@ -780,7 +865,7 @@ export default function AssetsPage() {
                         </td>
                       )
                     })}
-                    <td className="text-right px-3 py-2 font-bold">{formatCurrency(totalDepAnnual)}</td>
+                    <td className="text-right px-3 py-2 font-bold">{formatCurrency(scheduleYearTotal)}</td>
                   </tr>
                 </tfoot>
               </table>

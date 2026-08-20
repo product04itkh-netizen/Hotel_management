@@ -88,6 +88,8 @@ export interface FixedAsset {
   depreciation_rate: number
   /** Running total of depreciation posted so far. NBV = total_cost - accumulated_depreciation. */
   accumulated_depreciation: number
+  /** Month depreciation begins — the workbooks' "Start date", not the purchase date. */
+  depreciation_start_date?: string | null
   is_depreciable: boolean
   invoice_doc_ref?: string
   notes?: string
