@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { createClient } from '@/lib/supabase/client'
-import { formatCurrency, formatDate, capitalize } from '@/lib/utils'
+import { formatCurrency, formatDate, capitalize, todayISO } from '@/lib/utils'
 import { toast } from '@/components/ui/Toast'
 import { useBranch } from '@/context/BranchContext'
 import { cn } from '@/lib/utils'
@@ -694,7 +694,7 @@ export default function AssetsPage() {
       variant: 'danger',
       onConfirm: async () => {
         setConfirmDialog(null)
-        await supabase.from('fixed_assets').update({ status: 'disposed', date_disposed: new Date().toISOString().slice(0, 10), updated_at: new Date().toISOString() }).eq('id', id)
+        await supabase.from('fixed_assets').update({ status: 'disposed', date_disposed: todayISO(), updated_at: new Date().toISOString() }).eq('id', id)
         toast('Asset marked disposed')
         load()
       },

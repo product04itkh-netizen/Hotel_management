@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { createClient } from '@/lib/supabase/client'
-import { formatCurrency, formatDate, generateJournalEntryNumber, capitalize, branchLogo, branchBrandLabel } from '@/lib/utils'
+import { formatCurrency, formatDate, generateJournalEntryNumber, capitalize, branchLogo, branchBrandLabel, todayISO } from '@/lib/utils'
 import { exportXlsx } from '@/lib/excel'
 import { toast } from '@/components/ui/Toast'
 import { useBranch } from '@/context/BranchContext'
@@ -92,7 +92,7 @@ function agingColor(od: number) {
   if (od <= 60) return 'bg-orange-100 text-orange-700'
   return 'bg-red-100 text-red-700'
 }
-const todayStr = () => new Date().toISOString().split('T')[0]
+const todayStr = () => todayISO()
 const emptyCoaForm = { code: '', name: '', type: 'expense' as AccountType, category: 'operating_expense', is_active: true, opening_balance: '', opening_balance_date: todayStr(), offset_account_id: '' }
 const emptyJeLine = () => ({ account_id: '', description: '', debit: '' as number | string, credit: '' as number | string })
 

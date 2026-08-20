@@ -5,7 +5,7 @@ import { StatCard } from '@/components/ui/StatCard'
 import { Badge } from '@/components/ui/Badge'
 import { Modal } from '@/components/ui/Modal'
 import { createClient } from '@/lib/supabase/client'
-import { formatCurrency, formatDate } from '@/lib/utils'
+import { formatCurrency, formatDate, localISO } from '@/lib/utils'
 import { useBranch } from '@/context/BranchContext'
 import type { Reservation } from '@/types'
 
@@ -22,12 +22,6 @@ interface Stats {
 
 const WEEK_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
-// Local YYYY-MM-DD. toISOString() is UTC, which in Cambodia (UTC+7) reports
-// yesterday's date until 07:00 local — so "today" was wrong every morning.
-function localISO(d: Date): string {
-  const p = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
-}
 // Monday of the week containing d.
 function weekStartOf(d: Date): Date {
   const s = new Date(d); s.setHours(0, 0, 0, 0)

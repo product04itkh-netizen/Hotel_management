@@ -6,7 +6,7 @@ import { Modal } from '@/components/ui/Modal'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from '@/components/ui/Toast'
-import { formatCurrency, formatDateTime } from '@/lib/utils'
+import { formatCurrency, formatDateTime, todayISO } from '@/lib/utils'
 import type { HotelSettings, ServiceCatalogItem, ServiceCatalogCategory, AuditLog, AuditAction } from '@/types'
 import { useBranch } from '@/context/BranchContext'
 import { useCurrentStaff } from '@/hooks/useCurrentStaff'
@@ -422,7 +422,7 @@ export default function SettingsPage() {
       hotel_name: form.hotel_name,
       guest_name: 'Test Guest',
       house_name: 'House 01',
-      check_in:  new Date().toISOString().split('T')[0],
+      check_in:  todayISO(),
       check_out: new Date(Date.now() + 86400000 * 2).toISOString().split('T')[0],
       reservation_number: 'TEST-0001',
       pax: '4 Adults, 2 Children',

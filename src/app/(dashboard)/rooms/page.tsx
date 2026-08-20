@@ -6,7 +6,7 @@ import { Modal } from '@/components/ui/Modal'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { Badge } from '@/components/ui/Badge'
 import { createClient } from '@/lib/supabase/client'
-import { formatCurrency, formatDate, capitalize } from '@/lib/utils'
+import { formatCurrency, formatDate, capitalize, todayISO } from '@/lib/utils'
 import { toast } from '@/components/ui/Toast'
 import { useBranch } from '@/context/BranchContext'
 import { cn } from '@/lib/utils'
@@ -81,7 +81,7 @@ export default function PropertiesPage() {
   useEffect(() => {
     if (!selectedHouseId) { setHouseBookings([]); setPromotions([]); return }
     loadPromotions(selectedHouseId)
-    const today = new Date().toISOString().split('T')[0]
+    const today = todayISO()
     supabase
       .from('reservations')
       .select('reservation_number, check_in_date, check_out_date, arrival_time, status, pax_count, adults, guest:guests(full_name)')
@@ -591,7 +591,7 @@ export default function PropertiesPage() {
                 ) : (
                   <div className="space-y-1.5">
                     {promotions.map(promo => {
-                      const today = new Date().toISOString().split('T')[0]
+                      const today = todayISO()
                       const isExpired = promo.end_date < today
                       const isUpcoming = promo.start_date > today
                       const isRunning = !isExpired && !isUpcoming

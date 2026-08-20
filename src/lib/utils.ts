@@ -54,14 +54,27 @@ export function calculateNights(checkIn: string, checkOut: string): number {
 
 export function generateReservationNumber(): string {
   const date = new Date()
-  const dateStr = date.toISOString().slice(0, 10).replace(/-/g, '')
+  const dateStr = localISO(date).replace(/-/g, '')
   const rand = Math.floor(1000 + Math.random() * 9000)
   return `RES-${dateStr}-${rand}`
 }
 
 
+/**
+ * YYYY-MM-DD in LOCAL time.
+ *
+ * toISOString() is UTC, so in Cambodia (UTC+7) it reports the previous day
+ * until 07:00 local. Anything that stamps a calendar date from it — a journal
+ * entry, a deposit receipt, "today" in a filter — was a day early every
+ * morning, which on the 1st of a month lands the entry in the wrong period.
+ */
+export function localISO(d: Date = new Date()): string {
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+}
+
 export function todayISO(): string {
-  return new Date().toISOString().split('T')[0]
+  return localISO()
 }
 
 export function getStatusBadgeClass(status: string): string {
@@ -163,7 +176,10 @@ export function calculateNightlyTotal(
 
   const d = new Date(start)
   while (d < end) {
-    const dateStr = d.toISOString().split('T')[0]
+    // start/end are parsed as LOCAL midnight above, so the date string has to
+    // come from local parts too. toISOString() here yielded the previous day in
+    // UTC+7, matching each night against the wrong date when checking promos.
+    const dateStr = localISO(d)
     const matching = activePromos.filter(p => dateStr >= p.start_date && dateStr <= p.end_date)
     let rate = baseRate
     let promoName: string | undefined
@@ -189,7 +205,7 @@ export function calculateNightlyTotal(
 
 export function generateJournalEntryNumber(): string {
   const date = new Date()
-  const dateStr = date.toISOString().slice(0, 10).replace(/-/g, '')
+  const dateStr = localISO(date).replace(/-/g, '')
   const rand = Math.floor(1000 + Math.random() * 9000)
   return `JE-${dateStr}-${rand}`
 }

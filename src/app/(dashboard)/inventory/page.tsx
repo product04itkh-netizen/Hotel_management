@@ -4,7 +4,7 @@ import { TopBar } from '@/components/layout/TopBar'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 import { createClient } from '@/lib/supabase/client'
-import { formatCurrency, generateJournalEntryNumber, cn } from '@/lib/utils'
+import { formatCurrency, generateJournalEntryNumber, cn, todayISO } from '@/lib/utils'
 import { toast } from '@/components/ui/Toast'
 import { useBranch } from '@/context/BranchContext'
 import type { ChartOfAccount, InventoryItem, InventoryTransaction, InventoryCategory } from '@/types'
@@ -19,7 +19,7 @@ const INVENTORY_CATEGORIES: { value: InventoryCategory; label: string; defaultAc
 ]
 const ADJUSTMENT_ACCOUNT_CODE = '6000' // stock-count corrections post here regardless of item category — they're anomalies, not normal consumption
 
-const todayStr = () => new Date().toISOString().split('T')[0]
+const todayStr = () => todayISO()
 const input = 'w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg'
 
 export default function InventoryPage() {

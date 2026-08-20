@@ -7,8 +7,7 @@ import { Modal } from '@/components/ui/Modal'
 import { createClient } from '@/lib/supabase/client'
 import {
   formatDate, formatCurrency,
-  generateJournalEntryNumber, calculateNights, capitalize, branchLogo, branchBrandLabel,
-} from '@/lib/utils'
+  generateJournalEntryNumber, calculateNights, capitalize, branchLogo, branchBrandLabel, todayISO } from '@/lib/utils'
 import { toast } from '@/components/ui/Toast'
 import { useBranch } from '@/context/BranchContext'
 import type { Invoice, Reservation, InvoiceItem } from '@/types'
@@ -340,7 +339,7 @@ export default function BillingPage() {
   }
 
   async function handleCreate() {
-    const today = new Date().toISOString().split('T')[0]
+    const today = todayISO()
     const selectedRes = reservations.find(r => r.id === form.reservation_id) ?? null
     if (selectedRes && selectedRes.check_out_date > today) {
       toast('Update the check-out date in Reservations first, then create the invoice.', 'error')
@@ -410,7 +409,7 @@ export default function BillingPage() {
         if (depositLiabilityAcc) {
           const { data: je, error: jeErr } = await supabase.from('journal_entries').insert({
             entry_number: generateJournalEntryNumber(),
-            entry_date: new Date().toISOString().split('T')[0],
+            entry_date: todayISO(),
             reference: inv.invoice_number,
             reference_type: 'deposit_applied',
             description: `Deposit applied to invoice ${inv.invoice_number} (${(selectedRes.guest as any)?.full_name ?? 'Guest'})`,
@@ -532,7 +531,7 @@ export default function BillingPage() {
 
     if (carriedTotal > 0) {
       const { data: je, error: jeErr } = await supabase.from('journal_entries').insert({
-        entry_number: generateJournalEntryNumber(), entry_date: new Date().toISOString().split('T')[0],
+        entry_number: generateJournalEntryNumber(), entry_date: todayISO(),
         reference: inv.invoice_number, reference_type: 'invoice_correction',
         description: `Invoice correction — carried forward from ${reissueOf.invoice_number}`,
         branch_id: activeBranch.id,
@@ -614,7 +613,7 @@ export default function BillingPage() {
       if (cashAcct && amountReceived > 0) {
         const { data: je, error: jeErr } = await supabase.from('journal_entries').insert({
           entry_number: generateJournalEntryNumber(),
-          entry_date: new Date().toISOString().split('T')[0],
+          entry_date: todayISO(),
           reference: selectedInvoice.invoice_number,
           reference_type: 'invoice',
           description: `Payment received — ${selectedInvoice.invoice_number} (${(selectedInvoice.guest as any)?.full_name ?? 'Guest'})`,
@@ -648,7 +647,7 @@ export default function BillingPage() {
             if (depositLiabilityAcc) {
               const { data: depJe, error: depJeErr } = await supabase.from('journal_entries').insert({
                 entry_number: generateJournalEntryNumber(),
-                entry_date: new Date().toISOString().split('T')[0],
+                entry_date: todayISO(),
                 reference: selectedInvoice.invoice_number,
                 reference_type: 'deposit_applied',
                 description: `Deposit applied to invoice ${selectedInvoice.invoice_number} (${(selectedInvoice.guest as any)?.full_name ?? 'Guest'})`,
@@ -843,7 +842,7 @@ export default function BillingPage() {
           <div>
             <label className="text-xs text-hmuted">Link to Reservation</label>
             {(() => {
-              const today = new Date().toISOString().split('T')[0]
+              const today = todayISO()
               const invoicedIds = new Set(
                 invoices
                   .filter(i => i.reservation_id && i.status !== 'void')
@@ -1107,7 +1106,7 @@ export default function BillingPage() {
             <Button
               onClick={reissueOf ? handleReissueSave : handleCreate}
               disabled={saving || (!reissueOf && (() => {
-                const t = new Date().toISOString().split('T')[0]
+                const t = todayISO()
                 const r = reservations.find(r => r.id === form.reservation_id)
                 return !!(r && r.check_out_date > t)
               })())}

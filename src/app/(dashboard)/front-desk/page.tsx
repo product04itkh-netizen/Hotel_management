@@ -10,7 +10,7 @@ import type { CheckInForm } from '@/components/ui/CheckInModal'
 import { CheckOutModal } from '@/components/ui/CheckOutModal'
 import type { CheckOutForm } from '@/components/ui/CheckOutModal'
 import { createClient } from '@/lib/supabase/client'
-import { formatDate, generateReservationNumber, formatCurrency, calculateNights, capitalize, generateJournalEntryNumber } from '@/lib/utils'
+import { formatDate, generateReservationNumber, formatCurrency, calculateNights, capitalize, generateJournalEntryNumber, todayISO } from '@/lib/utils'
 import { toast } from '@/components/ui/Toast'
 import { useBranch } from '@/context/BranchContext'
 import type { Reservation, House } from '@/types'
@@ -54,7 +54,7 @@ export default function FrontDeskPage() {
 
   async function loadData() {
     if (!activeBranch) return
-    const today = new Date().toISOString().split('T')[0]
+    const today = todayISO()
     const [arrRes, depRes, houseRes, allResRes, allHouseRes] = await Promise.all([
       supabase.from('reservations')
         .select('*, guest:guests(full_name, email, phone), house:houses(name, code, house_type, capacity)')
@@ -369,7 +369,7 @@ export default function FrontDeskPage() {
   function renderCalendar() {
     const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December']
     const DAY_LABELS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']
-    const todayStr = new Date().toISOString().slice(0, 10)
+    const todayStr = todayISO()
 
     const statusColor: Record<string, { bg: string; text: string; border: string }> = {
       confirmed:   { bg: '#dcfce7', text: '#15803d', border: '#86efac' },
@@ -535,7 +535,7 @@ export default function FrontDeskPage() {
   }
 
   // ── Calendar detail modal helpers ───────────────────────────────────────────
-  const todayStr = new Date().toISOString().split('T')[0]
+  const todayStr = todayISO()
   const calRes = calDetailRes
   const canCheckIn  = calRes && (calRes.status === 'confirmed' || calRes.status === 'pending') && calRes.check_in_date === todayStr
   const canCheckOut = calRes && calRes.status === 'checked_in' && calRes.check_out_date === todayStr

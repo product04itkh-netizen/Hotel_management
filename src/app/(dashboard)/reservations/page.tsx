@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { createClient } from '@/lib/supabase/client'
-import { formatDate, calculateNights, calculateNightlyTotal, generateReservationNumber, formatCurrency, capitalize, generateJournalEntryNumber, formatTime12h, branchLogo, branchBrandLabel } from '@/lib/utils'
+import { formatDate, calculateNights, calculateNightlyTotal, generateReservationNumber, formatCurrency, capitalize, generateJournalEntryNumber, formatTime12h, branchLogo, branchBrandLabel, todayISO } from '@/lib/utils'
 import { toast } from '@/components/ui/Toast'
 import { useBranch } from '@/context/BranchContext'
 import type { Reservation, House, HousePromotion, DepositReceipt, ServiceCatalogItem } from '@/types'
@@ -292,7 +292,7 @@ export default function ReservationsPage() {
 
     const { data: existingJes } = await supabase.from('journal_entries').select('id, entry_date').eq('reference', resNum).eq('reference_type', 'deposit')
     const priorDate = existingJes && existingJes.length > 0 ? existingJes[0].entry_date : null
-    const depositDate = receipt?.receipt_date || priorDate || new Date().toISOString().split('T')[0]
+    const depositDate = receipt?.receipt_date || priorDate || todayISO()
     if (existingJes && existingJes.length > 0) {
       const jeIds = existingJes.map(je => je.id)
       await supabase.from('journal_entry_lines').delete().in('entry_id', jeIds)
@@ -335,7 +335,7 @@ export default function ReservationsPage() {
 
     const { data: entry, error: entryErr } = await supabase.from('journal_entries').insert({
       entry_number: generateJournalEntryNumber(),
-      entry_date: new Date().toISOString().split('T')[0],
+      entry_date: todayISO(),
       reference: resNum,
       reference_type: 'deposit_refund',
       description: `Deposit refunded for ${guestName} (${resNum})`,
@@ -444,7 +444,7 @@ export default function ReservationsPage() {
           await supabase.from('deposit_receipts').insert({
             receipt_number: receiptNum, reservation_id: editId, branch_id: activeBranch.id,
             amount: depositNum, payment_method: depositMethod,
-            receipt_date: new Date().toISOString().split('T')[0], status: 'held',
+            receipt_date: todayISO(), status: 'held',
           })
         }
         const resNum = reservations.find(r => r.id === editId)?.reservation_number || ''
@@ -495,7 +495,7 @@ export default function ReservationsPage() {
           branch_id: activeBranch.id,
           amount: depositNum,
           payment_method: depositMethod,
-          receipt_date: new Date().toISOString().split('T')[0],
+          receipt_date: todayISO(),
           status: 'held',
         })
         if (recErr) toast(`Reservation saved but receipt error: ${recErr.message}`, 'error')
@@ -945,7 +945,7 @@ export default function ReservationsPage() {
         {viewMode === 'calendar' && (() => {
           const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December']
           const DAY_LABELS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']
-          const todayStr = new Date().toISOString().slice(0, 10)
+          const todayStr = todayISO()
 
           const statusColor: Record<string, { bg: string; text: string; border: string }> = {
             confirmed:   { bg: '#dcfce7', text: '#15803d', border: '#86efac' },
