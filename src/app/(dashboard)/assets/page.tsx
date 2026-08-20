@@ -189,8 +189,12 @@ export default function AssetsPage() {
 
   async function loadDepRuns() {
     if (!activeBranch) return
+    // Pull the linked entry alongside each run so history can show whether it
+    // is still live — a run whose entry was voided leaves the register
+    // overstating depreciation the ledger no longer carries.
     const { data } = await supabase.from('depreciation_runs')
-      .select('*').eq('branch_id', activeBranch.id)
+      .select('*, je:journal_entries(entry_number, is_void, status, reference_type)')
+      .eq('branch_id', activeBranch.id)
       .order('run_year', { ascending: false }).order('run_month', { ascending: false })
     setDepRuns(data ?? [])
     const runIds = (data ?? []).map(r => r.id)
@@ -261,33 +265,40 @@ export default function AssetsPage() {
     return { ok: true, postings, total, depExpAcctId: depExpAcct.id }
   }
 
-  // Journal entries in the chosen month that debit 5750 Depreciation Expense
-  // and aren't already tied to a run — i.e. depreciation someone posted by hand.
-  async function loadLinkCandidates() {
-    if (!activeBranch) return
-    setLinkJeId('')
-    const from = `${linkYear}-${String(linkMonth).padStart(2, '0')}-01`
-    const to = new Date(linkYear, linkMonth, 0)
-    const toStr = `${linkYear}-${String(linkMonth).padStart(2, '0')}-${String(to.getDate()).padStart(2, '0')}`
+  // Live journal entries in a period that debit 5750 Depreciation Expense and
+  // aren't already tied to a run — i.e. depreciation someone posted by hand.
+  // Used to populate the record-manually picker AND to stop Run Depreciation
+  // from posting a second entry on top of one that already exists.
+  async function findUnrecordedDepEntries(year: number, month: number) {
+    if (!activeBranch) return []
+    const from = `${year}-${String(month).padStart(2, '0')}-01`
+    const last = new Date(year, month, 0).getDate()
+    const toStr = `${year}-${String(month).padStart(2, '0')}-${String(last).padStart(2, '0')}`
     const { data: jes } = await supabase.from('journal_entries')
       .select('id, entry_number, entry_date, description')
       .eq('branch_id', activeBranch.id).eq('status', 'posted').eq('is_void', false)
       .gte('entry_date', from).lte('entry_date', toStr).order('entry_date')
     const ids = (jes ?? []).map(e => e.id)
-    if (ids.length === 0) { setLinkCandidates([]); return }
+    if (ids.length === 0) return []
 
     const { data: acct } = await supabase.from('chart_of_accounts')
       .select('id').eq('branch_id', activeBranch.id).eq('code', '5750').maybeSingle()
-    if (!acct) { setLinkCandidates([]); return }
+    if (!acct) return []
     const { data: lines } = await supabase.from('journal_entry_lines')
       .select('entry_id, debit').in('entry_id', ids).eq('account_id', acct.id)
     const byEntry: Record<string, number> = {}
     for (const l of lines ?? []) byEntry[l.entry_id] = (byEntry[l.entry_id] ?? 0) + Number(l.debit)
 
     const linked = new Set(depRuns.map(r => r.journal_entry_id).filter(Boolean))
-    setLinkCandidates((jes ?? [])
+    return (jes ?? [])
       .filter(e => (byEntry[e.id] ?? 0) > 0 && !linked.has(e.id))
-      .map(e => ({ ...e, amount: byEntry[e.id] })))
+      .map(e => ({ ...e, amount: byEntry[e.id] }))
+  }
+
+  async function loadLinkCandidates() {
+    if (!activeBranch) return
+    setLinkJeId('')
+    setLinkCandidates(await findUnrecordedDepEntries(linkYear, linkMonth))
   }
 
   useEffect(() => { if (activeBranch) loadLinkCandidates() }, [activeBranch, linkYear, linkMonth, depRuns]) // eslint-disable-line
@@ -378,12 +389,76 @@ export default function AssetsPage() {
     loadDepRuns()
   }
 
+  // Undoes a recorded month: rolls each asset's accumulated depreciation back
+  // by what this run charged, drops the ledger rows and the run. If the run
+  // posted its own journal entry that entry goes too; a hand-written one is
+  // left alone, since it belongs to whoever wrote it.
+  function unrecordRun(run: any) {
+    const label = `${MONTHS[run.run_month - 1]} ${run.run_year}`
+    const ours = run.je?.reference_type === 'depreciation'
+    setConfirmDialog({
+      title: `Reverse depreciation for ${label}?`,
+      message:
+        `Rolls back ${formatCurrency(run.total_amount)} across ${run.asset_count} assets and removes the ledger rows. ` +
+        (ours
+          ? `The journal entry this run created (${run.je?.entry_number ?? '—'}) will be deleted too.`
+          : `Journal entry ${run.je?.entry_number ?? '—'} was written outside this screen and will be left untouched — void it in Accounting if that is what you intend.`),
+      confirmLabel: 'Reverse',
+      variant: 'danger',
+      onConfirm: async () => {
+        setConfirmDialog(null)
+        const { data: ents } = await supabase.from('depreciation_entries')
+          .select('asset_id, amount').eq('depreciation_run_id', run.id)
+        if (ents?.length) {
+          const { data: rows } = await supabase.from('fixed_assets')
+            .select('id, accumulated_depreciation').in('id', ents.map(e => e.asset_id))
+          const cur = Object.fromEntries((rows ?? []).map(r => [r.id, Number(r.accumulated_depreciation || 0)]))
+          const results = await Promise.all(ents.map(e =>
+            supabase.from('fixed_assets')
+              .update({ accumulated_depreciation: Math.max(0, Math.round(((cur[e.asset_id] ?? 0) - Number(e.amount)) * 100) / 100) })
+              .eq('id', e.asset_id)
+          ))
+          const failed = results.filter(r => r.error)
+          if (failed.length) {
+            toast(`Stopped: ${failed.length} asset balance(s) could not be rolled back — ${failed[0].error?.message}`, 'error')
+            return
+          }
+        }
+        // Deleting the run cascades to depreciation_entries.
+        const { error: delErr } = await supabase.from('depreciation_runs').delete().eq('id', run.id)
+        if (delErr) { toast(delErr.message, 'error'); return }
+        if (ours && run.journal_entry_id) {
+          await supabase.from('journal_entry_lines').delete().eq('entry_id', run.journal_entry_id)
+          await supabase.from('journal_entries').delete().eq('id', run.journal_entry_id)
+        }
+        toast(`${label} reversed${ours ? ' — journal entry removed' : ' — journal entry left in place'}`, 'info')
+        load()
+        loadDepRuns()
+      },
+    })
+  }
+
   async function runDepreciation() {
     if (!activeBranch) return
     const alreadyRun = depRuns.find(r => r.run_year === depRunYear && r.run_month === depRunMonth)
     if (alreadyRun) { toast(`Depreciation for ${MONTHS[depRunMonth - 1]} ${depRunYear} already posted`, 'error'); return }
 
     setDepRunSaving(true)
+
+    // Don't post on top of a depreciation entry someone already wrote by hand.
+    // The run-history check above only sees runs WE created, so without this a
+    // hand-written entry that nobody recorded yet would be silently duplicated
+    // in the ledger.
+    const existing = await findUnrecordedDepEntries(depRunYear, depRunMonth)
+    if (existing.length > 0) {
+      const e = existing[0]
+      toast(
+        `Aborted: ${e.entry_number} already charges ${formatCurrency(e.amount)} of depreciation to 5750 in ${MONTHS[depRunMonth - 1]} ${depRunYear}. ` +
+        `Record it against the register below instead of posting a second entry.`,
+        'error',
+      )
+      setDepRunSaving(false); return
+    }
     const entryDate = `${depRunYear}-${String(depRunMonth).padStart(2, '0')}-01`
 
     // Work the whole run out and check it BEFORE writing anything. The journal
@@ -958,15 +1033,39 @@ export default function AssetsPage() {
                 <div className="mt-4 border-t border-hborder pt-4">
                   <p className="text-xs font-semibold text-hmuted uppercase tracking-wide mb-2">Run History</p>
                   <div className="space-y-1">
-                    {depRuns.slice(0, 6).map(r => (
-                      <div key={r.id} className="flex items-center justify-between text-sm py-1 border-b border-hborder/40">
-                        <span className="text-htext">{MONTHS[r.run_month - 1]} {r.run_year}</span>
-                        <span className="text-xs text-hmuted">{r.asset_count} assets</span>
-                        <span className="font-semibold text-dark-navy">{formatCurrency(r.total_amount)}</span>
-                        <span className="text-xs text-green-600 font-medium">✓ Posted</span>
-                      </div>
-                    ))}
+                    {depRuns.slice(0, 6).map(r => {
+                      const orphaned = !r.journal_entry_id || !r.je || r.je.is_void || r.je.status !== 'posted'
+                      return (
+                        <div key={r.id} className="flex items-center justify-between gap-3 text-sm py-1.5 border-b border-hborder/40">
+                          <span className="text-htext whitespace-nowrap">{MONTHS[r.run_month - 1]} {r.run_year}</span>
+                          <span className="text-xs text-hmuted whitespace-nowrap">{r.asset_count} assets</span>
+                          <span className="text-xs text-hmuted font-mono truncate flex-1" title={r.je?.entry_number ?? ''}>
+                            {r.je?.entry_number ?? '—'}
+                          </span>
+                          <span className="font-semibold text-dark-navy whitespace-nowrap">{formatCurrency(r.total_amount)}</span>
+                          {orphaned ? (
+                            <span className="text-xs text-red-600 font-medium whitespace-nowrap" title="The linked journal entry is voided or missing — the register is carrying depreciation the ledger no longer has.">
+                              ⚠ Entry voided
+                            </span>
+                          ) : (
+                            <span className="text-xs text-green-600 font-medium whitespace-nowrap">✓ Posted</span>
+                          )}
+                          <button
+                            onClick={() => unrecordRun(r)}
+                            className="text-xs text-red-500 hover:underline whitespace-nowrap"
+                          >
+                            Reverse
+                          </button>
+                        </div>
+                      )
+                    })}
                   </div>
+                  {depRuns.some(r => !r.journal_entry_id || !r.je || r.je.is_void || r.je.status !== 'posted') && (
+                    <p className="text-[11px] text-red-600 mt-2">
+                      A run above is linked to a journal entry that is voided or gone. Reverse it so the register stops
+                      counting depreciation the ledger no longer carries.
+                    </p>
+                  )}
                 </div>
               )}
             </div>
