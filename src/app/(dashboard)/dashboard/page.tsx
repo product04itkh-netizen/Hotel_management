@@ -22,6 +22,19 @@ interface Stats {
 
 const WEEK_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
+// Local YYYY-MM-DD. toISOString() is UTC, which in Cambodia (UTC+7) reports
+// yesterday's date until 07:00 local — so "today" was wrong every morning.
+function localISO(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+}
+// Monday of the week containing d.
+function weekStartOf(d: Date): Date {
+  const s = new Date(d); s.setHours(0, 0, 0, 0)
+  s.setDate(s.getDate() - ((s.getDay() + 6) % 7))
+  return s
+}
+
 // Whole days from today (local) to a YYYY-MM-DD date. 0 = today, 1 = tomorrow.
 function daysUntil(dateStr: string): number {
   const today = new Date(); today.setHours(0, 0, 0, 0)
@@ -46,7 +59,7 @@ export default function DashboardPage() {
   const [recentReservations, setRecentReservations] = useState<Reservation[]>([])
   const [upcomingCheckIns, setUpcomingCheckIns] = useState<Reservation[]>([])
   const [selectedRes, setSelectedRes] = useState<Reservation | null>(null)
-  const [weeklyData, setWeeklyData] = useState<number[]>([60, 72, 65, 80, 78, 90, 85])
+  const [weeklyData, setWeeklyData] = useState<number[]>([0, 0, 0, 0, 0, 0, 0])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -55,24 +68,58 @@ export default function DashboardPage() {
 
   async function loadDashboard() {
     if (!activeBranch) return
-    const today = new Date().toISOString().split('T')[0]
+    const today = localISO(new Date())
+    const weekStart = weekStartOf(new Date())
+    const weekEnd = new Date(weekStart); weekEnd.setDate(weekStart.getDate() + 7)
 
-    const [housesRes, checkInsRes, checkOutsRes, revenueRes, housekeepingRes, reservationsRes, upcomingRes] = await Promise.all([
+    const [housesRes, checkInsRes, checkOutsRes, revenueRes, housekeepingRes, reservationsRes, upcomingRes, weekRes] = await Promise.all([
       supabase.from('houses').select('status').eq('branch_id', activeBranch.id),
       supabase.from('reservations').select('id').eq('branch_id', activeBranch.id).eq('check_in_date', today).in('status', ['confirmed', 'checked_in']),
-      supabase.from('reservations').select('id').eq('branch_id', activeBranch.id).eq('check_out_date', today).eq('status', 'checked_in'),
-      supabase.from('invoices').select('total').eq('branch_id', activeBranch.id).eq('status', 'paid').gte('paid_at', today + 'T00:00:00').lte('paid_at', today + 'T23:59:59'),
+      // Departures scheduled today — including guests who have already left,
+      // whose status has flipped to checked_out. Filtering on checked_in alone
+      // made the count shrink through the day as people actually departed.
+      supabase.from('reservations').select('id').eq('branch_id', activeBranch.id).eq('check_out_date', today).in('status', ['checked_in', 'checked_out']),
+      // Cash actually received today. This used to sum the FULL total of any
+      // invoice that reached 'paid' today, which double-counted money collected
+      // on earlier days and missed partial payments entirely — on 2026-08-10
+      // Srae Ambel took $524.00 and the dashboard showed $0.00.
+      supabase.from('payment_transactions').select('amount').eq('branch_id', activeBranch.id)
+        .gte('payment_date', today + 'T00:00:00').lte('payment_date', today + 'T23:59:59'),
       supabase.from('housekeeping_tasks').select('id').eq('branch_id', activeBranch.id).in('status', ['pending', 'in_progress']),
       supabase.from('reservations').select('*, guest:guests(full_name, phone), house:houses(name, code, house_type), line_items:reservation_line_items(id, label, qty, unit_price, amount, discount, revenue_account_code, sort_order)').eq('branch_id', activeBranch.id).order('created_at', { ascending: false }).limit(6),
       // Upcoming arrivals: not-yet-arrived reservations from today onward, soonest first
       supabase.from('reservations').select('*, guest:guests(full_name, phone), house:houses(name, code, house_type), line_items:reservation_line_items(id, label, qty, unit_price, amount, discount, revenue_account_code, sort_order)').eq('branch_id', activeBranch.id).in('status', ['confirmed', 'pending']).gte('check_in_date', today).order('check_in_date', { ascending: true }).limit(10),
+      // Stays overlapping the current week, for the occupancy chart.
+      supabase.from('reservations').select('house_id, check_in_date, check_out_date')
+        .eq('branch_id', activeBranch.id)
+        .in('status', ['confirmed', 'checked_in', 'checked_out'])
+        .lt('check_in_date', localISO(weekEnd))
+        .gt('check_out_date', localISO(weekStart)),
     ])
 
     const houseRows = housesRes.data ?? []
     const occupied = houseRows.filter(h => h.status === 'occupied').length
     const available = houseRows.filter(h => h.status === 'available').length
     const maintenance = houseRows.filter(h => h.status === 'maintenance').length
-    const revenue = (revenueRes.data ?? []).reduce((s, i) => s + Number(i.total), 0)
+    const revenue = (revenueRes.data ?? []).reduce((s, p) => s + Number(p.amount), 0)
+
+    // ── Weekly occupancy, Mon-Sun of the current week ──
+    // A house counts as occupied on a day when a stay covers it: check-in on or
+    // before that day, check-out after it (departure day is not a night).
+    // Previously this chart was hardcoded to [60,72,65,80,78,90,85] and never
+    // read the database at all.
+    const stays = weekRes.data ?? []
+    const week: number[] = []
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(weekStart); d.setDate(weekStart.getDate() + i)
+      const day = localISO(d)
+      const houses = new Set(
+        stays.filter((s: any) => s.house_id && s.check_in_date <= day && s.check_out_date > day)
+             .map((s: any) => s.house_id)
+      )
+      week.push(houseRows.length > 0 ? Math.round((houses.size / houseRows.length) * 100) : 0)
+    }
+    setWeeklyData(week)
 
     setStats({
       totalHouses: houseRows.length,
@@ -91,7 +138,7 @@ export default function DashboardPage() {
   }
 
   const occupancyRate = stats.totalHouses > 0 ? Math.round((stats.occupiedHouses / stats.totalHouses) * 100) : 0
-  const maxBar = Math.max(...weeklyData, 1)
+  const todayIdx = (new Date().getDay() + 6) % 7   // 0 = Monday
 
   return (
     <>
@@ -131,17 +178,21 @@ export default function DashboardPage() {
           <div className="bg-white border border-hborder rounded-2xl p-5 shadow-card">
             <h3 className="font-serif text-[17px] text-dark-navy">Weekly Occupancy</h3>
             <p className="text-xs text-hmuted mb-4">Room occupancy % — current week</p>
+            {/* Bars are scaled against 100%, not the week's own maximum —
+                otherwise a quiet week's best day renders as a full bar. */}
             <div className="flex items-end gap-2 h-24 px-1">
               {weeklyData.map((val, i) => (
-                <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                <div key={i} className="flex-1 flex flex-col items-center gap-1 justify-end h-full">
+                  <span className="text-[10px] font-semibold text-hmuted tabular-nums">{val}%</span>
                   <div
                     className="w-full rounded-t-sm transition-all duration-500"
                     style={{
-                      height: `${(val / maxBar) * 88}px`,
-                      background: i >= 4 ? '#F05830' : '#583808',
+                      height: `${Math.max((val / 100) * 70, val > 0 ? 2 : 1)}px`,
+                      background: i === todayIdx ? '#F05830' : '#583808',
+                      opacity: val === 0 ? 0.25 : 1,
                     }}
                   />
-                  <span className="text-[10px] text-hmuted">{WEEK_DAYS[i]}</span>
+                  <span className={`text-[10px] ${i === todayIdx ? 'font-semibold text-[#F05830]' : 'text-hmuted'}`}>{WEEK_DAYS[i]}</span>
                 </div>
               ))}
             </div>
