@@ -227,6 +227,9 @@ export default function AccountingPage() {
   const [reconStmtBal,   setReconStmtBal]   = useState('')
   const [reconLoading,   setReconLoading]   = useState(false)
   const [reconAccountId, setReconAccountId] = useState('')
+  const [reconSaving,    setReconSaving]    = useState<string | null>(null)   // line id being saved
+  const [reconEditLine,  setReconEditLine]  = useState<any | null>(null)      // line open in note editor
+  const [reconEditNote,  setReconEditNote]  = useState('')
 
   // Recurring Entries
   const [recurring,      setRecurring]      = useState<any[]>([])
@@ -1434,8 +1437,43 @@ export default function AccountingPage() {
   }
 
   async function toggleReconciled(lineId: string, current: boolean) {
-    await supabase.from('journal_entry_lines').update({ is_reconciled: !current }).eq('id', lineId)
+    setReconSaving(lineId)
+    const { error } = await supabase
+      .from('journal_entry_lines')
+      .update({ is_reconciled: !current })
+      .eq('id', lineId)
+    setReconSaving(null)
+    if (error) { toast('Failed to update reconciliation status', 'error'); return }
     setReconLines(prev => prev.map(r => r.id === lineId ? { ...r, is_reconciled: !current } : r))
+    toast(!current ? 'Line marked as cleared ✓' : 'Line uncleared', 'success')
+  }
+
+  async function markAllCleared(cleared: boolean) {
+    setReconLoading(true)
+    const ids = reconLines.filter(r => r.is_reconciled !== cleared).map((r: any) => r.id)
+    if (ids.length === 0) { setReconLoading(false); return }
+    const { error } = await supabase
+      .from('journal_entry_lines')
+      .update({ is_reconciled: cleared })
+      .in('id', ids)
+    setReconLoading(false)
+    if (error) { toast('Failed to update lines', 'error'); return }
+    setReconLines(prev => prev.map(r => ids.includes(r.id) ? { ...r, is_reconciled: cleared } : r))
+    toast(cleared ? `${ids.length} lines marked cleared` : `${ids.length} lines uncleared`, 'success')
+  }
+
+  async function saveReconNote() {
+    if (!reconEditLine) return
+    setReconSaving(reconEditLine.id)
+    const { error } = await supabase
+      .from('journal_entry_lines')
+      .update({ description: reconEditNote || reconEditLine.description })
+      .eq('id', reconEditLine.id)
+    setReconSaving(null)
+    if (error) { toast('Failed to save note', 'error'); return }
+    setReconLines(prev => prev.map(r => r.id === reconEditLine.id ? { ...r, description: reconEditNote } : r))
+    setReconEditLine(null)
+    toast('Note saved', 'success')
   }
 
   // ── Derived ────────────────────────────────────────────────────
@@ -2905,6 +2943,7 @@ export default function AccountingPage() {
         {/* ══ BANK RECONCILIATION ═══════════════════════════════════ */}
         {tab === 'reconciliation' && (
           <div>
+            {/* Controls bar */}
             <div className="flex items-end gap-4 mb-5 bg-white border border-hborder rounded-2xl p-4 shadow-card flex-wrap">
               <div>
                 <label className="block text-xs text-hmuted mb-1">Account</label>
@@ -2925,88 +2964,164 @@ export default function AccountingPage() {
                 <input type="number" step="0.01" value={reconStmtBal} onChange={e => setReconStmtBal(e.target.value)} placeholder="0.00" className={input} style={{ width: 160 }} />
               </div>
               <Button onClick={loadReconciliation} disabled={reconLoading || !reconAccountId}>{reconLoading ? 'Loading…' : 'Load Transactions'}</Button>
+              {reconLines.length > 0 && (
+                <>
+                  <Button variant="ghost" onClick={() => markAllCleared(true)} disabled={reconLoading}>Mark All Cleared</Button>
+                  <Button variant="ghost" onClick={() => markAllCleared(false)} disabled={reconLoading}>Unreconcile All</Button>
+                </>
+              )}
               <p className="text-xs text-hmuted self-end pb-2">Check off items that appear on the bank statement.</p>
             </div>
 
             {reconLines.length > 0 && (() => {
-              const bookBal     = reconLines.reduce((s, r) => s + Number(r.debit) - Number(r.credit), 0)
-              const clearedBal  = reconLines.filter(r => r.is_reconciled).reduce((s, r) => s + Number(r.debit) - Number(r.credit), 0)
-              const stmtBal     = Number(reconStmtBal) || 0
-              const diff        = clearedBal - stmtBal
+              const bookBal    = reconLines.reduce((s, r) => s + Number(r.debit) - Number(r.credit), 0)
+              const clearedBal = reconLines.filter(r => r.is_reconciled).reduce((s, r) => s + Number(r.debit) - Number(r.credit), 0)
+              const stmtBal    = Number(reconStmtBal) || 0
+              const diff       = clearedBal - stmtBal
+              const isBalanced = Math.abs(diff) < 0.01
               return (
                 <>
+                  {/* Summary cards */}
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-5">
                     {[
-                      { label: 'Book Balance',     value: bookBal,    color: 'text-dark-navy' },
-                      { label: 'Cleared Balance',  value: clearedBal, color: 'text-dark-navy' },
-                      { label: 'Statement Balance',value: stmtBal,    color: 'text-dark-navy' },
-                      { label: 'Difference',       value: diff,       color: Math.abs(diff) < 0.01 ? 'text-green-700' : 'text-red-600' },
+                      { label: 'Book Balance',      value: bookBal,    color: 'text-dark-navy' },
+                      { label: 'Cleared Balance',   value: clearedBal, color: 'text-dark-navy' },
+                      { label: 'Statement Balance', value: stmtBal,    color: 'text-dark-navy' },
+                      { label: 'Difference',        value: diff,       color: isBalanced ? 'text-green-700' : 'text-red-600' },
                     ].map(c => (
                       <div key={c.label} className="bg-white border border-hborder rounded-2xl p-4 shadow-card">
                         <p className="text-xs text-hmuted">{c.label}</p>
                         <p className={cn('font-serif text-xl mt-1', c.color)}>{formatCurrency(c.value)}</p>
-                        {c.label === 'Difference' && Math.abs(diff) < 0.01 && <p className="text-xs text-green-600 mt-0.5">✓ Reconciled</p>}
+                        {c.label === 'Difference' && isBalanced && <p className="text-xs text-green-600 mt-0.5">✓ Fully Reconciled</p>}
+                        {c.label === 'Difference' && !isBalanced && <p className="text-xs text-red-500 mt-0.5">{reconLines.filter(r => !r.is_reconciled).length} uncleared item(s)</p>}
                       </div>
                     ))}
                   </div>
+
+                  {/* Transactions table */}
                   <div className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
 
-                    {/* ── Mobile card view ── */}
+                    {/* Mobile cards */}
                     <div className="md:hidden divide-y divide-hborder">
                       {reconLines.map((r: any) => (
-                        <div
-                          key={r.id}
-                          className={cn('p-4 flex items-start gap-3 cursor-pointer', r.is_reconciled ? 'bg-green-50/60' : '')}
-                          onClick={() => toggleReconciled(r.id, r.is_reconciled)}
-                        >
-                          <input type="checkbox" checked={r.is_reconciled} readOnly
-                            className="w-4 h-4 mt-0.5 accent-green-600 cursor-pointer flex-shrink-0" />
+                        <div key={r.id} className={cn('p-4 flex items-start gap-3', r.is_reconciled ? 'bg-green-50/60' : '')}>
+                          {/* Checkbox */}
+                          <input
+                            type="checkbox"
+                            checked={r.is_reconciled}
+                            disabled={reconSaving === r.id}
+                            onChange={() => toggleReconciled(r.id, r.is_reconciled)}
+                            className="w-4 h-4 mt-1 accent-green-600 cursor-pointer flex-shrink-0"
+                          />
                           <div className="flex-1 min-w-0 space-y-1">
                             <div className="flex items-start justify-between gap-2">
                               <p className="text-htext truncate">{r.entry?.description}</p>
                               <div className="text-right flex-shrink-0 text-sm font-medium">
-                                {Number(r.debit)  > 0 && <p>DR {formatCurrency(r.debit)}</p>}
-                                {Number(r.credit) > 0 && <p>CR {formatCurrency(r.credit)}</p>}
+                                {Number(r.debit)  > 0 && <p className="text-green-700">DR {formatCurrency(r.debit)}</p>}
+                                {Number(r.credit) > 0 && <p className="text-red-600">CR {formatCurrency(r.credit)}</p>}
                               </div>
                             </div>
                             <p className="text-xs text-hmuted">{formatDate(r.entry?.entry_date)} · <span className="font-mono">{r.entry?.entry_number}</span></p>
+                            {r.description && <p className="text-xs text-hmuted italic">{r.description}</p>}
+                          </div>
+                          {/* Actions */}
+                          <div className="flex flex-col gap-1 flex-shrink-0">
+                            {r.is_reconciled
+                              ? <button onClick={() => toggleReconciled(r.id, r.is_reconciled)} disabled={reconSaving === r.id} className="text-xs text-orange-600 hover:underline whitespace-nowrap">Unreconcile</button>
+                              : <button onClick={() => toggleReconciled(r.id, r.is_reconciled)} disabled={reconSaving === r.id} className="text-xs text-green-700 hover:underline whitespace-nowrap">Reconcile</button>
+                            }
+                            <button onClick={() => { setReconEditLine(r); setReconEditNote(r.description ?? '') }} className="text-xs text-blue-600 hover:underline">Edit note</button>
                           </div>
                         </div>
                       ))}
                     </div>
 
+                    {/* Desktop table */}
                     <div className="hidden md:block overflow-x-auto">
-                    <table className="w-full text-sm table-fixed">
-                      <thead><tr className="bg-hsurface2">
-                        <th className="px-3 py-3 w-[5%]" />
-                        {([['Date','w-[10%]'],['Entry #','w-[15%]'],['Description','w-[38%]'],['Debit','w-[11%]'],['Credit','w-[11%]'],['Cleared','w-[10%]']] as const).map(([h, w]) => (
-                          <th key={h} className={cn('px-3 py-2.5 text-[11px] font-semibold text-hmuted uppercase tracking-wide', h.match(/Debit|Credit/) ? 'text-right' : 'text-left', w)}>{h}</th>
-                        ))}
-                      </tr></thead>
-                      <tbody>
-                        {reconLines.map((r: any) => (
-                          <tr key={r.id} className={cn('border-t border-hborder transition-colors', r.is_reconciled ? 'bg-green-50/60' : 'hover:bg-hbg/40')}>
-                            <td className="px-3 py-2.5 text-center">
-                              <input type="checkbox" checked={r.is_reconciled} onChange={() => toggleReconciled(r.id, r.is_reconciled)}
-                                className="w-4 h-4 accent-green-600 cursor-pointer" />
-                            </td>
-                            <td className="px-3 py-2 text-xs text-hmuted whitespace-nowrap">{formatDate(r.entry?.entry_date)}</td>
-                            <td className="px-3 py-2 font-mono text-xs text-hmuted truncate">{r.entry?.entry_number}</td>
-                            <td className="px-3 py-2 text-htext truncate">{r.entry?.description}</td>
-                            <td className="px-3 py-2 text-right font-medium whitespace-nowrap">{Number(r.debit) > 0 ? formatCurrency(r.debit) : ''}</td>
-                            <td className="px-3 py-2 text-right font-medium whitespace-nowrap">{Number(r.credit) > 0 ? formatCurrency(r.credit) : ''}</td>
-                            <td className="px-3 py-2 text-center">{r.is_reconciled ? <span className="text-green-600 font-bold">✓</span> : ''}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                      <table className="w-full text-sm">
+                        <thead><tr className="bg-hsurface2">
+                          {(['Date','Entry #','Description','Debit','Credit','Cleared','Actions'] as const).map(h => (
+                            <th key={h} className={cn(
+                              'px-3 py-2.5 text-[11px] font-semibold text-hmuted uppercase tracking-wide whitespace-nowrap',
+                              ['Debit','Credit'].includes(h) ? 'text-right' : 'text-left',
+                              h === 'Cleared' || h === 'Actions' ? 'text-center' : ''
+                            )}>{h}</th>
+                          ))}
+                        </tr></thead>
+                        <tbody>
+                          {reconLines.map((r: any) => (
+                            <tr key={r.id} className={cn('border-t border-hborder transition-colors', r.is_reconciled ? 'bg-green-50/60' : 'hover:bg-hbg/40')}>
+                              <td className="px-3 py-2 text-xs text-hmuted whitespace-nowrap">{formatDate(r.entry?.entry_date)}</td>
+                              <td className="px-3 py-2 font-mono text-xs text-hmuted">{r.entry?.entry_number}</td>
+                              <td className="px-3 py-2 text-htext">
+                                <p className="truncate max-w-xs">{r.entry?.description}</p>
+                                {r.description && <p className="text-xs text-hmuted italic truncate max-w-xs">{r.description}</p>}
+                              </td>
+                              <td className="px-3 py-2 text-right font-medium whitespace-nowrap text-green-700">{Number(r.debit) > 0 ? formatCurrency(r.debit) : ''}</td>
+                              <td className="px-3 py-2 text-right font-medium whitespace-nowrap text-red-600">{Number(r.credit) > 0 ? formatCurrency(r.credit) : ''}</td>
+                              <td className="px-3 py-2 text-center">
+                                {reconSaving === r.id
+                                  ? <span className="text-xs text-hmuted animate-pulse">Saving…</span>
+                                  : r.is_reconciled
+                                    ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-100 text-green-700 text-xs font-semibold">✓ Cleared</span>
+                                    : <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gray-100 text-gray-400 text-xs">Uncleared</span>
+                                }
+                              </td>
+                              <td className="px-3 py-2">
+                                <div className="flex items-center justify-center gap-2">
+                                  {r.is_reconciled
+                                    ? <button
+                                        onClick={() => toggleReconciled(r.id, r.is_reconciled)}
+                                        disabled={reconSaving === r.id}
+                                        className="text-xs text-orange-600 hover:text-orange-800 hover:underline disabled:opacity-40 whitespace-nowrap"
+                                      >Unreconcile</button>
+                                    : <button
+                                        onClick={() => toggleReconciled(r.id, r.is_reconciled)}
+                                        disabled={reconSaving === r.id}
+                                        className="text-xs text-green-700 hover:text-green-900 hover:underline disabled:opacity-40 whitespace-nowrap font-semibold"
+                                      >Reconcile</button>
+                                  }
+                                  <span className="text-hmuted">|</span>
+                                  <button
+                                    onClick={() => { setReconEditLine(r); setReconEditNote(r.description ?? '') }}
+                                    className="text-xs text-blue-600 hover:text-blue-800 hover:underline whitespace-nowrap"
+                                  >Edit note</button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
                   </div>
                 </>
               )
             })()}
+
             {reconLines.length === 0 && !reconLoading && (
               <p className="text-center text-hmuted py-16">{reconAccountId ? 'Click Load Transactions to begin reconciliation.' : 'Select an account above, then click Load Transactions.'}</p>
+            )}
+
+            {/* Edit Note modal */}
+            {reconEditLine && (
+              <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setReconEditLine(null)}>
+                <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-sm" onClick={e => e.stopPropagation()}>
+                  <h3 className="font-semibold text-htext mb-1">Edit Reconciliation Note</h3>
+                  <p className="text-xs text-hmuted mb-4">{reconEditLine.entry?.entry_number} · {formatDate(reconEditLine.entry?.entry_date)}</p>
+                  <textarea
+                    className={cn(input, 'h-24 resize-none w-full')}
+                    value={reconEditNote}
+                    onChange={e => setReconEditNote(e.target.value)}
+                    placeholder="Add a note for this reconciliation line…"
+                  />
+                  <div className="flex gap-2 mt-4 justify-end">
+                    <Button variant="ghost" onClick={() => setReconEditLine(null)}>Cancel</Button>
+                    <Button onClick={saveReconNote} disabled={reconSaving === reconEditLine.id}>
+                      {reconSaving === reconEditLine.id ? 'Saving…' : 'Save Note'}
+                    </Button>
+                  </div>
+                </div>
+              </div>
             )}
           </div>
         )}
