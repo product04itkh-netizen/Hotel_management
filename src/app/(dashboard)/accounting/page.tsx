@@ -214,6 +214,7 @@ export default function AccountingPage() {
   const [reportTo,      setReportTo]      = useState(todayStr())
   const [reportData,    setReportData]    = useState<any>(null)
   const [reportLoading, setReportLoading] = useState(false)
+  const [exportIncludesJe, setExportIncludesJe] = useState(true)
 
   // Account drill-down (shared by Trial Balance, P&L, Balance Sheet — click an
   // account line to see the journal entries behind its balance)
@@ -270,6 +271,12 @@ export default function AccountingPage() {
     if (tab === 'ledger' && activeBranch) loadLedger()
   }, [tab, activeBranch]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Re-fetch entries whenever the date filter changes (so older records aren't
+  // missed by the initial 200-entry cap)
+  useEffect(() => {
+    if (activeBranch) loadEntries(jeFrom || undefined, jeTo || undefined)
+  }, [jeFrom, jeTo, activeBranch]) // eslint-disable-line react-hooks/exhaustive-deps
+
   async function loadPaymentMethods() {
     if (!activeBranch) return
     const { data } = await supabase.from('payment_methods').select('name, value, is_cash, account_code').eq('branch_id', activeBranch.id).eq('is_active', true).order('sort_order')
@@ -291,14 +298,20 @@ export default function AccountingPage() {
     }
   }
 
-  async function loadEntries() {
+  async function loadEntries(fromDate?: string, toDate?: string) {
     if (!activeBranch) return
-    const { data } = await supabase.from('journal_entries')
+    let q = supabase.from('journal_entries')
       .select('*').eq('branch_id', activeBranch.id)
-      .order('entry_date', { ascending: false }).limit(100)
+    // If a date range is active, fetch all entries in that range.
+    // Otherwise fall back to the most recent 200.
+    if (fromDate) q = q.gte('entry_date', fromDate)
+    if (toDate)   q = q.lte('entry_date', toDate)
+    if (!fromDate && !toDate) q = q.limit(200)
+    q = q.order('entry_date', { ascending: false })
+    const { data } = await q
     const fetched = (data ?? []) as JournalEntry[]
     setEntries(fetched)
-    computeOverview(data ?? [])
+    if (!fromDate && !toDate) computeOverview(data ?? [])
     if (fetched.length > 0) {
       const ids = fetched.map(e => e.id)
       const { data: linesData } = await supabase.from('journal_entry_lines')
@@ -311,6 +324,9 @@ export default function AccountingPage() {
       }
       setEntryLines(byEntry)
       setExpandedEntries(new Set(ids))
+    } else {
+      setEntryLines({})
+      setExpandedEntries(new Set())
     }
   }
 
@@ -1488,10 +1504,37 @@ export default function AccountingPage() {
     .filter(b => b.vendor_id === vendorId && ['unpaid', 'partial'].includes(b.status))
     .reduce((s, b) => s + (Number(b.total) - Number(b.amount_paid)), 0)
 
+  const filteredEntries = entries.filter(e => {
+    if (jeFrom && e.entry_date < jeFrom) return false
+    if (jeTo   && e.entry_date > jeTo)   return false
+    if (jeStatus === 'void'   && !e.is_void) return false
+    if (jeStatus === 'draft'  && (e.is_void || e.status !== 'draft'))  return false
+    if (jeStatus === 'posted' && (e.is_void || e.status !== 'posted')) return false
+    if (jeSearch) {
+      const q = jeSearch.toLowerCase()
+      if (
+        !e.entry_number.toLowerCase().includes(q) &&
+        !(e.description ?? '').toLowerCase().includes(q) &&
+        !(e.reference   ?? '').toLowerCase().includes(q) &&
+        !(e.reference_type ?? '').toLowerCase().includes(q)
+      ) return false
+    }
+    return true
+  })
+
   // ── Excel exports ──────────────────────────────────────────────
 
+  const exportHeader = (title: string, dateStr: string = `As of ${todayStr()}`) => ({
+    branchName: branchBrandLabel(activeBranch?.location),
+    title,
+    dateStr,
+  })
+
   function exportAR() {
-    exportXlsx(`Receivables_${todayStr()}`, [{ name: 'Receivables', rows: filteredAR.map(inv => ({
+    exportXlsx(`Receivables_${todayStr()}`, [{ 
+      name: 'Receivables', 
+      header: exportHeader('Accounts Receivable'),
+      rows: filteredAR.map(inv => ({
       'Invoice #': inv.invoice_number,
       'Guest': (inv.guest as any)?.full_name ?? '',
       'Phone': (inv.guest as any)?.phone ?? '',
@@ -1505,7 +1548,10 @@ export default function AccountingPage() {
   }
 
   function exportBills() {
-    exportXlsx(`Bills_AP_${todayStr()}`, [{ name: 'Bills', rows: filteredBills.map(b => ({
+    exportXlsx(`Bills_AP_${todayStr()}`, [{ 
+      name: 'Bills', 
+      header: exportHeader('Bills (Accounts Payable)'),
+      rows: filteredBills.map(b => ({
       'Bill #': b.bill_number,
       'Vendor': (b.vendor as any)?.name ?? '',
       'Bill Date': b.bill_date,
@@ -1521,7 +1567,10 @@ export default function AccountingPage() {
   }
 
   function exportVendors() {
-    exportXlsx(`Vendors_${todayStr()}`, [{ name: 'Vendors', rows: vendors.map(v => ({
+    exportXlsx(`Vendors_${todayStr()}`, [{ 
+      name: 'Vendors', 
+      header: exportHeader('Vendor Directory'),
+      rows: vendors.map(v => ({
       'Name': v.name,
       'Contact': v.contact_name ?? '',
       'Email': v.email ?? '',
@@ -1535,37 +1584,88 @@ export default function AccountingPage() {
   }
 
   function exportJournalEntries() {
-    exportXlsx(`Journal_Entries_${todayStr()}`, [{ name: 'Journal Entries', rows: entries.map(e => ({
-      'Entry #': e.entry_number,
-      'Date': e.entry_date,
-      'Description': e.description,
-      'Reference': e.reference ?? '',
-      'Type': e.reference_type ?? '',
-      'Status': e.is_void ? 'Void' : (e.status ?? 'posted'),
-    })) }])
+    const COLS = ['Entry #', 'Date', 'Description', 'Reference', 'Type', 'Status', 'Account Code', 'Account Name', 'Debit', 'Credit']
+    const blank = () => Object.fromEntries(COLS.map(c => [c, ''])) as Record<string, any>
+
+    const rows: Record<string, any>[] = []
+    for (const e of filteredEntries) {
+      // JE header row
+      rows.push({
+        ...blank(),
+        'Entry #': e.entry_number,
+        'Date': e.entry_date,
+        'Description': e.description,
+        'Reference': e.reference ?? '',
+        'Type': e.reference_type ?? '',
+        'Status': e.is_void ? 'Void' : (e.status ?? 'posted'),
+      })
+      // Debit/Credit line rows
+      const lines = entryLines[e.id] ?? []
+      for (const l of lines) {
+        rows.push({
+          ...blank(),
+          'Account Code': l.account?.code ?? '',
+          'Account Name': l.account?.name ?? '',
+          'Debit': Number(l.debit) || '',
+          'Credit': Number(l.credit) || '',
+        })
+      }
+      // Blank spacer between entries
+      rows.push(blank())
+    }
+
+    exportXlsx(`Journal_Entries_${todayStr()}`, [{
+      name: 'Journal Entries',
+      header: exportHeader('Journal Entries', `Period: ${jeFrom || 'All time'} to ${jeTo || 'All time'}`),
+      rows,
+    }])
   }
+
 
   function exportLedger() {
     if (ledgerGroups.length === 0) { toast('Load the ledger first', 'error'); return }
-    const sheets = ledgerGroups.map(({ account, rows }) => ({
-      name: `${account.code} ${account.name}`.slice(0, 31),
-      rows: rows.map((r: any) => ({
-        'Account': `${account.code} — ${account.name}`,
-        'Entry #': r.entry?.entry_number ?? '',
-        'Date': r.entry?.entry_date ?? '',
-        'Description': r.entry?.description ?? '',
-        'Reference': r.entry?.reference ?? '',
-        'Debit': Number(r.debit),
-        'Credit': Number(r.credit),
-        'Balance': Number(r.running_balance ?? 0),
-      }))
-    }))
-    exportXlsx(`Ledger_${todayStr()}`, sheets)
+
+    const COLS = ['Account Code', 'Account Name', 'Entry #', 'Date', 'Description', 'Reference', 'Debit', 'Credit', 'Balance']
+    const blank = () => Object.fromEntries(COLS.map(c => [c, ''])) as Record<string, any>
+
+    const rows: Record<string, any>[] = []
+    for (const { account, rows: ledgerRows } of ledgerGroups) {
+      // Account header row — shows the account code + name spanning all cols
+      rows.push({
+        ...blank(),
+        'Account Code': `${account.code}`,
+        'Account Name': `${account.name}`,
+      })
+      // JE lines under the account
+      for (const r of ledgerRows as any[]) {
+        rows.push({
+          ...blank(),
+          'Entry #': r.entry?.entry_number ?? '',
+          'Date': r.entry?.entry_date ?? '',
+          'Description': r.entry?.description ?? '',
+          'Reference': r.entry?.reference ?? '',
+          'Debit': Number(r.debit) || '',
+          'Credit': Number(r.credit) || '',
+          'Balance': Number(r.running_balance ?? 0),
+        })
+      }
+      // Blank spacer between accounts
+      rows.push(blank())
+    }
+
+    exportXlsx(`Ledger_${todayStr()}`, [{
+      name: 'General Ledger',
+      header: exportHeader('General Ledger', `Period: ${ledgerFrom || 'All time'} to ${ledgerTo}`),
+      rows,
+    }])
   }
 
   function exportTrialBalance() {
     if (tbRows.length === 0) { toast('Load the trial balance first', 'error'); return }
-    exportXlsx(`Trial_Balance_${todayStr()}`, [{ name: 'Trial Balance', rows: tbRows.map(r => ({
+    exportXlsx(`Trial_Balance_${todayStr()}`, [{ 
+      name: 'Trial Balance', 
+      header: exportHeader('Trial Balance', `Period: ${tbFrom} to ${tbTo}`),
+      rows: tbRows.map(r => ({
       'Code': r.code,
       'Account': r.name,
       'Type': r.type,
@@ -1582,37 +1682,43 @@ export default function AccountingPage() {
     // Fetch the drill-down journal entries for every account in the report, so
     // the export carries the full detail — not just account totals. Same period
     // + posted/non-void filter the on-screen drill-down uses.
-    const from = reportType === 'pl' ? reportFrom : undefined
-    let jeQ = supabase.from('journal_entries').select('id').eq('branch_id', activeBranch.id).eq('status', 'posted').eq('is_void', false)
-    if (from) jeQ = jeQ.gte('entry_date', from)
-    if (reportTo) jeQ = jeQ.lte('entry_date', reportTo)
-    const { data: jeIdRows } = await jeQ
-    const jeIds = (jeIdRows ?? []).map((e: any) => e.id)
-    const { data: allLines } = jeIds.length > 0
-      ? await supabase.from('journal_entry_lines')
-          .select('account_id, debit, credit, entry:journal_entries(entry_number, entry_date, description, reference)')
-          .in('entry_id', jeIds)
-      : { data: [] as any[] }
     const byAcct: Record<string, any[]> = {}
-    for (const l of allLines ?? []) { (byAcct[l.account_id] ||= []).push(l) }
+    if (exportIncludesJe) {
+      const from = reportType === 'pl' ? reportFrom : undefined
+      let jeQ = supabase.from('journal_entries').select('id').eq('branch_id', activeBranch.id).eq('status', 'posted').eq('is_void', false)
+      if (from) jeQ = jeQ.gte('entry_date', from)
+      if (reportTo) jeQ = jeQ.lte('entry_date', reportTo)
+      const { data: jeIdRows } = await jeQ
+      const jeIds = (jeIdRows ?? []).map((e: any) => e.id)
+      const { data: allLines } = jeIds.length > 0
+        ? await supabase.from('journal_entry_lines')
+            .select('account_id, debit, credit, entry:journal_entries(entry_number, entry_date, description, reference)')
+            .in('entry_id', jeIds)
+        : { data: [] as any[] }
+      for (const l of allLines ?? []) { (byAcct[l.account_id] ||= []).push(l) }
+    }
 
-    const COLS = ['Section', 'Code', 'Account', 'Entry #', 'Date', 'Description', 'Debit', 'Credit', 'Amount'] as const
+    const COLS = exportIncludesJe 
+      ? ['Section', 'Code', 'Account', 'Entry #', 'Date', 'Description', 'Debit', 'Credit', 'Amount']
+      : ['Section', 'Code', 'Account', 'Amount']
     const blank = () => Object.fromEntries(COLS.map(c => [c, ''])) as Record<string, any>
     const sectionRow = (label: string) => ({ ...blank(), Section: label })
     const totalRow = (label: string, amount: number) => ({ ...blank(), Account: label, Amount: Number(amount) })
     // An account's summary line followed by each of its journal entries.
     const acctBlock = (a: any) => {
       const out: Record<string, any>[] = [{ ...blank(), Code: a.code, Account: a.name, Amount: Number(a.balance) }]
-      const lines = (byAcct[a.id] ?? []).slice().sort((x, y) => (x.entry?.entry_date ?? '').localeCompare(y.entry?.entry_date ?? ''))
-      for (const l of lines) {
-        out.push({
-          ...blank(),
-          'Entry #': l.entry?.entry_number ?? '',
-          Date: l.entry?.entry_date ?? '',
-          Description: l.entry?.description ?? '',
-          Debit: Number(l.debit) || '',
-          Credit: Number(l.credit) || '',
-        })
+      if (exportIncludesJe) {
+        const lines = (byAcct[a.id] ?? []).slice().sort((x, y) => (x.entry?.entry_date ?? '').localeCompare(y.entry?.entry_date ?? ''))
+        for (const l of lines) {
+          out.push({
+            ...blank(),
+            'Entry #': l.entry?.entry_number ?? '',
+            Date: l.entry?.entry_date ?? '',
+            Description: l.entry?.description ?? '',
+            Debit: Number(l.debit) || '',
+            Credit: Number(l.credit) || '',
+          })
+        }
       }
       return out
     }
@@ -1629,7 +1735,11 @@ export default function AccountingPage() {
         blank(),
         totalRow('NET INCOME', Number(reportData.totalRev) - Number(reportData.totalExp)),
       ]
-      exportXlsx(`PL_${reportFrom}_${reportTo}`, [{ name: 'Income Statement', rows }])
+      exportXlsx(`PL_${reportFrom}_${reportTo}`, [{ 
+        name: 'Income Statement', 
+        header: exportHeader('Income Statement', `From ${reportFrom} to ${reportTo}`),
+        rows 
+      }])
     } else {
       const diff = Number(reportData.totalAssets) - (Number(reportData.totalLiab) + Number(reportData.totalEquity))
       const rows = [
@@ -1650,12 +1760,19 @@ export default function AccountingPage() {
         { ...blank(), Account: 'BALANCE CHECK (Assets − Liab − Equity)', Amount: Number(diff.toFixed(2)) },
         { ...blank(), Account: 'Status', Description: Math.abs(diff) < 0.01 ? 'BALANCED' : 'OUT OF BALANCE' },
       ]
-      exportXlsx(`Balance_Sheet_${reportTo}`, [{ name: 'Balance Sheet', rows }])
+      exportXlsx(`Balance_Sheet_${reportTo}`, [{ 
+        name: 'Balance Sheet', 
+        header: exportHeader('Balance Sheet', `As of ${reportTo}`),
+        rows 
+      }])
     }
   }
 
   function exportCOA() {
-    exportXlsx(`Chart_of_Accounts_${todayStr()}`, [{ name: 'Chart of Accounts', rows: accounts.map(a => ({
+    exportXlsx(`Chart_of_Accounts_${todayStr()}`, [{ 
+      name: 'Chart of Accounts', 
+      header: exportHeader('Chart of Accounts'),
+      rows: accounts.map(a => ({
       'Code': a.code,
       'Name': a.name,
       'Type': a.type,
@@ -1665,7 +1782,10 @@ export default function AccountingPage() {
   }
 
   function exportPettyCash() {
-    exportXlsx(`Petty_Cash_${todayStr()}`, [{ name: 'Petty Cash', rows: filteredPetty.map(t => ({
+    exportXlsx(`Petty_Cash_${todayStr()}`, [{ 
+      name: 'Petty Cash', 
+      header: exportHeader('Petty Cash Transactions'),
+      rows: filteredPetty.map(t => ({
       'Date': t.transaction_date,
       'Description': t.description,
       'Category': t.category,
@@ -2129,23 +2249,6 @@ export default function AccountingPage() {
 
         {/* ══ JOURNAL ENTRIES ═══════════════════════════════════════ */}
         {tab === 'journal' && (() => {
-          const filteredEntries = entries.filter(e => {
-            if (jeFrom && e.entry_date < jeFrom) return false
-            if (jeTo   && e.entry_date > jeTo)   return false
-            if (jeStatus === 'void'   && !e.is_void) return false
-            if (jeStatus === 'draft'  && (e.is_void || e.status !== 'draft'))  return false
-            if (jeStatus === 'posted' && (e.is_void || e.status !== 'posted')) return false
-            if (jeSearch) {
-              const q = jeSearch.toLowerCase()
-              if (
-                !e.entry_number.toLowerCase().includes(q) &&
-                !(e.description ?? '').toLowerCase().includes(q) &&
-                !(e.reference   ?? '').toLowerCase().includes(q) &&
-                !(e.reference_type ?? '').toLowerCase().includes(q)
-              ) return false
-            }
-            return true
-          })
           return (
           <div>
             <div className="flex items-center gap-3 mb-4 flex-wrap">
@@ -2637,7 +2740,20 @@ export default function AccountingPage() {
               </div>
               <Button onClick={loadReport} disabled={reportLoading}>{reportLoading ? 'Computing…' : 'Generate'}</Button>
               {reportData && <Button variant="ghost" onClick={() => window.print()}>Print</Button>}
-              {reportData && <Button variant="ghost" onClick={exportReport}>↓ Export</Button>}
+              {reportData && (
+                <div className="flex items-center gap-3 ml-2">
+                  <Button variant="ghost" onClick={exportReport}>↓ Export</Button>
+                  <label className="flex items-center gap-1.5 text-xs font-medium text-hmuted cursor-pointer hover:text-htext transition-colors select-none">
+                    <input 
+                      type="checkbox" 
+                      checked={exportIncludesJe} 
+                      onChange={e => setExportIncludesJe(e.target.checked)} 
+                      className="w-3.5 h-3.5 rounded border-hborder text-navy focus:ring-navy" 
+                    /> 
+                    Include JEs
+                  </label>
+                </div>
+              )}
             </div>
 
             {reportData?.type === 'pl' && (

@@ -1,0 +1,359 @@
+[
+  [
+    "Code",
+    "Name",
+    "Type",
+    "Category",
+    "Active"
+  ],
+  [
+    "1010",
+    "Cash",
+    "asset",
+    "Bank",
+    "Yes"
+  ],
+  [
+    "1011",
+    "Petty Cash ",
+    "asset",
+    "Bank",
+    "Yes"
+  ],
+  [
+    "1012",
+    "Petty Cash ",
+    "asset",
+    "Bank",
+    "Yes"
+  ],
+  [
+    "1020",
+    "Bank",
+    "asset",
+    "Bank",
+    "Yes"
+  ],
+  [
+    "1030",
+    "Cash Advance",
+    "asset",
+    "current_asset",
+    "Yes"
+  ],
+  [
+    "1040",
+    "Staff Loan ",
+    "asset",
+    "current_asset",
+    "Yes"
+  ],
+  [
+    "1041",
+    "Staff Loan",
+    "asset",
+    "current_asset",
+    "Yes"
+  ],
+  [
+    "1100",
+    "Accounts Receivable",
+    "asset",
+    "current_asset",
+    "Yes"
+  ],
+  [
+    "1200",
+    "Prepaid Expenses",
+    "asset",
+    "current_asset",
+    "Yes"
+  ],
+  [
+    "1300",
+    "Inventory & Supplies",
+    "asset",
+    "current_asset",
+    "Yes"
+  ],
+  [
+    1500,
+    "Buildings",
+    "asset",
+    "current_asset",
+    "Yes"
+  ],
+  [
+    "1501",
+    "Accumulated Dep. — Buildings",
+    "asset",
+    "current_asset",
+    "Yes"
+  ],
+  [
+    1510,
+    "Computers",
+    "asset",
+    "current_asset",
+    "Yes"
+  ],
+  [
+    1511,
+    "Accumulated Dep. — Computers",
+    "asset",
+    "current_asset",
+    "Yes"
+  ],
+  [
+    1520,
+    "Furniture",
+    "asset",
+    "current_asset",
+    "Yes"
+  ],
+  [
+    1521,
+    "Accumulated Dep. — Furniture",
+    "asset",
+    "current_asset",
+    "Yes"
+  ],
+  [
+    1530,
+    "Machinery",
+    "asset",
+    "current_asset",
+    "Yes"
+  ],
+  [
+    1531,
+    "Accumulated Dep. — Machinery",
+    "asset",
+    "current_asset",
+    "Yes"
+  ],
+  [
+    1540,
+    "Vehicles",
+    "asset",
+    "current_asset",
+    "Yes"
+  ],
+  [
+    1541,
+    "Accumulated Dep. — Vehicles",
+    "asset",
+    "fixed_asset",
+    "Yes"
+  ],
+  [
+    "2100",
+    "Accounts Payable",
+    "liability",
+    "current_liability",
+    "Yes"
+  ],
+  [
+    "2200",
+    "Guest Deposits Received",
+    "liability",
+    "current_liability",
+    "Yes"
+  ],
+  [
+    "3100",
+    "Owner's Capital",
+    "equity",
+    "equity",
+    "Yes"
+  ],
+  [
+    "3200",
+    "Retained Earnings",
+    "equity",
+    "equity",
+    "Yes"
+  ],
+  [
+    4000,
+    "House Rental Revenue",
+    "revenue",
+    "operating_revenue",
+    "Yes"
+  ],
+  [
+    "4100",
+    "Food & Beverage Revenue",
+    "revenue",
+    "operating_revenue",
+    "Yes"
+  ],
+  [
+    "4200",
+    "Activity & Rental Revenue",
+    "revenue",
+    "operating_revenue",
+    "Yes"
+  ],
+  [
+    "4300",
+    "Other Revenue",
+    "revenue",
+    "operating_revenue",
+    "Yes"
+  ],
+  [
+    "5000",
+    "Salary Expense ",
+    "expense",
+    "operating_expense",
+    "Yes"
+  ],
+  [
+    5010,
+    "Salary Expense",
+    "expense",
+    "operating_expense",
+    "Yes"
+  ],
+  [
+    "5100",
+    "Utilities Expense ",
+    "expense",
+    "operating_expense",
+    "Yes"
+  ],
+  [
+    5110,
+    "Utilities Expense",
+    "expense",
+    "operating_expense",
+    "Yes"
+  ],
+  [
+    "5200",
+    "Telephone and Internet Expense ",
+    "expense",
+    "operating_expense",
+    "Yes"
+  ],
+  [
+    5210,
+    "Telephone and Internet Expense ",
+    "expense",
+    "operating_expense",
+    "Yes"
+  ],
+  [
+    "5300",
+    "Food and Grocery Expense ",
+    "expense",
+    "operating_expense",
+    "Yes"
+  ],
+  [
+    5310,
+    "Food and Grocery Expense ",
+    "expense",
+    "operating_expense",
+    "Yes"
+  ],
+  [
+    "5400",
+    "Repairs and Maintenance Expense ",
+    "expense",
+    "operating_expense",
+    "Yes"
+  ],
+  [
+    5410,
+    "Repairs and Maintenance Expense ",
+    "expense",
+    "operating_expense",
+    "Yes"
+  ],
+  [
+    "5500",
+    "Petroleum Expense ",
+    "expense",
+    "operating_expense",
+    "Yes"
+  ],
+  [
+    5510,
+    "Petroleum Expense ",
+    "expense",
+    "operating_expense",
+    "Yes"
+  ],
+  [
+    "5600",
+    "Gas and Charcoal Expense ",
+    "expense",
+    "operating_expense",
+    "Yes"
+  ],
+  [
+    5610,
+    "Gas and Charcoal Expense",
+    "expense",
+    "operating_expense",
+    "Yes"
+  ],
+  [
+    "5700",
+    "Laundry Expense ",
+    "expense",
+    "operating_expense",
+    "Yes"
+  ],
+  [
+    5710,
+    "Laundry Expense ",
+    "expense",
+    "operating_expense",
+    "Yes"
+  ],
+  [
+    "5800",
+    "Delivery Expense ",
+    "expense",
+    "operating_expense",
+    "Yes"
+  ],
+  [
+    5810,
+    "Delivery Expense ",
+    "expense",
+    "operating_expense",
+    "Yes"
+  ],
+  [
+    "5900",
+    "Beverages Expense ",
+    "expense",
+    "operating_expense",
+    "Yes"
+  ],
+  [
+    5910,
+    "Beverages Expense ",
+    "expense",
+    "operating_expense",
+    "Yes"
+  ],
+  [
+    "6000",
+    "Other Expense ",
+    "expense",
+    "operating_expense",
+    "Yes"
+  ],
+  [
+    6010,
+    "Other Expense ",
+    "expense",
+    "operating_expense",
+    "Yes"
+  ]
+]
