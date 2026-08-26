@@ -16,7 +16,7 @@ export function exportXlsx(filename: string, sheets: ExportSheet[]) {
   const wb = XLSX.utils.book_new()
   sheets.forEach(({ name, rows, header }) => {
     const origin = header ? 'A5' : 'A1'
-    const ws = XLSX.utils.json_to_sheet(rows.length > 0 ? rows : [{}], { origin })
+    const ws = XLSX.utils.json_to_sheet(rows.length > 0 ? rows : [{}], { origin } as any)
     
     const numCols = rows.length > 0 ? Object.keys(rows[0]).length : 0
 
