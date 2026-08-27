@@ -270,8 +270,23 @@ export default function ReservationsPage() {
     return `${prefix}${String(seq).padStart(3, '0')}`
   }
 
+  async function checkPeriodOpen(dateISO: string): Promise<boolean> {
+    if (!activeBranch) return false
+    const d = new Date(dateISO)
+    const y = d.getFullYear(), m = d.getMonth() + 1
+    const { data } = await supabase.from('accounting_periods')
+      .select('status').eq('branch_id', activeBranch.id).eq('year', y).eq('month', m).maybeSingle()
+    return data?.status !== 'closed'
+  }
+
   async function syncDepositJournalEntry(resNum: string, guestName: string, depositAmt: number, method: string) {
     if (!activeBranch) return
+    // Skip JE creation/update if today's period is closed (deposit receipt is still saved)
+    if (!(await checkPeriodOpen(todayISO()))) {
+      toast(`Today's accounting period is closed. The deposit was saved but no Journal Entry was posted. Reopen the period to post it.`, 'error')
+      return
+    }
+
     const pm = paymentMethods.find(m => m.value === method)
     const cashCode = (pm as any)?.account_code || (pm?.is_cash ? '1010' : (method === 'cash' ? '1010' : '1020'))
     const { data: accounts } = await supabase.from('chart_of_accounts').select('id, code').eq('branch_id', activeBranch.id).in('code', [cashCode, '2200'])
@@ -348,6 +363,11 @@ export default function ReservationsPage() {
 
   async function createRefundJournalEntry(resNum: string, guestName: string, depositAmt: number, method: string) {
     if (!activeBranch || depositAmt <= 0) return
+    if (!(await checkPeriodOpen(todayISO()))) {
+      toast(`Today's accounting period is closed. Refund was recorded but no Journal Entry was posted. Reopen the period to post it.`, 'error')
+      return
+    }
+
     const pm = paymentMethods.find(m => m.value === method)
     const cashCode = (pm as any)?.account_code || (pm?.is_cash ? '1010' : (method === 'cash' ? '1010' : '1020'))
     const { data: accounts } = await supabase.from('chart_of_accounts').select('id, code').eq('branch_id', activeBranch.id).in('code', [cashCode, '2200'])

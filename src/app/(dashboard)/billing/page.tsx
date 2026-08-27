@@ -588,6 +588,17 @@ export default function BillingPage() {
     const newPaid = Number(selectedInvoice.amount_paid) + amountReceived
     const newStatus = newPaid >= Number(selectedInvoice.total) ? 'paid' : 'partial'
 
+    // Block payment if today's date falls in a closed period
+    const today = new Date()
+    const todayY = today.getFullYear(), todayM = today.getMonth() + 1
+    const { data: periodCheck } = await supabase.from('accounting_periods')
+      .select('status').eq('branch_id', activeBranch.id).eq('year', todayY).eq('month', todayM).maybeSingle()
+    if (periodCheck?.status === 'closed') {
+      toast(`${today.toLocaleString('default', { month: 'long' })} ${todayY} is a closed period. Reopen it first.`, 'error')
+      setSaving(false)
+      return
+    }
+
     const { error } = await supabase.from('invoices').update({
       amount_paid: newPaid,
       status: newStatus,

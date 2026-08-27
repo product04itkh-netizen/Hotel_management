@@ -118,6 +118,7 @@ export default function SettingsPage() {
     bank_name: '',
     bank_account_name: '',
     bank_account_number: '',
+    period_lock_password: '',
   })
 
   useEffect(() => { if (activeBranch) { loadSettings(); loadPaymentMethods(); loadCoaAccounts(); loadServiceCatalog(); loadRevenueExpenseAccounts() } }, [activeBranch]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -378,6 +379,7 @@ export default function SettingsPage() {
         bank_name: data.bank_name ?? '',
         bank_account_name: data.bank_account_name ?? '',
         bank_account_number: data.bank_account_number ?? '',
+        period_lock_password: data.period_lock_password ?? '',
       })
     }
     setLoading(false)
@@ -403,6 +405,7 @@ export default function SettingsPage() {
       bank_name: form.bank_name || null,
       bank_account_name: form.bank_account_name || null,
       bank_account_number: form.bank_account_number || null,
+      period_lock_password: form.period_lock_password || null,
       updated_at: new Date().toISOString(),
     }
     const { data, error } = await supabase
@@ -661,6 +664,16 @@ export default function SettingsPage() {
                       ⚠ Changes the display symbol only — every amount already in the system is recorded in USD and will not be converted.
                     </p>
                   )}
+                </div>
+                <div>
+                  <label className="block text-xs text-hmuted mb-1">Period Lock Password</label>
+                  <input
+                    type="password"
+                    value={form.period_lock_password}
+                    onChange={e => setForm(f => ({ ...f, period_lock_password: e.target.value }))}
+                    placeholder="Leave blank for none"
+                    className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg"
+                  />
                 </div>
               </div>
             </div>

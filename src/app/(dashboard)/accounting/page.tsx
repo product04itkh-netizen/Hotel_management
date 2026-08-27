@@ -1187,8 +1187,23 @@ export default function AccountingPage() {
     setPeriods(data ?? [])
   }
 
+  async function checkPeriodPassword(): Promise<boolean> {
+    if (!activeBranch) return false
+    const { data } = await supabase.from('hotel_settings').select('period_lock_password').eq('branch_id', activeBranch.id).single()
+    if (data?.period_lock_password) {
+      const p = window.prompt('Enter period lock password:')
+      if (p === null) return false
+      if (p !== data.period_lock_password) {
+        toast('Incorrect password', 'error')
+        return false
+      }
+    }
+    return true
+  }
+
   async function closePeriod(year: number, month: number) {
     if (!activeBranch) return
+    if (!(await checkPeriodPassword())) return
     setPeriodSaving(true)
     const existing = periods.find(p => p.year === year && p.month === month)
     if (existing) {
@@ -1205,6 +1220,7 @@ export default function AccountingPage() {
   }
 
   async function reopenPeriod(id: string, year: number, month: number) {
+    if (!(await checkPeriodPassword())) return
     await supabase.from('accounting_periods').update({ status: 'open', closed_at: null }).eq('id', id)
     toast(`${MONTH_NAMES[month - 1]} ${year} reopened`)
     loadPeriods()
@@ -1243,6 +1259,10 @@ export default function AccountingPage() {
 
   async function postRecurring(rec: any) {
     if (!activeBranch) return
+    const d = new Date(rec.next_due_date)
+    const ey = d.getFullYear(), em = d.getMonth() + 1
+    const closed = periods.find(p => p.year === ey && p.month === em && p.status === 'closed')
+    if (closed) { toast(`${MONTH_NAMES[em - 1]} ${ey} is a closed period. Reopen it first.`, 'error'); return }
     const { data: je, error } = await supabase.from('journal_entries').insert({
       entry_number: generateJournalEntryNumber(),
       entry_date: rec.next_due_date,

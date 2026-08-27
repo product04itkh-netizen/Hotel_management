@@ -547,6 +547,7 @@ export interface HotelSettings {
   bank_name?: string
   bank_account_name?: string
   bank_account_number?: string
+  period_lock_password?: string | null
   branch_id?: string
   branch?: Branch
   created_at: string
