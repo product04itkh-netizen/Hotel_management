@@ -294,14 +294,20 @@ export default function BillingPage() {
     // Item totals are pre-invoice-level-discount (only per-item discounts are
     // baked in), so their sum can exceed the invoice's actual net total —
     // e.g. a negotiated $70 discount applied at invoice level, not per line.
-    // Scale every account's share down proportionally so the split reflects
-    // what was actually earned, instead of letting whichever account sorts
-    // first (always '4000' House Rental) silently absorb the whole payment
-    // and starve F&B/Activity/Other of any credit at all.
+    // Since the discount originates from the reservation (i.e. room discount),
+    // we deduct the difference entirely from House Rental Revenue (4000)
+    // rather than scaling all revenue types proportionally, which would
+    // artificially shrink F&B and Activity revenue.
     const rawSum = Object.values(accountTotals).reduce((s, v) => s + v, 0)
     if (rawSum > 0.001 && Math.abs(rawSum - invoiceTotal) > 0.01) {
-      const scale = invoiceTotal / rawSum
-      for (const code of Object.keys(accountTotals)) accountTotals[code] = accountTotals[code] * scale
+      const discount = rawSum - invoiceTotal
+      if (accountTotals['4000'] && accountTotals['4000'] >= discount) {
+        accountTotals['4000'] = Math.round((accountTotals['4000'] - discount) * 100) / 100
+      } else {
+        // Fallback: apply to the largest revenue bucket if 4000 doesn't exist or is too small
+        const largestCode = Object.keys(accountTotals).reduce((a, b) => accountTotals[a] > accountTotals[b] ? a : b)
+        accountTotals[largestCode] = Math.max(0, Math.round((accountTotals[largestCode] - discount) * 100) / 100)
+      }
     }
     const codes = Object.keys(accountTotals).sort()
     if (codes.length === 0) return []
