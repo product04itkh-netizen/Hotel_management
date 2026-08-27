@@ -244,6 +244,7 @@ export default function AccountingPage() {
   const [periods,       setPeriods]       = useState<any[]>([])
   const [oldestPeriod,  setOldestPeriod]  = useState<{ year: number, month: number } | null>(null)
   const [periodSaving,  setPeriodSaving]  = useState(false)
+  const [periodPasswordModal, setPeriodPasswordModal] = useState<{ isOpen: boolean, action: 'close'|'reopen'|null, year: number, month: number, id?: string, input: string, correctPassword?: string }>({ isOpen: false, action: null, year: 0, month: 0, input: '' })
 
   // AR Aging Report modal
   const [showAgingReport, setShowAgingReport] = useState(false)
@@ -1197,23 +1198,20 @@ export default function AccountingPage() {
     }
   }
 
-  async function checkPeriodPassword(): Promise<boolean> {
-    if (!activeBranch) return false
+  async function handlePeriodActionTrigger(action: 'close' | 'reopen', year: number, month: number, id?: string) {
+    if (!activeBranch) return
     const { data } = await supabase.from('hotel_settings').select('period_lock_password').eq('branch_id', activeBranch.id).single()
     if (data?.period_lock_password) {
-      const p = window.prompt('Enter period lock password:')
-      if (p === null) return false
-      if (p !== data.period_lock_password) {
-        toast('Incorrect password', 'error')
-        return false
-      }
+      setPeriodPasswordModal({ isOpen: true, action, year, month, id, input: '', correctPassword: data.period_lock_password })
+    } else {
+      // No password required, execute directly
+      if (action === 'close') await executeClosePeriod(year, month)
+      if (action === 'reopen' && id) await executeReopenPeriod(id, year, month)
     }
-    return true
   }
 
-  async function closePeriod(year: number, month: number) {
+  async function executeClosePeriod(year: number, month: number) {
     if (!activeBranch) return
-    if (!(await checkPeriodPassword())) return
     setPeriodSaving(true)
     const existing = periods.find(p => p.year === year && p.month === month)
     if (existing) {
@@ -1229,8 +1227,7 @@ export default function AccountingPage() {
     setPeriodSaving(false)
   }
 
-  async function reopenPeriod(id: string, year: number, month: number) {
-    if (!(await checkPeriodPassword())) return
+  async function executeReopenPeriod(id: string, year: number, month: number) {
     await supabase.from('accounting_periods').update({ status: 'open', closed_at: null }).eq('id', id)
     toast(`${MONTH_NAMES[month - 1]} ${year} reopened`)
     loadPeriods()
@@ -3389,9 +3386,9 @@ export default function AccountingPage() {
                           {isClosed ? '🔒 Closed' : '🔓 Open'}
                         </span>
                         {isClosed ? (
-                          <button onClick={() => reopenPeriod(period!.id, year, month)} className="text-xs text-navy hover:underline">Reopen</button>
+                          <button onClick={() => handlePeriodActionTrigger('reopen', year, month, period!.id)} className="text-xs text-navy hover:underline">Reopen</button>
                         ) : (
-                          <button onClick={() => closePeriod(year, month)} disabled={periodSaving} className="text-xs text-red-500 hover:text-red-700 hover:underline disabled:opacity-50">Close</button>
+                          <button onClick={() => handlePeriodActionTrigger('close', year, month)} disabled={periodSaving} className="text-xs text-red-500 hover:text-red-700 hover:underline disabled:opacity-50">Close</button>
                         )}
                       </div>
                     </div>
@@ -3858,6 +3855,68 @@ export default function AccountingPage() {
         onConfirm={() => confirmDialog?.onConfirm()}
         onCancel={() => setConfirmDialog(null)}
       />
+
+      {/* ── Period Password Modal ── */}
+      {periodPasswordModal.isOpen && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setPeriodPasswordModal(m => ({ ...m, isOpen: false }))}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 space-y-4" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-navy/10 flex items-center justify-center flex-shrink-0">
+                <span className="text-xl">🔒</span>
+              </div>
+              <div>
+                <h2 className="font-semibold text-htext text-base">
+                  {periodPasswordModal.action === 'close' ? 'Close Period' : 'Reopen Period'}
+                </h2>
+                <p className="text-xs text-hmuted mt-0.5">
+                  {MONTH_NAMES[(periodPasswordModal.month || 1) - 1]} {periodPasswordModal.year}
+                </p>
+              </div>
+            </div>
+            <p className="text-sm text-hmuted">Enter the period lock password to continue.</p>
+            <div>
+              <label className="block text-xs text-hmuted mb-1">Password</label>
+              <input
+                type="password"
+                autoFocus
+                value={periodPasswordModal.input}
+                onChange={e => setPeriodPasswordModal(m => ({ ...m, input: e.target.value }))}
+                onKeyDown={async e => {
+                  if (e.key === 'Enter') {
+                    if (periodPasswordModal.input !== periodPasswordModal.correctPassword) {
+                      toast('Incorrect password', 'error')
+                      return
+                    }
+                    setPeriodPasswordModal(m => ({ ...m, isOpen: false }))
+                    if (periodPasswordModal.action === 'close') await executeClosePeriod(periodPasswordModal.year, periodPasswordModal.month)
+                    if (periodPasswordModal.action === 'reopen' && periodPasswordModal.id) await executeReopenPeriod(periodPasswordModal.id, periodPasswordModal.year, periodPasswordModal.month)
+                  }
+                }}
+                placeholder="Enter password..."
+                className="w-full border border-hborder rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-navy bg-hbg"
+              />
+            </div>
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={() => setPeriodPasswordModal(m => ({ ...m, isOpen: false }))}
+                className="flex-1 border border-hborder text-htext rounded-lg px-4 py-2 text-sm hover:bg-hbg transition-colors"
+              >Cancel</button>
+              <button
+                onClick={async () => {
+                  if (periodPasswordModal.input !== periodPasswordModal.correctPassword) {
+                    toast('Incorrect password', 'error')
+                    return
+                  }
+                  setPeriodPasswordModal(m => ({ ...m, isOpen: false }))
+                  if (periodPasswordModal.action === 'close') await executeClosePeriod(periodPasswordModal.year, periodPasswordModal.month)
+                  if (periodPasswordModal.action === 'reopen' && periodPasswordModal.id) await executeReopenPeriod(periodPasswordModal.id, periodPasswordModal.year, periodPasswordModal.month)
+                }}
+                className="flex-1 bg-navy text-white rounded-lg px-4 py-2 text-sm hover:bg-navy/90 transition-colors font-medium"
+              >Confirm</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Journal Entry Modal ── */}
       <Modal open={jeFormOpen} onClose={() => setJeFormOpen(false)} title={editJeId ? 'Edit Journal Entry' : 'New Journal Entry'} size="xl">
