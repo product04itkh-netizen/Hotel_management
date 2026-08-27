@@ -242,6 +242,7 @@ export default function AccountingPage() {
 
   // Accounting Periods
   const [periods,       setPeriods]       = useState<any[]>([])
+  const [oldestPeriod,  setOldestPeriod]  = useState<{ year: number, month: number } | null>(null)
   const [periodSaving,  setPeriodSaving]  = useState(false)
 
   // AR Aging Report modal
@@ -1185,6 +1186,15 @@ export default function AccountingPage() {
       .select('*').eq('branch_id', activeBranch.id)
       .order('year', { ascending: false }).order('month', { ascending: false })
     setPeriods(data ?? [])
+
+    const { data: oldestEntry } = await supabase.from('journal_entries')
+      .select('entry_date').eq('branch_id', activeBranch.id)
+      .order('entry_date', { ascending: true }).limit(1).maybeSingle()
+      
+    if (oldestEntry?.entry_date) {
+      const d = new Date(oldestEntry.entry_date)
+      setOldestPeriod({ year: d.getFullYear(), month: d.getMonth() + 1 })
+    }
   }
 
   async function checkPeriodPassword(): Promise<boolean> {
@@ -3345,11 +3355,21 @@ export default function AccountingPage() {
 
         {/* ══ ACCOUNTING PERIODS ════════════════════════════════════ */}
         {tab === 'periods' && (() => {
-          const allMonths = Array.from({ length: 24 }, (_, i) => {
+          let numMonths = 24
+          if (oldestPeriod) {
+            const current = new Date()
+            numMonths = (current.getFullYear() - oldestPeriod.year) * 12 + (current.getMonth() + 1 - oldestPeriod.month) + 1
+            if (numMonths < 1) numMonths = 1
+            if (numMonths > 60) numMonths = 60 // Cap at 5 years
+          }
+
+          const allMonths = Array.from({ length: numMonths }, (_, i) => {
             const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - i)
             return { year: d.getFullYear(), month: d.getMonth() + 1 }
           })
-          const columns = [allMonths.slice(0, 12), allMonths.slice(12, 24)]
+          
+          const half = Math.ceil(allMonths.length / 2)
+          const columns = [allMonths.slice(0, half), allMonths.slice(half)]
           const renderPeriodsTable = (months: { year: number; month: number }[], key: string) => (
             <div key={key} className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
 
