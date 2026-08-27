@@ -741,6 +741,21 @@ export default function AccountingPage() {
     const targetEntries = [correctDateEntry, ...correctDateSiblings.filter(s => correctDateSelected.has(s.id))]
     const targetIds = targetEntries.map(e => e.id)
 
+    // Block moving into or out of closed periods
+    const dNew = new Date(correctDateValue)
+    const yNew = dNew.getFullYear(), mNew = dNew.getMonth() + 1
+    if (periods.some(p => p.year === yNew && p.month === mNew && p.status === 'closed')) {
+      toast(`${MONTH_NAMES[mNew - 1]} ${yNew} is a closed period. Reopen it to move entries here.`, 'error'); setCorrectDateSaving(false); return
+    }
+    for (const entry of targetEntries) {
+      if (!entry.entry_date) continue
+      const dOld = new Date(entry.entry_date)
+      const yOld = dOld.getFullYear(), mOld = dOld.getMonth() + 1
+      if (periods.some(p => p.year === yOld && p.month === mOld && p.status === 'closed')) {
+        toast(`Entry ${entry.entry_number} is in a closed period. Reopen ${MONTH_NAMES[mOld - 1]} ${yOld} first.`, 'error'); setCorrectDateSaving(false); return
+      }
+    }
+
     const { error: jeErr } = await supabase.from('journal_entries')
       .update({ entry_date: correctDateValue, updated_at: new Date().toISOString() })
       .in('id', targetIds)
@@ -802,6 +817,16 @@ export default function AccountingPage() {
     if (!correctCoaEntry || !activeBranch) return
     const changed = correctCoaLines.filter(l => l.newAccountId && l.newAccountId !== l.account_id)
     if (changed.length === 0) { setCorrectCoaOpen(false); return }
+    
+    // Block modifying entries in closed periods
+    if (correctCoaEntry.entry_date) {
+      const d = new Date(correctCoaEntry.entry_date)
+      const y = d.getFullYear(), m = d.getMonth() + 1
+      if (periods.some(p => p.year === y && p.month === m && p.status === 'closed')) {
+        toast(`This entry is in a closed period. Reopen ${MONTH_NAMES[m - 1]} ${y} first.`, 'error'); return
+      }
+    }
+
     setCorrectCoaSaving(true)
 
     for (const line of changed) {
@@ -866,6 +891,14 @@ export default function AccountingPage() {
     // Guard against a half-filled line (account picked but no amount, or vice versa).
     const halfFilled = billForm.lines.some(l => (l.expense_account_id && !(Number(l.amount) > 0)) || (!l.expense_account_id && Number(l.amount) > 0))
     if (halfFilled) { toast('Every expense line needs both an account and an amount', 'error'); return }
+
+    if (billForm.bill_date) {
+      const d = new Date(billForm.bill_date)
+      const y = d.getFullYear(), m = d.getMonth() + 1
+      if (periods.some(p => p.year === y && p.month === m && p.status === 'closed')) {
+        toast(`${MONTH_NAMES[m - 1]} ${y} is a closed period. Reopen it first.`, 'error'); return
+      }
+    }
 
     setBillSaving(true)
     const subtotal = validLines.reduce((s, l) => s + Number(l.amount), 0)
@@ -961,6 +994,14 @@ export default function AccountingPage() {
     if (!selectedBill || Number(billPayForm.amount) <= 0) { toast('Amount required', 'error'); return }
     setBillSaving(true)
     const payAmt  = Number(billPayForm.amount)
+
+    if (billPayForm.payment_date) {
+      const d = new Date(billPayForm.payment_date)
+      const y = d.getFullYear(), m = d.getMonth() + 1
+      if (periods.some(p => p.year === y && p.month === m && p.status === 'closed')) {
+        toast(`${MONTH_NAMES[m - 1]} ${y} is a closed period. Reopen it first.`, 'error'); setBillSaving(false); return
+      }
+    }
 
     // Guard against double-paying / overpaying. The "Pay From Account" selector
     // also exists on Record New Bill (pay-at-recording) — a bill paid there is
@@ -1082,6 +1123,15 @@ export default function AccountingPage() {
 
   async function savePettyCash() {
     if (!pcForm.description || Number(pcForm.amount) <= 0) { toast('Description and amount required', 'error'); return }
+
+    if (pcForm.date) {
+      const d = new Date(pcForm.date)
+      const y = d.getFullYear(), m = d.getMonth() + 1
+      if (periods.some(p => p.year === y && p.month === m && p.status === 'closed')) {
+        toast(`${MONTH_NAMES[m - 1]} ${y} is a closed period. Reopen it first.`, 'error'); return
+      }
+    }
+
     setPcSaving(true)
 
     // ── Edit existing ──────────────────────────────────────────────
@@ -3418,9 +3468,9 @@ export default function AccountingPage() {
                         <td className="px-3 py-2 text-xs text-hmuted whitespace-nowrap">{period?.closed_at ? formatDate(period.closed_at) : '—'}</td>
                         <td className="px-3 py-2">
                           {isClosed ? (
-                            <button onClick={() => reopenPeriod(period!.id, year, month)} className="text-xs text-navy hover:underline">Reopen</button>
+                            <button onClick={() => handlePeriodActionTrigger('reopen', year, month, period!.id)} className="text-xs text-navy hover:underline">Reopen</button>
                           ) : (
-                            <button onClick={() => closePeriod(year, month)} disabled={periodSaving} className="text-xs text-red-500 hover:text-red-700 hover:underline disabled:opacity-50">Close Period</button>
+                            <button onClick={() => handlePeriodActionTrigger('close', year, month)} disabled={periodSaving} className="text-xs text-red-500 hover:text-red-700 hover:underline disabled:opacity-50">Close Period</button>
                           )}
                         </td>
                       </tr>
