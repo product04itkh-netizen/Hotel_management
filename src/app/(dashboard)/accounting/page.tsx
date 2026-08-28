@@ -231,6 +231,10 @@ export default function AccountingPage() {
   const [reconSaving,    setReconSaving]    = useState<string | null>(null)   // line id being saved
   const [reconEditLine,  setReconEditLine]  = useState<any | null>(null)      // line open in note editor
   const [reconEditNote,  setReconEditNote]  = useState('')
+  // Reconciling means working through the uncleared items; with dozens of lines
+  // the only way to find them was scrolling, so the list is filterable.
+  const [reconFilter,    setReconFilter]    = useState<'all' | 'uncleared' | 'cleared'>('all')
+  const [reconSearch,    setReconSearch]    = useState('')
 
   // Recurring Entries
   const [recurring,      setRecurring]      = useState<any[]>([])
@@ -3172,10 +3176,30 @@ export default function AccountingPage() {
               const stmtBal    = Number(reconStmtBal) || 0
               const diff       = clearedBal - stmtBal
               const isBalanced = Math.abs(diff) < 0.01
+              const clearedCount   = reconLines.filter(r => r.is_reconciled).length
+              const unclearedCount = reconLines.length - clearedCount
+              const unclearedBal   = bookBal - clearedBal
+              const pct = reconLines.length > 0 ? Math.round((clearedCount / reconLines.length) * 100) : 0
+
+              const q = reconSearch.trim().toLowerCase()
+              const visible = reconLines.filter((r: any) => {
+                if (reconFilter === 'cleared'   && !r.is_reconciled) return false
+                if (reconFilter === 'uncleared' &&  r.is_reconciled) return false
+                if (!q) return true
+                const amt = (Number(r.debit) || Number(r.credit) || 0).toFixed(2)
+                return (
+                  String(r.entry?.description ?? '').toLowerCase().includes(q) ||
+                  String(r.entry?.entry_number ?? '').toLowerCase().includes(q) ||
+                  String(r.description ?? '').toLowerCase().includes(q) ||
+                  String(r.entry?.entry_date ?? '').includes(q) ||
+                  amt.includes(q)
+                )
+              })
+
               return (
                 <>
                   {/* Summary cards */}
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-5">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
                     {[
                       { label: 'Book Balance',      value: bookBal,    color: 'text-dark-navy' },
                       { label: 'Cleared Balance',   value: clearedBal, color: 'text-dark-navy' },
@@ -3185,18 +3209,89 @@ export default function AccountingPage() {
                       <div key={c.label} className="bg-white border border-hborder rounded-2xl p-4 shadow-card">
                         <p className="text-xs text-hmuted">{c.label}</p>
                         <p className={cn('font-serif text-xl mt-1', c.color)}>{formatCurrency(c.value)}</p>
+                        {c.label === 'Cleared Balance' && (
+                          <p className="text-xs text-hmuted mt-0.5">{clearedCount} of {reconLines.length} items</p>
+                        )}
+                        {/* The uncleared TOTAL is what explains a difference — a
+                            bare count of items never did. */}
+                        {c.label === 'Book Balance' && unclearedCount > 0 && (
+                          <p className="text-xs text-hmuted mt-0.5">{formatCurrency(unclearedBal)} still uncleared</p>
+                        )}
                         {c.label === 'Difference' && isBalanced && <p className="text-xs text-green-600 mt-0.5">✓ Fully Reconciled</p>}
-                        {c.label === 'Difference' && !isBalanced && <p className="text-xs text-red-500 mt-0.5">{reconLines.filter(r => !r.is_reconciled).length} uncleared item(s)</p>}
+                        {c.label === 'Difference' && !isBalanced && <p className="text-xs text-red-500 mt-0.5">{unclearedCount} uncleared item(s)</p>}
                       </div>
                     ))}
+                  </div>
+
+                  {/* Progress + filters + search */}
+                  <div className="bg-white border border-hborder rounded-2xl p-4 shadow-card mb-4">
+                    <div className="flex items-center gap-3 mb-3">
+                      <div className="flex-1 h-2 bg-hsurface2 rounded-full overflow-hidden">
+                        <div
+                          className={cn('h-full rounded-full transition-all duration-300', pct === 100 ? 'bg-green-600' : 'bg-navy')}
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                      <span className="text-xs font-semibold text-hmuted tabular-nums whitespace-nowrap">
+                        {clearedCount}/{reconLines.length} cleared · {pct}%
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {([
+                        ['all',       'All',       reconLines.length],
+                        ['uncleared', 'Uncleared', unclearedCount],
+                        ['cleared',   'Cleared',   clearedCount],
+                      ] as const).map(([key, label, count]) => (
+                        <button
+                          key={key}
+                          onClick={() => setReconFilter(key)}
+                          className={cn(
+                            'text-xs font-semibold px-3 py-1.5 rounded-full transition-colors',
+                            reconFilter === key
+                              ? (key === 'uncleared' ? 'bg-red-600 text-white' : key === 'cleared' ? 'bg-green-700 text-white' : 'bg-navy text-white')
+                              : 'bg-hsurface2 text-hmuted hover:text-navy',
+                          )}
+                        >
+                          {label}<span className="ml-1.5 opacity-70">({count})</span>
+                        </button>
+                      ))}
+                      <input
+                        value={reconSearch}
+                        onChange={e => setReconSearch(e.target.value)}
+                        placeholder="Search description, entry #, date or amount…"
+                        className="flex-1 min-w-[200px] border border-hborder rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-navy bg-hbg"
+                      />
+                      {(reconSearch || reconFilter !== 'all') && (
+                        <button
+                          onClick={() => { setReconSearch(''); setReconFilter('all') }}
+                          className="text-xs text-hmuted hover:text-navy underline whitespace-nowrap"
+                        >Clear</button>
+                      )}
+                    </div>
+                    {visible.length !== reconLines.length && (
+                      <p className="text-[11px] text-hmuted mt-2">
+                        Showing {visible.length} of {reconLines.length}
+                        {visible.length > 0 && <> · {formatCurrency(visible.reduce((s: number, r: any) => s + Number(r.debit) - Number(r.credit), 0))} in view</>}
+                      </p>
+                    )}
                   </div>
 
                   {/* Transactions table */}
                   <div className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
 
+                    {visible.length === 0 && (
+                      <p className="text-center text-hmuted py-12 text-sm">
+                        {reconFilter === 'uncleared' && !reconSearch
+                          ? '✓ Nothing uncleared — every line has been checked off.'
+                          : reconFilter === 'cleared' && !reconSearch
+                          ? 'Nothing cleared yet.'
+                          : 'No lines match this search.'}
+                      </p>
+                    )}
+
                     {/* Mobile cards */}
                     <div className="md:hidden divide-y divide-hborder">
-                      {reconLines.map((r: any) => (
+                      {visible.map((r: any) => (
                         <div key={r.id} className={cn('p-4 flex items-start gap-3', r.is_reconciled ? 'bg-green-50/60' : '')}>
                           {/* Checkbox */}
                           <input
@@ -3230,7 +3325,7 @@ export default function AccountingPage() {
                     </div>
 
                     {/* Desktop table */}
-                    <div className="hidden md:block overflow-x-auto">
+                    <div className={cn('overflow-x-auto', visible.length === 0 ? 'hidden' : 'hidden md:block')}>
                       <table className="w-full text-sm">
                         <thead><tr className="bg-hsurface2">
                           {(['Date','Entry #','Description','Debit','Credit','Cleared','Actions'] as const).map(h => (
@@ -3242,7 +3337,7 @@ export default function AccountingPage() {
                           ))}
                         </tr></thead>
                         <tbody>
-                          {reconLines.map((r: any) => (
+                          {visible.map((r: any) => (
                             <tr key={r.id} className={cn('border-t border-hborder transition-colors', r.is_reconciled ? 'bg-green-50/60' : 'hover:bg-hbg/40')}>
                               <td className="px-3 py-2 text-xs text-hmuted whitespace-nowrap">{formatDate(r.entry?.entry_date)}</td>
                               <td className="px-3 py-2 font-mono text-xs text-hmuted">{r.entry?.entry_number}</td>
