@@ -324,6 +324,10 @@ export default function AssetsPage() {
     if (depRuns.find(r => r.run_year === linkYear && r.run_month === linkMonth)) {
       toast(`${MONTHS[linkMonth - 1]} ${linkYear} is already recorded against the register`, 'error'); return
     }
+    // No journal entry is written here, but this still advances every asset's
+    // accumulated depreciation for that month — a closed period should be
+    // frozen in the register as well as the ledger.
+    if (await periodClosed(linkYear, linkMonth)) return
 
     setLinkSaving(true)
     const built = await buildPostings(linkYear, linkMonth)
@@ -389,12 +393,30 @@ export default function AssetsPage() {
     loadDepRuns()
   }
 
+  // Depreciation is a month-end entry, so it is exactly what a period lock is
+  // meant to protect — but it lands in the RUN month, not today, so the check
+  // is on the period being posted to rather than the current date.
+  async function periodClosed(year: number, month: number): Promise<boolean> {
+    if (!activeBranch) return false
+    const { data } = await supabase.from('accounting_periods')
+      .select('status').eq('branch_id', activeBranch.id)
+      .eq('year', year).eq('month', month).maybeSingle()
+    if (data?.status === 'closed') {
+      toast(`${MONTHS[month - 1]} ${year} is a closed period. Reopen it first.`, 'error')
+      return true
+    }
+    return false
+  }
+
   // Undoes a recorded month: rolls each asset's accumulated depreciation back
   // by what this run charged, drops the ledger rows and the run. If the run
   // posted its own journal entry that entry goes too; a hand-written one is
   // left alone, since it belongs to whoever wrote it.
-  function unrecordRun(run: any) {
+  async function unrecordRun(run: any) {
     const label = `${MONTHS[run.run_month - 1]} ${run.run_year}`
+    // Reversing rolls back balances and, for a run that posted its own entry,
+    // deletes that entry — both barred once the period is closed.
+    if (await periodClosed(run.run_year, run.run_month)) return
     const ours = run.je?.reference_type === 'depreciation'
     setConfirmDialog({
       title: `Reverse depreciation for ${label}?`,
@@ -442,6 +464,7 @@ export default function AssetsPage() {
     if (!activeBranch) return
     const alreadyRun = depRuns.find(r => r.run_year === depRunYear && r.run_month === depRunMonth)
     if (alreadyRun) { toast(`Depreciation for ${MONTHS[depRunMonth - 1]} ${depRunYear} already posted`, 'error'); return }
+    if (await periodClosed(depRunYear, depRunMonth)) return
 
     setDepRunSaving(true)
 
