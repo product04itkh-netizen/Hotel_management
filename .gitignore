@@ -29,6 +29,28 @@ tsconfig.tsbuildinfo
 
 # Data files
 *.xlsx
+*.xlsm
 
 # Local data backups — contain real guest PII, never commit
 backups/
+
+# ── Scratch / one-off scripts ─────────────────────────────────────────────
+# Ad-hoc scripts used to inspect or repair data. They routinely get a
+# service-role key pasted into them, which bypasses RLS entirely — keep them
+# out of the repo so that can't be committed by accident. Anything meant to
+# be permanent belongs in supabase/migrations/ or src/.
+check_*.js
+verify_*.js
+read_excel*.js
+generate_sql.js
+delete_*.js
+scratch/
+
+# Database dumps taken for inspection
+chart_of_accounts_*.json
+*_dump.json
+
+# Source documents & brand assets kept alongside the project but not built
+# from — the served logos live in public/.
+*.docx
+*Logo.jpg
