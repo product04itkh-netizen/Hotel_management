@@ -127,6 +127,7 @@ export default function AccountingPage() {
   const [jeTo, setJeTo] = useState('')
   const [jeSearch, setJeSearch] = useState('')
   const [jeStatus, setJeStatus] = useState<'all' | 'draft' | 'posted' | 'void'>('all')
+  const [jeAccountFilter, setJeAccountFilter] = useState('')
 
   // Correct Entry Date (for auto-generated JEs — historical backfill corrections)
   const [correctDateOpen, setCorrectDateOpen] = useState(false)
@@ -235,6 +236,8 @@ export default function AccountingPage() {
   // the only way to find them was scrolling, so the list is filterable.
   const [reconFilter,    setReconFilter]    = useState<'all' | 'uncleared' | 'cleared'>('all')
   const [reconSearch,    setReconSearch]    = useState('')
+  const [reconFrom,      setReconFrom]      = useState('')
+  const [reconTo,        setReconTo]        = useState('')
 
   // Recurring Entries
   const [recurring,      setRecurring]      = useState<any[]>([])
@@ -1518,8 +1521,11 @@ export default function AccountingPage() {
     if (!activeBranch) return
     if (!reconAccountId) { toast('Select an account to reconcile', 'error'); return }
     setReconLoading(true)
-    const { data: jeData } = await supabase.from('journal_entries')
+    let jeQ = supabase.from('journal_entries')
       .select('id').eq('branch_id', activeBranch.id).eq('status', 'posted').eq('is_void', false)
+    if (reconFrom) jeQ = jeQ.gte('entry_date', reconFrom)
+    if (reconTo)   jeQ = jeQ.lte('entry_date', reconTo)
+    const { data: jeData } = await jeQ
     const ids = (jeData ?? []).map((e: any) => e.id)
     if (ids.length === 0) { setReconLines([]); setReconLoading(false); return }
     const { data } = await supabase.from('journal_entry_lines')
@@ -1591,6 +1597,10 @@ export default function AccountingPage() {
     if (jeStatus === 'void'   && !e.is_void) return false
     if (jeStatus === 'draft'  && (e.is_void || e.status !== 'draft'))  return false
     if (jeStatus === 'posted' && (e.is_void || e.status !== 'posted')) return false
+    if (jeAccountFilter) {
+      const lines = entryLines[e.id] ?? []
+      if (!lines.some(l => l.account_id === jeAccountFilter)) return false
+    }
     if (jeSearch) {
       const q = jeSearch.toLowerCase()
       if (
@@ -1695,9 +1705,14 @@ export default function AccountingPage() {
       rows.push(blank())
     }
 
+    const coaTitle = jeAccountFilter 
+      ? accounts.find(a => a.id === jeAccountFilter)?.name 
+      : 'All Accounts'
+    const periodTitle = `Period: ${jeFrom || 'All time'} to ${jeTo || 'All time'}`
+
     exportXlsx(`Journal_Entries_${todayStr()}`, [{
       name: 'Journal Entries',
-      header: exportHeader('Journal Entries', `Period: ${jeFrom || 'All time'} to ${jeTo || 'All time'}`),
+      header: exportHeader('Journal Entries', `${periodTitle} · ${coaTitle}`),
       rows,
     }])
   }
@@ -1745,22 +1760,51 @@ export default function AccountingPage() {
     if (reconLines.length === 0) { toast('Load the transactions first', 'error'); return }
     const acct = accounts.find(a => a.id === reconAccountId)
     const acctLabel = acct ? `${acct.code} — ${acct.name}` : 'Account'
+    const periodLabel = reconFrom || reconTo
+      ? `${reconFrom || 'Start'} to ${reconTo || 'Present'}`
+      : `As of ${todayStr()}`
+    const headerSubtitle = `${acctLabel} · ${periodLabel}`
 
     const bookBal    = reconLines.reduce((s, r) => s + Number(r.debit) - Number(r.credit), 0)
     const cleared    = reconLines.filter(r => r.is_reconciled)
     const uncleared  = reconLines.filter(r => !r.is_reconciled)
     const clearedBal = cleared.reduce((s, r) => s + Number(r.debit) - Number(r.credit), 0)
     const stmtBal    = Number(reconStmtBal) || 0
-    // Uncleared money IN has not reached the statement yet; uncleared money OUT
-    // has not been presented. These are the two sides of the classic bridge
-    // from the statement balance back to the book balance.
-    const inTransit  = uncleared.reduce((s, r) => s + Number(r.debit), 0)
+    const inTransit   = uncleared.reduce((s, r) => s + Number(r.debit), 0)
     const outstanding = uncleared.reduce((s, r) => s + Number(r.credit), 0)
+    const adjusted    = stmtBal + inTransit - outstanding
 
-    const COLS = ['Date', 'Entry #', 'Description', 'Note', 'Debit', 'Credit', 'Status']
-    const blank = () => Object.fromEntries(COLS.map(c => [c, ''])) as Record<string, any>
-    const line = (r: any) => ({
-      ...blank(),
+    // ── Summary helpers (clean two-column layout) ──
+    const SUM_COLS = ['Section', 'Description', 'Amount']
+    const sumBlank  = () => Object.fromEntries(SUM_COLS.map(c => [c, ''])) as Record<string, any>
+    const sumHead   = (s: string) => ({ ...sumBlank(), 'Section': s })
+    const sumRow    = (desc: string, amt: number | string) => ({ ...sumBlank(), 'Description': desc, 'Amount': amt })
+
+    const summary: Record<string, any>[] = []
+    summary.push(sumHead('RECONCILIATION'))
+    summary.push(sumRow('Statement balance', stmtBal))
+    summary.push(sumRow('Add: deposits in transit (uncleared receipts)', inTransit))
+    summary.push(sumRow('Less: outstanding payments (uncleared payments)', -outstanding))
+    summary.push(sumRow('Adjusted statement balance', adjusted))
+    summary.push(sumBlank())
+    summary.push(sumRow('Book balance per ledger', bookBal))
+    summary.push(sumRow('Unreconciled difference', adjusted - bookBal))
+    summary.push(sumBlank())
+    summary.push(sumHead('REFERENCE'))
+    summary.push(sumRow('Cleared balance (per ledger)', clearedBal))
+    summary.push(sumRow('Statement balance', stmtBal))
+    summary.push(sumRow('Cleared vs. statement difference', clearedBal - stmtBal))
+    summary.push(sumBlank())
+    summary.push(sumHead('ITEM COUNTS'))
+    summary.push(sumRow('Items cleared', cleared.length))
+    summary.push(sumRow('Items uncleared', uncleared.length))
+    summary.push(sumRow('Total items', reconLines.length))
+
+    // ── Transaction-row helpers (full column layout) ──
+    const TX_COLS = ['Date', 'Entry #', 'Description', 'Note', 'Debit', 'Credit', 'Status']
+    const txBlank = () => Object.fromEntries(TX_COLS.map(c => [c, ''])) as Record<string, any>
+    const txLine  = (r: any) => ({
+      ...txBlank(),
       'Date': r.entry?.entry_date ?? '',
       'Entry #': r.entry?.entry_number ?? '',
       'Description': r.entry?.description ?? '',
@@ -1769,61 +1813,39 @@ export default function AccountingPage() {
       'Credit': Number(r.credit) || '',
       'Status': r.is_reconciled ? 'Cleared' : 'Uncleared',
     })
-    const section = (label: string) => ({ ...blank(), 'Date': label })
-    const total = (label: string, amount: number) => ({ ...blank(), 'Description': label, 'Debit': amount })
+    const txTotal = (label: string, dr: number, cr: number) => ({
+      ...txBlank(), 'Description': label, 'Debit': dr, 'Credit': cr,
+    })
 
-    // ── Sheet 1: the reconciliation itself ──
-    // The bridge runs statement -> adjusted -> book. Cleared balance and its
-    // gap against the statement are the SAME difference seen from the other
-    // side (equal and opposite), so they are shown as reference figures rather
-    // than as a second, contradictory-looking difference.
-    const adjusted = stmtBal + inTransit - outstanding
-    const recon: Record<string, any>[] = []
-    recon.push(section('RECONCILIATION'))
-    recon.push(total('Statement balance', stmtBal))
-    recon.push(total('Add: deposits in transit (uncleared receipts)', inTransit))
-    recon.push(total('Less: outstanding payments (uncleared payments)', -outstanding))
-    recon.push(total('Adjusted statement balance', adjusted))
-    recon.push(total('Book balance per ledger', bookBal))
-    recon.push(total('Unreconciled difference', adjusted - bookBal))
-    recon.push(blank())
-    recon.push(section('REFERENCE'))
-    recon.push(total('Cleared balance (per ledger)', clearedBal))
-    recon.push(total('Statement balance', stmtBal))
-    recon.push(total('Cleared less statement — same difference, opposite sign', clearedBal - stmtBal))
-    recon.push(blank())
-    recon.push({ ...blank(), 'Description': 'Items cleared', 'Debit': cleared.length })
-    recon.push({ ...blank(), 'Description': 'Items uncleared', 'Debit': uncleared.length })
-    recon.push({ ...blank(), 'Description': 'Items total', 'Debit': reconLines.length })
+    // ── Build detail sheets ──
+    const unclearedRows: Record<string, any>[] = uncleared.map(txLine)
+    if (unclearedRows.length > 0) unclearedRows.push(txTotal('Total Uncleared', inTransit, outstanding))
 
-    if (uncleared.length > 0) {
-      recon.push(blank())
-      recon.push(section('UNCLEARED ITEMS'))
-      uncleared.forEach(r => recon.push(line(r)))
-      recon.push({ ...blank(), 'Description': 'Total uncleared', 'Debit': inTransit, 'Credit': outstanding })
-    }
-    if (cleared.length > 0) {
-      recon.push(blank())
-      recon.push(section('CLEARED ITEMS'))
-      cleared.forEach(r => recon.push(line(r)))
-      recon.push({
-        ...blank(), 'Description': 'Total cleared',
-        'Debit': cleared.reduce((s, r) => s + Number(r.debit), 0),
-        'Credit': cleared.reduce((s, r) => s + Number(r.credit), 0),
-      })
-    }
+    const clearedDr = cleared.reduce((s, r) => s + Number(r.debit), 0)
+    const clearedCr = cleared.reduce((s, r) => s + Number(r.credit), 0)
+    const clearedRows: Record<string, any>[] = cleared.map(txLine)
+    if (clearedRows.length > 0) clearedRows.push(txTotal('Total Cleared', clearedDr, clearedCr))
 
     exportXlsx(`Bank_Reconciliation_${acct?.code ?? 'account'}_${todayStr()}`, [
       {
-        name: 'Reconciliation',
-        header: exportHeader('Bank Reconciliation', `${acctLabel} · As of ${todayStr()}`),
-        rows: recon,
+        name: 'Summary',
+        header: exportHeader('Bank Reconciliation', headerSubtitle),
+        rows: summary,
       },
+      ...(unclearedRows.length > 0 ? [{
+        name: 'Uncleared Items',
+        header: exportHeader('Uncleared Items', headerSubtitle),
+        rows: unclearedRows,
+      }] : []),
+      ...(clearedRows.length > 0 ? [{
+        name: 'Cleared Items',
+        header: exportHeader('Cleared Items', headerSubtitle),
+        rows: clearedRows,
+      }] : []),
       {
-        // Flat list too, so it can be sorted and filtered without unpicking sections.
         name: 'All Transactions',
-        header: exportHeader('Bank Reconciliation — All Transactions', `${acctLabel} · As of ${todayStr()}`),
-        rows: reconLines.map(line),
+        header: exportHeader('All Transactions', headerSubtitle),
+        rows: reconLines.map(txLine),
       },
     ])
   }
@@ -2428,6 +2450,12 @@ export default function AccountingPage() {
                 <option value="draft">Draft</option>
                 <option value="posted">Posted</option>
                 <option value="void">Void</option>
+              </select>
+              <select value={jeAccountFilter} onChange={e => setJeAccountFilter(e.target.value)} className={cn(input, 'w-auto max-w-[200px]')}>
+                <option value="">All Accounts</option>
+                {accounts.filter(a => a.is_active).map(a => (
+                  <option key={a.id} value={a.id}>{a.code} — {a.name}</option>
+                ))}
               </select>
               <div className="relative flex-1 min-w-[200px]">
                 <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-hmuted pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z"/></svg>
@@ -3242,6 +3270,14 @@ export default function AccountingPage() {
                     <option key={a.id} value={a.id}>{a.code} — {a.name}</option>
                   ))}
                 </select>
+              </div>
+              <div>
+                <label className="block text-xs text-hmuted mb-1">From</label>
+                <input type="date" value={reconFrom} onChange={e => setReconFrom(e.target.value)} className={input} style={{ width: 150 }} />
+              </div>
+              <div>
+                <label className="block text-xs text-hmuted mb-1">To</label>
+                <input type="date" value={reconTo} onChange={e => setReconTo(e.target.value)} className={input} style={{ width: 150 }} />
               </div>
               <div>
                 <label className="block text-xs text-hmuted mb-1">Statement Balance ($)</label>
