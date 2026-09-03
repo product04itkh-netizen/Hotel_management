@@ -1741,6 +1741,93 @@ export default function AccountingPage() {
     }])
   }
 
+  function exportReconciliation() {
+    if (reconLines.length === 0) { toast('Load the transactions first', 'error'); return }
+    const acct = accounts.find(a => a.id === reconAccountId)
+    const acctLabel = acct ? `${acct.code} — ${acct.name}` : 'Account'
+
+    const bookBal    = reconLines.reduce((s, r) => s + Number(r.debit) - Number(r.credit), 0)
+    const cleared    = reconLines.filter(r => r.is_reconciled)
+    const uncleared  = reconLines.filter(r => !r.is_reconciled)
+    const clearedBal = cleared.reduce((s, r) => s + Number(r.debit) - Number(r.credit), 0)
+    const stmtBal    = Number(reconStmtBal) || 0
+    // Uncleared money IN has not reached the statement yet; uncleared money OUT
+    // has not been presented. These are the two sides of the classic bridge
+    // from the statement balance back to the book balance.
+    const inTransit  = uncleared.reduce((s, r) => s + Number(r.debit), 0)
+    const outstanding = uncleared.reduce((s, r) => s + Number(r.credit), 0)
+
+    const COLS = ['Date', 'Entry #', 'Description', 'Note', 'Debit', 'Credit', 'Status']
+    const blank = () => Object.fromEntries(COLS.map(c => [c, ''])) as Record<string, any>
+    const line = (r: any) => ({
+      ...blank(),
+      'Date': r.entry?.entry_date ?? '',
+      'Entry #': r.entry?.entry_number ?? '',
+      'Description': r.entry?.description ?? '',
+      'Note': r.description ?? '',
+      'Debit': Number(r.debit) || '',
+      'Credit': Number(r.credit) || '',
+      'Status': r.is_reconciled ? 'Cleared' : 'Uncleared',
+    })
+    const section = (label: string) => ({ ...blank(), 'Date': label })
+    const total = (label: string, amount: number) => ({ ...blank(), 'Description': label, 'Debit': amount })
+
+    // ── Sheet 1: the reconciliation itself ──
+    // The bridge runs statement -> adjusted -> book. Cleared balance and its
+    // gap against the statement are the SAME difference seen from the other
+    // side (equal and opposite), so they are shown as reference figures rather
+    // than as a second, contradictory-looking difference.
+    const adjusted = stmtBal + inTransit - outstanding
+    const recon: Record<string, any>[] = []
+    recon.push(section('RECONCILIATION'))
+    recon.push(total('Statement balance', stmtBal))
+    recon.push(total('Add: deposits in transit (uncleared receipts)', inTransit))
+    recon.push(total('Less: outstanding payments (uncleared payments)', -outstanding))
+    recon.push(total('Adjusted statement balance', adjusted))
+    recon.push(total('Book balance per ledger', bookBal))
+    recon.push(total('Unreconciled difference', adjusted - bookBal))
+    recon.push(blank())
+    recon.push(section('REFERENCE'))
+    recon.push(total('Cleared balance (per ledger)', clearedBal))
+    recon.push(total('Statement balance', stmtBal))
+    recon.push(total('Cleared less statement — same difference, opposite sign', clearedBal - stmtBal))
+    recon.push(blank())
+    recon.push({ ...blank(), 'Description': 'Items cleared', 'Debit': cleared.length })
+    recon.push({ ...blank(), 'Description': 'Items uncleared', 'Debit': uncleared.length })
+    recon.push({ ...blank(), 'Description': 'Items total', 'Debit': reconLines.length })
+
+    if (uncleared.length > 0) {
+      recon.push(blank())
+      recon.push(section('UNCLEARED ITEMS'))
+      uncleared.forEach(r => recon.push(line(r)))
+      recon.push({ ...blank(), 'Description': 'Total uncleared', 'Debit': inTransit, 'Credit': outstanding })
+    }
+    if (cleared.length > 0) {
+      recon.push(blank())
+      recon.push(section('CLEARED ITEMS'))
+      cleared.forEach(r => recon.push(line(r)))
+      recon.push({
+        ...blank(), 'Description': 'Total cleared',
+        'Debit': cleared.reduce((s, r) => s + Number(r.debit), 0),
+        'Credit': cleared.reduce((s, r) => s + Number(r.credit), 0),
+      })
+    }
+
+    exportXlsx(`Bank_Reconciliation_${acct?.code ?? 'account'}_${todayStr()}`, [
+      {
+        name: 'Reconciliation',
+        header: exportHeader('Bank Reconciliation', `${acctLabel} · As of ${todayStr()}`),
+        rows: recon,
+      },
+      {
+        // Flat list too, so it can be sorted and filtered without unpicking sections.
+        name: 'All Transactions',
+        header: exportHeader('Bank Reconciliation — All Transactions', `${acctLabel} · As of ${todayStr()}`),
+        rows: reconLines.map(line),
+      },
+    ])
+  }
+
   function exportTrialBalance() {
     if (tbRows.length === 0) { toast('Load the trial balance first', 'error'); return }
     exportXlsx(`Trial_Balance_${todayStr()}`, [{ 
@@ -3165,6 +3252,7 @@ export default function AccountingPage() {
                 <>
                   <Button variant="ghost" onClick={() => markAllCleared(true)} disabled={reconLoading}>Mark All Cleared</Button>
                   <Button variant="ghost" onClick={() => markAllCleared(false)} disabled={reconLoading}>Unreconcile All</Button>
+                  <Button variant="ghost" onClick={exportReconciliation} disabled={reconLoading}>↓ Export</Button>
                 </>
               )}
               <p className="text-xs text-hmuted self-end pb-2">Check off items that appear on the bank statement.</p>
