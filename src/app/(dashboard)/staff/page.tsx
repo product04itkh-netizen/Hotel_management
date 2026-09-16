@@ -262,7 +262,7 @@ export default function StaffPage() {
                     {member.auth_user_id ? (
                       <span className="text-[10px] px-2 py-0.5 rounded-full font-medium bg-green-100 text-green-700 whitespace-nowrap">Active</span>
                     ) : (
-                      <span className="text-[10px] px-2 py-0.5 rounded-full font-medium bg-gray-100 text-gray-500 whitespace-nowrap">No login</span>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full font-medium bg-hsurface2 text-hmuted whitespace-nowrap">No login</span>
                     )}
                   </td>
                   <td className="px-3 py-2">

@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -6,7 +6,38 @@
 
 @layer base {
   * { box-sizing: border-box; }
-  body { background: #F7F5F0; }
+  body {
+    background: #F7F5F0;
+    color: #1A1714;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Browser surfaces, themed from the palette rather than left at defaults */
+  ::selection { background: rgba(240, 88, 48, 0.2); color: #1A1714; }
+  input, textarea { caret-color: #583808; }
+  h1, h2, h3 { text-wrap: balance; }
+
+  /* Money and counts line up in every table */
+  table { font-variant-numeric: tabular-nums; }
+
+  /* Keyboard focus. Most controls carry focus:outline-none, which left keyboard
+     users with no visible focus at all; this ring shows only for keyboard focus
+     and is drawn with box-shadow so it doesn't fight those outline utilities. */
+  button:focus-visible,
+  a:focus-visible,
+  summary:focus-visible,
+  [role="button"]:focus-visible,
+  [tabindex]:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px #FFFFFF, 0 0 0 4px rgba(88, 56, 8, 0.6);
+  }
+  input[type="checkbox"]:focus-visible,
+  input[type="radio"]:focus-visible {
+    outline: 2px solid rgba(88, 56, 8, 0.6);
+    outline-offset: 2px;
+  }
+
   ::-webkit-scrollbar { width: 6px; height: 6px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: #D4CEBC; border-radius: 99px; }
@@ -14,47 +45,26 @@
 }
 
 @layer utilities {
-  .hover\:bg-white\/8:hover { background-color: rgba(255,255,255,0.08); }
-  .animate-slide-up { animation: slideUp 0.22s cubic-bezier(0.4,0,0.2,1); }
+  .animate-slide-up { animation: slideUp 0.2s cubic-bezier(0.22, 1, 0.36, 1); }
 }
 
 @keyframes slideUp {
-  from { opacity: 0; transform: translateY(10px); }
+  from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(6px); }
+  from { opacity: 0; transform: translateY(4px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 
-.section-enter { animation: fadeIn 0.18s cubic-bezier(0.4,0,0.2,1); }
+.section-enter { animation: fadeIn 0.18s cubic-bezier(0.22, 1, 0.36, 1); }
 
-/* Smooth table row entrance */
-@keyframes rowIn {
-  from { opacity: 0; }
-  to   { opacity: 1; }
-}
-tbody tr { animation: rowIn 0.15s ease both; }
-tbody tr:nth-child(1)  { animation-delay: 0ms; }
-tbody tr:nth-child(2)  { animation-delay: 20ms; }
-tbody tr:nth-child(3)  { animation-delay: 40ms; }
-tbody tr:nth-child(4)  { animation-delay: 60ms; }
-tbody tr:nth-child(5)  { animation-delay: 80ms; }
-tbody tr:nth-child(6)  { animation-delay: 100ms; }
-tbody tr:nth-child(7)  { animation-delay: 120ms; }
-tbody tr:nth-child(8)  { animation-delay: 140ms; }
-tbody tr:nth-child(9)  { animation-delay: 160ms; }
-tbody tr:nth-child(10) { animation-delay: 180ms; }
-
-/* Pulse shimmer for skeleton */
-@keyframes shimmer {
-  0%   { background-position: -400px 0; }
-  100% { background-position: 400px 0; }
-}
-.animate-pulse {
-  background: linear-gradient(90deg, #EDEAE3 25%, #F4F1EC 50%, #EDEAE3 75%) !important;
-  background-size: 800px 100% !important;
-  animation: shimmer 1.4s infinite linear !important;
-  border-radius: inherit;
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

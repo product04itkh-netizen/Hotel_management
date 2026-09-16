@@ -14,6 +14,7 @@ import { formatDate, generateReservationNumber, formatCurrency, calculateNights,
 import { toast } from '@/components/ui/Toast'
 import { useBranch } from '@/context/BranchContext'
 import type { Reservation, House } from '@/types'
+import { Icon } from '@/components/ui/Icon'
 
 export default function FrontDeskPage() {
   const supabase = createClient()
@@ -513,8 +514,8 @@ export default function FrontDeskPage() {
                               className="w-full text-left rounded-[4px] px-1.5 py-[3px] text-[10px] font-semibold leading-tight truncate block hover:opacity-80 transition-opacity"
                               style={{ background: sc.bg, color: sc.text, border: `1.5px solid ${sc.border}` }}
                             >
-                              {isCI && <span className="mr-0.5 opacity-60">▶</span>}
-                              {isCO && <span className="mr-0.5 opacity-60">◀</span>}
+                              {isCI && <Icon name="chevronRight" className="inline-block w-2.5 h-2.5 mr-0.5 align-middle opacity-70" strokeWidth={3} />}
+                              {isCO && <Icon name="chevronLeft" className="inline-block w-2.5 h-2.5 mr-0.5 align-middle opacity-70" strokeWidth={3} />}
                               {guestName}
                               {houseName && <span className="opacity-60 ml-1">· {houseName}</span>}
                             </button>

@@ -10,6 +10,7 @@ import { formatDate, calculateNights, calculateNightlyTotal, generateReservation
 import { toast } from '@/components/ui/Toast'
 import { useBranch } from '@/context/BranchContext'
 import type { Reservation, House, HousePromotion, DepositReceipt, ServiceCatalogItem } from '@/types'
+import { Icon } from '@/components/ui/Icon'
 
 interface PaymentMethod {
   id: string
@@ -707,7 +708,7 @@ export default function ReservationsPage() {
     }
     if (pcCount > 0) lines.push(`${pcCount} petty cash transaction${pcCount > 1 ? 's' : ''} will be unlinked.`)
     if (checkInJeIds.length > 0) lines.push('Check-in revenue recognition will be reversed.')
-    if (res.status === 'checked_in') lines.push(`⚠️  Guest is currently checked in — the house will be released back to available.`)
+    if (res.status === 'checked_in') lines.push(`Guest is currently checked in — the house will be released back to available.`)
     lines.push('\nThis action cannot be undone.')
 
     setConfirmDialog({
@@ -859,7 +860,7 @@ export default function ReservationsPage() {
               onClick={() => { setSearch(''); setStatusFilter('all'); setHouseFilter('all'); setDateFrom(''); setDateTo('') }}
               className="text-xs text-hmuted hover:text-red-500 transition-colors px-2 py-2"
             >
-              ✕ Clear
+              Clear filters
             </button>
           )}
           {/* Spacer */}
@@ -868,15 +869,15 @@ export default function ReservationsPage() {
           <div className="flex rounded-lg border border-hborder overflow-hidden">
             <button
               onClick={() => setViewMode('list')}
-              className={`px-3 py-2 text-xs font-medium transition-colors ${viewMode === 'list' ? 'bg-navy text-white' : 'bg-white text-hmuted hover:bg-hbg'}`}
+              className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors ${viewMode === 'list' ? 'bg-navy text-white' : 'bg-white text-hmuted hover:bg-hbg'}`}
             >
-              ☰ List
+              <Icon name="list" className="w-3.5 h-3.5" />List
             </button>
             <button
               onClick={() => setViewMode('calendar')}
-              className={`px-3 py-2 text-xs font-medium transition-colors border-l border-hborder ${viewMode === 'calendar' ? 'bg-navy text-white' : 'bg-white text-hmuted hover:bg-hbg'}`}
+              className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors border-l border-hborder ${viewMode === 'calendar' ? 'bg-navy text-white' : 'bg-white text-hmuted hover:bg-hbg'}`}
             >
-              ▦ Calendar
+              <Icon name="grid" className="w-3.5 h-3.5" />Calendar
             </button>
           </div>
           <Button onClick={openCreate}>+ New Reservation</Button>
@@ -1166,8 +1167,8 @@ export default function ReservationsPage() {
                                   className="w-full text-left rounded-[4px] px-1.5 py-[3px] text-[10px] font-semibold leading-tight truncate block hover:opacity-80 transition-opacity"
                                   style={{ background: sc.bg, color: sc.text, border: `1.5px solid ${sc.border}` }}
                                 >
-                                  {isCI && <span className="mr-0.5 opacity-60">▶</span>}
-                                  {isCO && <span className="mr-0.5 opacity-60">◀</span>}
+                                  {isCI && <Icon name="chevronRight" className="inline-block w-2.5 h-2.5 mr-0.5 align-middle opacity-70" strokeWidth={3} />}
+                                  {isCO && <Icon name="chevronLeft" className="inline-block w-2.5 h-2.5 mr-0.5 align-middle opacity-70" strokeWidth={3} />}
                                   {guestName}
                                   {visibleHouses.length > 1 && (
                                     <span className="opacity-60 ml-1">· {house.name}</span>
@@ -1434,10 +1435,10 @@ export default function ReservationsPage() {
                               : 'border-hborder bg-hsurface2 text-htext hover:bg-white hover:border-navy/50',
                           ].join(' ')}
                         >
-                          <span>{cat === 'activity' ? '🎯' : '🍽️'}</span>
+                          <Icon name={cat === 'activity' ? 'target' : 'utensils'} className="w-3.5 h-3.5 text-hmuted" />
                           <span>{p.name_en}</span>
                           <span className="text-hmuted/70">{formatCurrency(p.unit_price)}</span>
-                          {added && <span className="text-navy/60">✓</span>}
+                          {added && <Icon name="check" className="w-3 h-3 text-navy/70" strokeWidth={3} />}
                         </button>
                       )
                     })}
@@ -1541,7 +1542,7 @@ export default function ReservationsPage() {
               </div>
               {editId && originalTotalAmount != null && Math.abs(netTotal - originalTotalAmount) > 0.01 && (
                 <div className="px-4 py-2.5 bg-amber-50 border-b border-amber-200 text-xs text-amber-800">
-                  ⚠ Saved total for this booking is <strong>{formatCurrency(originalTotalAmount)}</strong>, but recalculates to <strong>{formatCurrency(netTotal)}</strong> at today's rates — the house rate (or a promo) has changed since this reservation was made. Saving will overwrite the total to {formatCurrency(netTotal)} unless you adjust the discount below to preserve the original price.
+                  Saved total for this booking is <strong>{formatCurrency(originalTotalAmount)}</strong>, but recalculates to <strong>{formatCurrency(netTotal)}</strong> at today's rates — the house rate (or a promo) has changed since this reservation was made. Saving will overwrite the total to {formatCurrency(netTotal)} unless you adjust the discount below to preserve the original price.
                 </div>
               )}
               <div className="px-4 py-3 space-y-1.5 bg-white">
@@ -1921,8 +1922,8 @@ export default function ReservationsPage() {
                 {/* Status */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, paddingTop: 4, borderTop: '1px solid #f0f4f8' }}>
                   <span style={{ fontSize: 12, color: '#6b7280' }}>Deposit Status</span>
-                  <span className={`text-xs px-2.5 py-1 rounded-full font-semibold whitespace-nowrap ${statusColor[receipt.status] ?? 'bg-gray-100 text-gray-600'}`}>
-                    {receipt.status === 'held' ? '🟡 Held — pending checkout' : receipt.status === 'applied' ? '✅ Applied to invoice' : '↩ Refunded'}
+                  <span className={`text-xs px-2.5 py-1 rounded-full font-semibold whitespace-nowrap ${statusColor[receipt.status] ?? 'bg-hsurface2 text-hmuted'}`}>
+                    {receipt.status === 'held' ? 'Held — pending checkout' : receipt.status === 'applied' ? 'Applied to invoice' : 'Refunded'}
                   </span>
                 </div>
                 <p style={{ fontSize: 12, color: '#6b7280', marginTop: 16, borderTop: '1px dashed #e8edf3', paddingTop: 14 }}>

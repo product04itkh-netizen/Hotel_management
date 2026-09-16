@@ -83,30 +83,30 @@ export function getStatusBadgeClass(status: string): string {
     occupied: 'bg-blue-100 text-blue-700',
     cleaning: 'bg-yellow-100 text-yellow-700',
     maintenance: 'bg-red-100 text-red-700',
-    out_of_order: 'bg-gray-100 text-gray-600',
+    out_of_order: 'bg-hsurface2 text-hmuted',
     confirmed: 'bg-blue-100 text-blue-700',
     pending: 'bg-yellow-100 text-yellow-700',
     checked_in: 'bg-green-100 text-green-700',
-    checked_out: 'bg-gray-100 text-gray-600',
+    checked_out: 'bg-hsurface2 text-hmuted',
     cancelled: 'bg-red-100 text-red-700',
     no_show: 'bg-red-100 text-red-700',
     paid: 'bg-green-100 text-green-700',
     unpaid: 'bg-red-100 text-red-700',
     partial: 'bg-yellow-100 text-yellow-700',
     refunded: 'bg-purple-100 text-purple-700',
-    void: 'bg-gray-100 text-gray-600',
+    void: 'bg-hsurface2 text-hmuted',
     in_progress: 'bg-blue-100 text-blue-700',
     completed: 'bg-green-100 text-green-700',
-    skipped: 'bg-gray-100 text-gray-600',
+    skipped: 'bg-hsurface2 text-hmuted',
     active: 'bg-green-100 text-green-700',
-    inactive: 'bg-gray-100 text-gray-600',
+    inactive: 'bg-hsurface2 text-hmuted',
     on_leave: 'bg-yellow-100 text-yellow-700',
     urgent: 'bg-red-100 text-red-700',
     high: 'bg-orange-100 text-orange-700',
     normal: 'bg-blue-100 text-blue-700',
-    low: 'bg-gray-100 text-gray-600',
+    low: 'bg-hsurface2 text-hmuted',
   }
-  return map[status] ?? 'bg-gray-100 text-gray-600'
+  return map[status] ?? 'bg-hsurface2 text-hmuted'
 }
 
 export function capitalize(str: string): string {

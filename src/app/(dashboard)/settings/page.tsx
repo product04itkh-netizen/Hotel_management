@@ -10,6 +10,7 @@ import { formatCurrency, formatDateTime, todayISO } from '@/lib/utils'
 import type { HotelSettings, ServiceCatalogItem, ServiceCatalogCategory, AuditLog, AuditAction } from '@/types'
 import { useBranch } from '@/context/BranchContext'
 import { useCurrentStaff } from '@/hooks/useCurrentStaff'
+import { Icon } from '@/components/ui/Icon'
 
 // v1 audited tables — matches migration 045_audit_logs.sql's trigger list.
 const AUDITED_TABLES = [
@@ -661,7 +662,7 @@ export default function SettingsPage() {
                   </select>
                   {form.currency !== 'USD' && (
                     <p className="text-[10px] text-amber-700 mt-1">
-                      ⚠ Changes the display symbol only — every amount already in the system is recorded in USD and will not be converted.
+                      Changes the display symbol only — every amount already in the system is recorded in USD and will not be converted.
                     </p>
                   )}
                 </div>
@@ -695,7 +696,7 @@ export default function SettingsPage() {
                     onChange={e => setForm(f => ({ ...f, telegram_enabled: e.target.checked }))}
                     className="sr-only peer"
                   />
-                  <div className="w-11 h-6 bg-gray-300 rounded-full peer peer-checked:bg-navy transition-colors shadow-inner after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-5 after:w-5 after:shadow after:transition-all peer-checked:after:translate-x-5"></div>
+                  <div className="w-11 h-6 bg-hborder rounded-full peer peer-checked:bg-navy transition-colors shadow-inner after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-5 after:w-5 after:shadow after:transition-all peer-checked:after:translate-x-5"></div>
                 </label>
               </div>
 
@@ -754,7 +755,7 @@ export default function SettingsPage() {
                     onClick={handleTestTelegram}
                     disabled={testingTelegram}
                   >
-                    {testingTelegram ? 'Sending…' : '📨 Test'}
+                    {testingTelegram ? 'Sending…' : 'Send test'}
                   </Button>
                 </div>
               </div>
@@ -794,8 +795,8 @@ export default function SettingsPage() {
                   <tr key={pm.id} className="border-t border-hborder hover:bg-hbg/40 transition-colors">
                     <td className="px-3 py-2">
                       <div className="flex gap-1">
-                        <button onClick={() => movePm(pm, 'up')} disabled={idx === 0} className="text-hmuted hover:text-navy disabled:opacity-30 text-xs px-1">▲</button>
-                        <button onClick={() => movePm(pm, 'down')} disabled={idx === paymentMethods.length - 1} className="text-hmuted hover:text-navy disabled:opacity-30 text-xs px-1">▼</button>
+                        <button onClick={() => movePm(pm, 'up')} disabled={idx === 0} aria-label="Move up" className="text-hmuted hover:text-navy disabled:opacity-30 px-1"><Icon name="arrowUp" className="w-3.5 h-3.5" /></button>
+                        <button onClick={() => movePm(pm, 'down')} disabled={idx === paymentMethods.length - 1} aria-label="Move down" className="text-hmuted hover:text-navy disabled:opacity-30 px-1"><Icon name="arrowDown" className="w-3.5 h-3.5" /></button>
                       </div>
                     </td>
                     <td className="px-3 py-2 font-medium text-htext max-w-[130px] truncate" title={pm.name}>{pm.name}</td>
@@ -818,7 +819,7 @@ export default function SettingsPage() {
                     <td className="px-3 py-2">
                       <button
                         onClick={() => togglePmActive(pm)}
-                        className={`text-xs font-semibold px-2 py-0.5 rounded-full transition-colors ${pm.is_active ? 'bg-emerald-100 text-emerald-700 hover:bg-red-100 hover:text-red-600' : 'bg-gray-100 text-gray-500 hover:bg-emerald-100 hover:text-emerald-700'}`}
+                        className={`text-xs font-semibold px-2 py-0.5 rounded-full transition-colors ${pm.is_active ? 'bg-emerald-100 text-emerald-700 hover:bg-red-100 hover:text-red-600' : 'bg-hsurface2 text-hmuted hover:bg-emerald-100 hover:text-emerald-700'}`}
                       >
                         {pm.is_active ? 'Active' : 'Inactive'}
                       </button>
@@ -897,7 +898,7 @@ export default function SettingsPage() {
                     <td className="px-3 py-2 h-[52px] align-middle">
                       <button
                         onClick={() => toggleScActive(item)}
-                        className={`text-xs font-semibold px-2 py-0.5 rounded-full transition-colors whitespace-nowrap ${item.is_active ? 'bg-emerald-100 text-emerald-700 hover:bg-red-100 hover:text-red-600' : 'bg-gray-100 text-gray-500 hover:bg-emerald-100 hover:text-emerald-700'}`}
+                        className={`text-xs font-semibold px-2 py-0.5 rounded-full transition-colors whitespace-nowrap ${item.is_active ? 'bg-emerald-100 text-emerald-700 hover:bg-red-100 hover:text-red-600' : 'bg-hsurface2 text-hmuted hover:bg-emerald-100 hover:text-emerald-700'}`}
                       >
                         {item.is_active ? 'Active' : 'Inactive'}
                       </button>
@@ -1020,7 +1021,7 @@ export default function SettingsPage() {
                             </span>
                           </td>
                           <td className="px-3 py-2 text-xs font-mono text-hmuted whitespace-nowrap">{log.record_id?.slice(0, 8) ?? '—'}</td>
-                          <td className="px-3 py-2 text-xs text-navy whitespace-nowrap">{expanded ? '▲ Hide' : diffs.length > 0 ? `▼ ${diffs.length} field${diffs.length === 1 ? '' : 's'}` : ''}</td>
+                          <td className="px-3 py-2 text-xs text-navy whitespace-nowrap">{expanded ? <span className="inline-flex items-center gap-1"><Icon name="chevronDown" className="w-3 h-3" />Hide</span> : diffs.length > 0 ? <span className="inline-flex items-center gap-1"><Icon name="chevronRight" className="w-3 h-3" />{diffs.length} field{diffs.length === 1 ? '' : 's'}</span> : ''}</td>
                         </tr>
                         {expanded && (
                           <tr className="border-t border-hborder bg-hbg/30">
@@ -1122,7 +1123,7 @@ export default function SettingsPage() {
             </select>
             <p className="text-[10px] text-hmuted mt-1">
               When this payment method is used, the journal entry will debit/credit this account.
-              {pmForm.account_code === '1010' ? ' ✔ Marked as Cash on Hand.' : ' This account will be treated as a Bank / Electronic account.'}
+              {pmForm.account_code === '1010' ? ' Marked as Cash on Hand.' : ' This account will be treated as a Bank / Electronic account.'}
             </p>
           </div>
           <div className="flex justify-end gap-3">

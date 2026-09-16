@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { cn } from '@/lib/utils'
+import { Icon } from './Icon'
 
 export type ToastType = 'success' | 'error' | 'info'
 
@@ -33,21 +34,27 @@ export function ToastContainer() {
   }, [])
 
   return (
-    <div className="fixed bottom-6 right-6 z-[9999] flex flex-col gap-2">
+    <div
+      aria-live="polite"
+      className="fixed bottom-4 inset-x-4 sm:inset-x-auto sm:bottom-6 sm:right-6 z-[9999] flex flex-col sm:items-end gap-2 pointer-events-none"
+    >
       {toasts.map(t => (
         <div
           key={t.id}
-          className={cn(
-            'flex items-center gap-3 px-4 py-3 rounded-xl shadow-lg text-sm font-medium min-w-[280px] animate-slide-up',
-            t.type === 'success' && 'bg-green-600 text-white',
-            t.type === 'error' && 'bg-red-600 text-white',
-            t.type === 'info' && 'bg-navy text-white',
-          )}
+          role={t.type === 'error' ? 'alert' : 'status'}
+          className="pointer-events-auto flex items-start gap-3 pl-3 pr-4 py-3 rounded-xl bg-[#241A0F] text-white text-sm shadow-[0_12px_32px_-8px_rgba(26,23,20,0.5)] sm:min-w-[280px] sm:max-w-[420px] animate-slide-up"
         >
-          <span>
-            {t.type === 'success' ? '✓' : t.type === 'error' ? '✕' : 'ℹ'}
+          <span
+            className={cn(
+              'mt-px w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0',
+              t.type === 'success' && 'bg-emerald-400/20 text-emerald-300',
+              t.type === 'error' && 'bg-red-400/20 text-red-300',
+              t.type === 'info' && 'bg-white/10 text-gold-light',
+            )}
+          >
+            <Icon name={t.type === 'success' ? 'check' : t.type === 'error' ? 'x' : 'info'} className="w-3 h-3" strokeWidth={2.75} />
           </span>
-          {t.message}
+          <span className="leading-5">{t.message}</span>
         </div>
       ))}
     </div>

@@ -20,7 +20,7 @@ const HOUSE_COLORS: Record<HouseStatus, { bg: string; border: string; badge: str
   available:   { bg: 'bg-green-50',  border: 'border-green-200',  badge: 'bg-green-100 text-green-700',  dot: 'bg-green-500' },
   occupied:    { bg: 'bg-blue-50',   border: 'border-blue-200',   badge: 'bg-blue-100 text-blue-700',    dot: 'bg-blue-500' },
   maintenance: { bg: 'bg-red-50',    border: 'border-red-200',    badge: 'bg-red-100 text-red-700',      dot: 'bg-red-500' },
-  closed:      { bg: 'bg-gray-50',   border: 'border-gray-200',   badge: 'bg-gray-100 text-gray-500',    dot: 'bg-gray-400' },
+  closed:      { bg: 'bg-hsurface2/60',   border: 'border-hborder',   badge: 'bg-hsurface2 text-hmuted',    dot: 'bg-hlight' },
 }
 
 const ROOM_DOT: Record<RoomStatus, string> = {
@@ -28,7 +28,7 @@ const ROOM_DOT: Record<RoomStatus, string> = {
   occupied:     'bg-blue-500',
   cleaning:     'bg-yellow-500',
   maintenance:  'bg-red-500',
-  out_of_order: 'bg-gray-400',
+  out_of_order: 'bg-hlight',
 }
 
 const emptyHouseForm = {
@@ -597,7 +597,7 @@ export default function PropertiesPage() {
                       const isRunning = !isExpired && !isUpcoming
                       const statusLabel = !promo.is_active ? 'inactive' : isRunning ? 'live' : isUpcoming ? 'upcoming' : 'expired'
                       const statusClass = !promo.is_active || isExpired
-                        ? 'bg-gray-100 text-gray-500'
+                        ? 'bg-hsurface2 text-hmuted'
                         : isRunning ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'
                       return (
                         <div key={promo.id} className={cn('flex items-center gap-3 rounded-lg px-3 py-2.5', promo.is_active && !isExpired ? 'bg-hsurface2' : 'bg-hsurface2/50')}>

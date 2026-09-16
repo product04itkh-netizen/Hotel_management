@@ -12,6 +12,7 @@ import { useBranch } from '@/context/BranchContext'
 import { useCurrentStaff } from '@/hooks/useCurrentStaff'
 import { cn } from '@/lib/utils'
 import type { ChartOfAccount, AccountType, JournalEntry, PettyCashTransaction, Vendor, Bill } from '@/types'
+import { Icon } from '@/components/ui/Icon'
 
 // ── Types & constants ──────────────────────────────────────────
 type Tab = 'overview' | 'ar' | 'bills' | 'vendors' | 'journal' | 'ledger' | 'trial_balance' | 'reports' | 'reconciliation' | 'recurring' | 'periods' | 'coa' | 'petty'
@@ -697,7 +698,7 @@ export default function AccountingPage() {
     setConfirmDialog({
       title: `Unpost ${entry.entry_number}?`,
       message: isAuto
-        ? `⚠️  Admin override — this is an auto-generated ${entry.reference_type!.replace(/_/g, ' ')} entry linked to an invoice/reservation. Editing it here will NOT update that source record, so the two can go out of sync. Only proceed if you know what you're doing; otherwise use Correct Date / Correct COA or void the source document.`
+        ? `Admin override — this is an auto-generated ${entry.reference_type!.replace(/_/g, ' ')} entry linked to an invoice/reservation. Editing it here will NOT update that source record, so the two can go out of sync. Only proceed if you know what you're doing; otherwise use Correct Date / Correct COA or void the source document.`
         : 'Entry will return to draft and can be edited. It will be excluded from reports until re-posted.',
       confirmLabel: 'Unpost',
       variant: isAuto ? 'danger' : 'default',
@@ -1548,7 +1549,7 @@ export default function AccountingPage() {
     setReconSaving(null)
     if (error) { toast('Failed to update reconciliation status', 'error'); return }
     setReconLines(prev => prev.map(r => r.id === lineId ? { ...r, is_reconciled: !current } : r))
-    toast(!current ? 'Line marked as cleared ✓' : 'Line uncleared', 'success')
+    toast(!current ? 'Line marked as cleared' : 'Line uncleared', 'success')
   }
 
   async function markAllCleared(cleared: boolean) {
@@ -2013,29 +2014,27 @@ export default function AccountingPage() {
           <div className="space-y-5">
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
               {[
-                { label: 'AR Outstanding',    value: formatCurrency(overview.arOutstanding),  color: '#583808', sub: 'Unpaid customer invoices' },
-                { label: 'AP Outstanding',    value: formatCurrency(overview.apOutstanding),  color: '#B83232', sub: 'Unpaid supplier bills' },
-                { label: 'Petty Cash',        value: formatCurrency(pettyCashBalance),         color: '#F05830', sub: (() => { const a = accounts.find(x => x.code === '1011') ?? accounts.find(x => x.code === '1010'); return a ? `${a.code} — ${a.name}` : '1011 — Petty Cash' })() },
+                { label: 'AR Outstanding',    value: formatCurrency(overview.arOutstanding),  sub: 'Unpaid customer invoices' },
+                { label: 'AP Outstanding',    value: formatCurrency(overview.apOutstanding),  sub: 'Unpaid supplier bills' },
+                { label: 'Petty Cash',        value: formatCurrency(pettyCashBalance),         sub: (() => { const a = accounts.find(x => x.code === '1011') ?? accounts.find(x => x.code === '1010'); return a ? `${a.code} — ${a.name}` : '1011 — Petty Cash' })() },
               ].map(s => (
-                <div key={s.label} className="bg-white border border-hborder rounded-2xl p-4 shadow-card relative overflow-hidden">
-                  <div className="absolute top-0 left-0 w-1 h-full rounded-l-2xl" style={{ background: s.color }} />
-                  <p className="text-[11px] text-hmuted uppercase tracking-wide pl-2">{s.label}</p>
-                  <p className="font-serif text-xl sm:text-2xl text-dark-navy mt-1 pl-2 truncate" title={s.value}>{s.value}</p>
-                  <p className="text-[10px] text-hmuted pl-2 mt-0.5">{s.sub}</p>
+                <div key={s.label} className="bg-white border border-hborder rounded-2xl p-4 shadow-card">
+                  <p className="text-[11px] font-semibold text-hmuted uppercase tracking-wide">{s.label}</p>
+                  <p className="text-xl sm:text-2xl font-semibold tracking-tight tabular-nums text-dark-navy mt-1.5 truncate" title={s.value}>{s.value}</p>
+                  <p className="text-[10px] text-hmuted mt-1">{s.sub}</p>
                 </div>
               ))}
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
               {[
-                { label: 'Revenue This Month',  value: formatCurrency(overview.monthRevenue),                              color: '#1A7A4A', sub: 'From GL entries' },
-                { label: 'Expenses This Month', value: formatCurrency(overview.monthExpenses),                             color: '#B83232', sub: 'From GL entries' },
-                { label: 'Net Income',          value: formatCurrency(overview.monthRevenue - overview.monthExpenses),     color: '#583808', sub: `${overview.totalEntries} total entries` },
+                { label: 'Revenue This Month',  value: formatCurrency(overview.monthRevenue),                              sub: 'From GL entries' },
+                { label: 'Expenses This Month', value: formatCurrency(overview.monthExpenses),                             sub: 'From GL entries' },
+                { label: 'Net Income',          value: formatCurrency(overview.monthRevenue - overview.monthExpenses),     sub: `${overview.totalEntries} total entries` },
               ].map(s => (
-                <div key={s.label} className="bg-white border border-hborder rounded-2xl p-4 shadow-card relative overflow-hidden">
-                  <div className="absolute top-0 left-0 w-1 h-full rounded-l-2xl" style={{ background: s.color }} />
-                  <p className="text-[11px] text-hmuted uppercase tracking-wide pl-2">{s.label}</p>
-                  <p className="font-serif text-xl sm:text-2xl text-dark-navy mt-1 pl-2 truncate" title={s.value}>{s.value}</p>
-                  <p className="text-[10px] text-hmuted pl-2 mt-0.5">{s.sub}</p>
+                <div key={s.label} className="bg-white border border-hborder rounded-2xl p-4 shadow-card">
+                  <p className="text-[11px] font-semibold text-hmuted uppercase tracking-wide">{s.label}</p>
+                  <p className="text-xl sm:text-2xl font-semibold tracking-tight tabular-nums text-dark-navy mt-1.5 truncate" title={s.value}>{s.value}</p>
+                  <p className="text-[10px] text-hmuted mt-1">{s.sub}</p>
                 </div>
               ))}
             </div>
@@ -2110,7 +2109,7 @@ export default function AccountingPage() {
               </div>
               <div className="flex gap-2">
                 <Button variant="ghost" onClick={() => setShowAgingReport(true)}>Aging Report</Button>
-                <Button variant="ghost" onClick={exportAR}>↓ Export</Button>
+                <Button variant="ghost" onClick={exportAR}><Icon name="download" className="w-3.5 h-3.5" />Export</Button>
               </div>
             </div>
             <div className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
@@ -2141,7 +2140,7 @@ export default function AccountingPage() {
                         <span className={cn('text-[10px] px-2 py-0.5 rounded-full font-medium capitalize whitespace-nowrap',
                           inv.status === 'paid'    ? 'bg-green-100 text-green-700' :
                           inv.status === 'partial' ? 'bg-yellow-100 text-yellow-700' :
-                          inv.status === 'void'    ? 'bg-gray-100 text-gray-500' :
+                          inv.status === 'void'    ? 'bg-hsurface2 text-hmuted' :
                           'bg-red-100 text-red-700'
                         )}>{inv.status}</span>
                       </div>
@@ -2203,7 +2202,7 @@ export default function AccountingPage() {
                             <span className={cn('text-[10px] px-2 py-0.5 rounded-full font-medium capitalize',
                               inv.status === 'paid'    ? 'bg-green-100 text-green-700' :
                               inv.status === 'partial' ? 'bg-yellow-100 text-yellow-700' :
-                              inv.status === 'void'    ? 'bg-gray-100 text-gray-500' :
+                              inv.status === 'void'    ? 'bg-hsurface2 text-hmuted' :
                               'bg-red-100 text-red-700'
                             )}>{inv.status}</span>
                           </td>
@@ -2231,7 +2230,7 @@ export default function AccountingPage() {
                 ))}
               </div>
               <div className="flex gap-2">
-                <Button variant="ghost" onClick={exportBills}>↓ Export</Button>
+                <Button variant="ghost" onClick={exportBills}><Icon name="download" className="w-3.5 h-3.5" />Export</Button>
                 <Button onClick={() => setBillFormOpen(true)}>+ New Bill</Button>
               </div>
             </div>
@@ -2262,7 +2261,7 @@ export default function AccountingPage() {
                         <span className={cn('text-[10px] px-2 py-0.5 rounded-full font-medium capitalize whitespace-nowrap',
                           b.status === 'paid'    ? 'bg-green-100 text-green-700' :
                           b.status === 'partial' ? 'bg-yellow-100 text-yellow-700' :
-                          b.status === 'void'    ? 'bg-gray-100 text-gray-500' :
+                          b.status === 'void'    ? 'bg-hsurface2 text-hmuted' :
                           'bg-red-100 text-red-700'
                         )}>{b.status}</span>
                       </div>
@@ -2324,7 +2323,7 @@ export default function AccountingPage() {
                             <span className={cn('text-[10px] px-2 py-0.5 rounded-full font-medium capitalize',
                               b.status === 'paid'    ? 'bg-green-100 text-green-700' :
                               b.status === 'partial' ? 'bg-yellow-100 text-yellow-700' :
-                              b.status === 'void'    ? 'bg-gray-100 text-gray-500' :
+                              b.status === 'void'    ? 'bg-hsurface2 text-hmuted' :
                               'bg-red-100 text-red-700'
                             )}>{b.status}</span>
                           </td>
@@ -2360,7 +2359,7 @@ export default function AccountingPage() {
             <div className="flex items-center justify-between mb-4">
               <p className="text-sm text-hmuted">{vendors.length} vendors · {vendors.filter(v => v.is_active).length} active</p>
               <div className="flex gap-2">
-                <Button variant="ghost" onClick={exportVendors}>↓ Export</Button>
+                <Button variant="ghost" onClick={exportVendors}><Icon name="download" className="w-3.5 h-3.5" />Export</Button>
                 <Button onClick={openAddVendor}>+ Add Vendor</Button>
               </div>
             </div>
@@ -2375,7 +2374,7 @@ export default function AccountingPage() {
                     <div className="flex items-start justify-between gap-2">
                       <p className="font-medium text-htext truncate" title={v.name}>{v.name}</p>
                       <span className={cn('text-[10px] px-2 py-0.5 rounded-full font-medium whitespace-nowrap',
-                        v.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
+                        v.is_active ? 'bg-green-100 text-green-700' : 'bg-hsurface2 text-hmuted'
                       )}>{v.is_active ? 'Active' : 'Inactive'}</span>
                     </div>
                     <div className="flex items-center gap-1.5 flex-wrap text-xs text-hmuted">
@@ -2417,7 +2416,7 @@ export default function AccountingPage() {
                       <td className="px-3 py-2 font-semibold text-dark-navy whitespace-nowrap truncate">{formatCurrency(vendorBalance(v.id))}</td>
                       <td className="px-3 py-2">
                         <span className={cn('text-[10px] px-2 py-0.5 rounded-full font-medium',
-                          v.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
+                          v.is_active ? 'bg-green-100 text-green-700' : 'bg-hsurface2 text-hmuted'
                         )}>{v.is_active ? 'Active' : 'Inactive'}</span>
                       </td>
                       <td className="px-3 py-2">
@@ -2463,7 +2462,7 @@ export default function AccountingPage() {
                   className={cn(input, 'pl-8')} />
               </div>
               <div className="flex gap-2 ml-auto">
-                <Button variant="ghost" onClick={exportJournalEntries}>↓ Export</Button>
+                <Button variant="ghost" onClick={exportJournalEntries}><Icon name="download" className="w-3.5 h-3.5" />Export</Button>
                 <Button onClick={openAddEntry}>+ New Entry</Button>
               </div>
             </div>
@@ -2478,7 +2477,7 @@ export default function AccountingPage() {
                 ) : filteredEntries.map(e => {
                   const isExpanded = expandedEntries.has(e.id)
                   return (
-                    <div key={e.id} className={cn('p-4 space-y-2', e.is_void && 'opacity-50 bg-gray-50/60', e.status === 'draft' && !e.is_void && 'bg-amber-50/40')}>
+                    <div key={e.id} className={cn('p-4 space-y-2', e.is_void && 'opacity-50 bg-hsurface2/50', e.status === 'draft' && !e.is_void && 'bg-amber-50/40')}>
                       <div
                         className="flex items-start justify-between gap-2 cursor-pointer"
                         onClick={async () => {
@@ -2493,18 +2492,18 @@ export default function AccountingPage() {
                         <div className="min-w-0">
                           <p className="font-mono text-xs text-hmuted truncate">
                             <span className={e.is_void ? 'line-through' : ''}>{e.entry_number}</span>
-                            {e.is_void && <span className="ml-1.5 text-[9px] bg-gray-200 text-gray-500 px-1.5 py-0.5 rounded-full font-bold uppercase">VOID</span>}
+                            {e.is_void && <span className="ml-1.5 text-[9px] bg-hborder text-htext px-1.5 py-0.5 rounded-full font-bold uppercase">VOID</span>}
                           </p>
                           <p className="font-medium text-htext truncate" title={e.description}>{e.description}</p>
                         </div>
                         <div className="flex items-center gap-1.5 flex-shrink-0">
                           {e.is_void
-                            ? <span className="text-[10px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full font-bold uppercase">Void</span>
+                            ? <span className="text-[10px] bg-hsurface2 text-hmuted px-2 py-0.5 rounded-full font-bold uppercase">Void</span>
                             : e.status === 'draft'
                               ? <span className="text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-bold uppercase">Draft</span>
                               : <span className="text-[10px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-bold uppercase">Posted</span>
                           }
-                          <span className="text-hmuted text-xs">{isExpanded ? '▾' : '▸'}</span>
+                          <Icon name={isExpanded ? 'chevronDown' : 'chevronRight'} className="w-3.5 h-3.5 text-hmuted" />
                         </div>
                       </div>
                       <div className="flex items-center gap-1.5 flex-wrap text-xs text-hmuted">
@@ -2572,7 +2571,7 @@ export default function AccountingPage() {
                     </td></tr>
                   ) : filteredEntries.map(e => (
                     <>
-                      <tr key={e.id} className={cn('border-t border-hborder hover:bg-hbg/40 cursor-pointer', e.is_void && 'opacity-50 bg-gray-50/60', e.status === 'draft' && !e.is_void && 'bg-amber-50/40')}
+                      <tr key={e.id} className={cn('border-t border-hborder hover:bg-hbg/40 cursor-pointer', e.is_void && 'opacity-50 bg-hsurface2/50', e.status === 'draft' && !e.is_void && 'bg-amber-50/40')}
                         onClick={async () => {
                           if (expandedEntries.has(e.id)) {
                             setExpandedEntries(prev => { const s = new Set(prev); s.delete(e.id); return s })
@@ -2582,10 +2581,10 @@ export default function AccountingPage() {
                           }
                         }}
                       >
-                        <td className="px-3 py-2.5 text-hmuted text-xs">{expandedEntries.has(e.id) ? '▾' : '▸'}</td>
+                        <td className="px-3 py-2.5 text-hmuted"><Icon name={expandedEntries.has(e.id) ? 'chevronDown' : 'chevronRight'} className="w-3.5 h-3.5" /></td>
                         <td className="px-3 py-2 font-mono text-xs text-hmuted truncate">
                           <span className={e.is_void ? 'line-through' : ''}>{e.entry_number}</span>
-                          {e.is_void && <span className="ml-1.5 text-[9px] bg-gray-200 text-gray-500 px-1.5 py-0.5 rounded-full font-bold uppercase">VOID</span>}
+                          {e.is_void && <span className="ml-1.5 text-[9px] bg-hborder text-htext px-1.5 py-0.5 rounded-full font-bold uppercase">VOID</span>}
                         </td>
                         <td className="px-3 py-2 text-xs text-hmuted whitespace-nowrap">{formatDate(e.entry_date)}</td>
                         <td className="px-3 py-2 text-htext truncate" title={e.description}>{e.description}</td>
@@ -2597,7 +2596,7 @@ export default function AccountingPage() {
                         </td>
                         <td className="px-3 py-2">
                           {e.is_void
-                            ? <span className="text-[10px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full font-bold uppercase">Void</span>
+                            ? <span className="text-[10px] bg-hsurface2 text-hmuted px-2 py-0.5 rounded-full font-bold uppercase">Void</span>
                             : e.status === 'draft'
                               ? <span className="text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-bold uppercase">Draft</span>
                               : <span className="text-[10px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-bold uppercase">Posted</span>
@@ -2703,7 +2702,7 @@ export default function AccountingPage() {
                 <input type="date" value={ledgerTo} onChange={e => setLedgerTo(e.target.value)} className={input} />
               </div>
               <Button onClick={loadLedger}>Apply Filters</Button>
-              {ledgerGroups.length > 0 && <Button variant="ghost" onClick={exportLedger}>↓ Export</Button>}
+              {ledgerGroups.length > 0 && <Button variant="ghost" onClick={exportLedger}><Icon name="download" className="w-3.5 h-3.5" />Export</Button>}
             </div>
 
             {ledgerLoading ? (
@@ -2796,7 +2795,7 @@ export default function AccountingPage() {
               </div>
               <Button onClick={loadTrialBalance} disabled={tbLoading}>{tbLoading ? 'Computing…' : 'Generate'}</Button>
               {tbRows.length > 0 && <Button variant="ghost" onClick={() => window.print()}>Print</Button>}
-              {tbRows.length > 0 && <Button variant="ghost" onClick={exportTrialBalance}>↓ Export</Button>}
+              {tbRows.length > 0 && <Button variant="ghost" onClick={exportTrialBalance}><Icon name="download" className="w-3.5 h-3.5" />Export</Button>}
             </div>
             {tbRows.length > 0 ? (
               <div className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
@@ -2820,7 +2819,7 @@ export default function AccountingPage() {
                           </div>
                           <div className="flex items-center gap-1.5 flex-shrink-0">
                             <span className={cn('text-[10px] px-2 py-0.5 rounded-full font-medium', TYPE_COLOR[r.type as AccountType])}>{r.type}</span>
-                            <span className="text-hmuted text-xs">{expandedReportAccts.has(r.id) ? '▾' : '▸'}</span>
+                            <Icon name={expandedReportAccts.has(r.id) ? 'chevronDown' : 'chevronRight'} className="w-3.5 h-3.5 text-hmuted" />
                           </div>
                         </div>
                         <div className="flex items-center justify-between text-sm">
@@ -2845,7 +2844,7 @@ export default function AccountingPage() {
                       <div className="p-4 bg-dark-navy text-white text-sm space-y-1">
                         <div className="flex items-center justify-between">
                           <span className="text-xs font-bold uppercase tracking-wide">Totals</span>
-                          {balanced ? <span className="text-green-300 text-xs">✓ Balanced</span> : <span className="text-red-300 text-xs">⚠ Unbalanced</span>}
+                          {balanced ? <span className="text-green-300 text-xs">Balanced</span> : <span className="text-red-300 text-xs">Unbalanced</span>}
                         </div>
                         <div className="flex items-center justify-between font-bold">
                           <span className="text-xs font-normal">DR {formatCurrency(totDr)} · CR {formatCurrency(totCr)}</span>
@@ -2870,7 +2869,7 @@ export default function AccountingPage() {
                           className={cn('border-t border-hborder cursor-pointer hover:bg-hbg/50', i % 2 === 1 ? 'bg-hbg/30' : '')}
                           onClick={() => toggleAcctDrilldown(r.id, tbFrom, tbTo)}
                         >
-                          <td className="px-3 py-2 text-hmuted text-xs">{expandedReportAccts.has(r.id) ? '▾' : '▸'}</td>
+                          <td className="px-3 py-2 text-hmuted"><Icon name={expandedReportAccts.has(r.id) ? 'chevronDown' : 'chevronRight'} className="w-3.5 h-3.5" /></td>
                           <td className="px-3 py-2 font-mono text-xs text-navy whitespace-nowrap truncate">{r.code}</td>
                           <td className="px-3 py-2 text-htext truncate" title={r.name}>{r.name}</td>
                           <td className="px-3 py-2"><span className={cn('text-[10px] px-2 py-0.5 rounded-full font-medium', TYPE_COLOR[r.type as AccountType])}>{r.type}</span></td>
@@ -2897,7 +2896,7 @@ export default function AccountingPage() {
                           <td className="px-3 py-2 text-right font-bold">{formatCurrency(totDr)}</td>
                           <td className="px-3 py-2 text-right font-bold">{formatCurrency(totCr)}</td>
                           <td className="px-3 py-2 text-right font-bold">
-                            {balanced ? <span className="text-green-300">✓ Balanced</span> : <span className="text-red-300">⚠ Unbalanced</span>}
+                            {balanced ? <span className="text-green-300">Balanced</span> : <span className="text-red-300">Unbalanced</span>}
                           </td>
                         </tr>
                       )
@@ -2938,7 +2937,7 @@ export default function AccountingPage() {
               {reportData && <Button variant="ghost" onClick={() => window.print()}>Print</Button>}
               {reportData && (
                 <div className="flex items-center gap-3 ml-2">
-                  <Button variant="ghost" onClick={exportReport}>↓ Export</Button>
+                  <Button variant="ghost" onClick={exportReport}><Icon name="download" className="w-3.5 h-3.5" />Export</Button>
                   <label className="flex items-center gap-1.5 text-xs font-medium text-hmuted cursor-pointer hover:text-htext transition-colors select-none">
                     <input 
                       type="checkbox" 
@@ -2967,7 +2966,7 @@ export default function AccountingPage() {
                           className="flex justify-between py-1.5 border-b border-hborder/40 text-sm cursor-pointer hover:bg-hbg/50 -mx-1 px-1 rounded"
                           onClick={() => toggleAcctDrilldown(a.id, reportFrom, reportTo)}
                         >
-                          <span className="text-htext">{expandedReportAccts.has(a.id) ? '▾' : '▸'} {a.code} — {a.name}</span>
+                          <span className="flex items-center gap-1.5 text-htext"><Icon name={expandedReportAccts.has(a.id) ? 'chevronDown' : 'chevronRight'} className="w-3 h-3 text-hmuted" />{a.code} — {a.name}</span>
                           <span className="font-medium text-green-700">{formatCurrency(a.balance)}</span>
                         </div>
                         {expandedReportAccts.has(a.id) && <AcctDrilldown accountId={a.id} />}
@@ -2982,7 +2981,7 @@ export default function AccountingPage() {
                           className="text-[11px] text-hmuted cursor-pointer hover:text-navy inline"
                           onClick={() => setDiscountDetailsOpen(o => !o)}
                         >
-                          {discountDetailsOpen ? '▾' : '▸'} Already net of {formatCurrency(reportData.totalDiscounts)} in discounts given this period — revenue lines above reflect what was actually recognized, not the pre-discount amount.
+                          <Icon name={discountDetailsOpen ? 'chevronDown' : 'chevronRight'} className="inline-block w-3 h-3 mr-0.5 align-middle" /> Already net of {formatCurrency(reportData.totalDiscounts)} in discounts given this period — revenue lines above reflect what was actually recognized, not the pre-discount amount.
                         </p>
                         {discountDetailsOpen && (
                           <div className="mt-2 bg-hbg/60 rounded-lg p-2 space-y-1">
@@ -3008,7 +3007,7 @@ export default function AccountingPage() {
                           className="flex justify-between py-1.5 border-b border-hborder/40 text-sm cursor-pointer hover:bg-hbg/50 -mx-1 px-1 rounded"
                           onClick={() => toggleAcctDrilldown(a.id, reportFrom, reportTo)}
                         >
-                          <span className="text-htext">{expandedReportAccts.has(a.id) ? '▾' : '▸'} {a.code} — {a.name}</span>
+                          <span className="flex items-center gap-1.5 text-htext"><Icon name={expandedReportAccts.has(a.id) ? 'chevronDown' : 'chevronRight'} className="w-3 h-3 text-hmuted" />{a.code} — {a.name}</span>
                           <span className="font-medium text-red-600">{formatCurrency(a.balance)}</span>
                         </div>
                         {expandedReportAccts.has(a.id) && <AcctDrilldown accountId={a.id} />}
@@ -3064,7 +3063,7 @@ export default function AccountingPage() {
                       onClick={() => toggleAcctDrilldown(a.id, undefined, reportTo)}
                     >
                       <span className="flex items-center gap-1 text-htext">
-                        <span className="text-hmuted text-[10px]">{expandedReportAccts.has(a.id) ? '▾' : '▸'}</span>
+                        <Icon name={expandedReportAccts.has(a.id) ? 'chevronDown' : 'chevronRight'} className="w-3 h-3 text-hmuted" />
                         <span className="font-mono text-[11px] text-navy">{a.code}</span>
                         <span className="text-hmuted">·</span>
                         <span>{a.name}</span>
@@ -3209,7 +3208,7 @@ export default function AccountingPage() {
                           <div className="flex items-center gap-3">
                             <span className="font-bold tabular-nums text-[15px] text-dark-navy">{formatCurrency(rhs)}</span>
                             <span className={cn('text-[11px] font-semibold px-2 py-0.5 rounded-full', balanced ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700')}>
-                              {balanced ? '✓ Balanced' : `Off by ${formatCurrency(Math.abs(lhs - rhs))}`}
+                              {balanced ? 'Balanced' : `Off by ${formatCurrency(Math.abs(lhs - rhs))}`}
                             </span>
                           </div>
                         </div>
@@ -3288,7 +3287,7 @@ export default function AccountingPage() {
                 <>
                   <Button variant="ghost" onClick={() => markAllCleared(true)} disabled={reconLoading}>Mark All Cleared</Button>
                   <Button variant="ghost" onClick={() => markAllCleared(false)} disabled={reconLoading}>Unreconcile All</Button>
-                  <Button variant="ghost" onClick={exportReconciliation} disabled={reconLoading}>↓ Export</Button>
+                  <Button variant="ghost" onClick={exportReconciliation} disabled={reconLoading}><Icon name="download" className="w-3.5 h-3.5" />Export</Button>
                 </>
               )}
               <p className="text-xs text-hmuted self-end pb-2">Check off items that appear on the bank statement.</p>
@@ -3332,7 +3331,7 @@ export default function AccountingPage() {
                     ].map(c => (
                       <div key={c.label} className="bg-white border border-hborder rounded-2xl p-4 shadow-card">
                         <p className="text-xs text-hmuted">{c.label}</p>
-                        <p className={cn('font-serif text-xl mt-1', c.color)}>{formatCurrency(c.value)}</p>
+                        <p className={cn('text-xl font-semibold tracking-tight tabular-nums mt-1', c.color)}>{formatCurrency(c.value)}</p>
                         {c.label === 'Cleared Balance' && (
                           <p className="text-xs text-hmuted mt-0.5">{clearedCount} of {reconLines.length} items</p>
                         )}
@@ -3341,7 +3340,7 @@ export default function AccountingPage() {
                         {c.label === 'Book Balance' && unclearedCount > 0 && (
                           <p className="text-xs text-hmuted mt-0.5">{formatCurrency(unclearedBal)} still uncleared</p>
                         )}
-                        {c.label === 'Difference' && isBalanced && <p className="text-xs text-green-600 mt-0.5">✓ Fully Reconciled</p>}
+                        {c.label === 'Difference' && isBalanced && <p className="text-xs text-green-600 mt-0.5">Fully reconciled</p>}
                         {c.label === 'Difference' && !isBalanced && <p className="text-xs text-red-500 mt-0.5">{unclearedCount} uncleared item(s)</p>}
                       </div>
                     ))}
@@ -3406,7 +3405,7 @@ export default function AccountingPage() {
                     {visible.length === 0 && (
                       <p className="text-center text-hmuted py-12 text-sm">
                         {reconFilter === 'uncleared' && !reconSearch
-                          ? '✓ Nothing uncleared — every line has been checked off.'
+                          ? 'Nothing uncleared — every line has been checked off.'
                           : reconFilter === 'cleared' && !reconSearch
                           ? 'Nothing cleared yet.'
                           : 'No lines match this search.'}
@@ -3475,8 +3474,8 @@ export default function AccountingPage() {
                                 {reconSaving === r.id
                                   ? <span className="text-xs text-hmuted animate-pulse">Saving…</span>
                                   : r.is_reconciled
-                                    ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-100 text-green-700 text-xs font-semibold">✓ Cleared</span>
-                                    : <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gray-100 text-gray-400 text-xs">Uncleared</span>
+                                    ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-100 text-green-700 text-xs font-semibold">Cleared</span>
+                                    : <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-hsurface2 text-hmuted text-xs">Uncleared</span>
                                 }
                               </td>
                               <td className="px-3 py-2">
@@ -3559,7 +3558,7 @@ export default function AccountingPage() {
                   <div key={rec.id} className={cn('p-4 space-y-2', !rec.is_active && 'opacity-50')}>
                     <div className="flex items-start justify-between gap-2">
                       <p className="font-medium text-htext truncate" title={rec.name}>{rec.name}</p>
-                      <span className={cn('text-[10px] px-2 py-0.5 rounded-full font-medium whitespace-nowrap', rec.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500')}>
+                      <span className={cn('text-[10px] px-2 py-0.5 rounded-full font-medium whitespace-nowrap', rec.is_active ? 'bg-green-100 text-green-700' : 'bg-hsurface2 text-hmuted')}>
                         {rec.is_active ? 'Active' : 'Inactive'}
                       </span>
                     </div>
@@ -3595,7 +3594,7 @@ export default function AccountingPage() {
                       <td className="px-3 py-2 text-xs text-hmuted capitalize truncate">{rec.frequency}</td>
                       <td className="px-3 py-2 text-xs text-hmuted whitespace-nowrap">{formatDate(rec.next_due_date)}</td>
                       <td className="px-3 py-2">
-                        <span className={cn('text-[10px] px-2 py-0.5 rounded-full font-medium', rec.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500')}>
+                        <span className={cn('text-[10px] px-2 py-0.5 rounded-full font-medium', rec.is_active ? 'bg-green-100 text-green-700' : 'bg-hsurface2 text-hmuted')}>
                           {rec.is_active ? 'Active' : 'Inactive'}
                         </span>
                       </td>
@@ -3645,14 +3644,14 @@ export default function AccountingPage() {
                   const period = periods.find(p => p.year === year && p.month === month)
                   const isClosed = period?.status === 'closed'
                   return (
-                    <div key={`${year}-${month}`} className={cn('p-3.5 flex items-center justify-between gap-2', isClosed ? 'bg-gray-50/60' : '')}>
+                    <div key={`${year}-${month}`} className={cn('p-3.5 flex items-center justify-between gap-2', isClosed ? 'bg-hsurface2/50' : '')}>
                       <div className="min-w-0">
                         <p className="font-medium text-htext truncate">{MONTH_NAMES[month - 1]} {year}</p>
                         <p className="text-[11px] text-hmuted truncate">{period?.closed_at ? `Closed ${formatDate(period.closed_at)}` : ''}</p>
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
-                        <span className={cn('text-xs px-2 py-0.5 rounded-full font-medium whitespace-nowrap', isClosed ? 'bg-gray-100 text-gray-600' : 'bg-green-100 text-green-700')}>
-                          {isClosed ? '🔒 Closed' : '🔓 Open'}
+                        <span className={cn('inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium whitespace-nowrap', isClosed ? 'bg-hsurface2 text-hmuted' : 'bg-green-100 text-green-700')}>
+                          <Icon name={isClosed ? 'lock' : 'unlock'} className="w-3 h-3" />{isClosed ? 'Closed' : 'Open'}
                         </span>
                         {isClosed ? (
                           <button onClick={() => handlePeriodActionTrigger('reopen', year, month, period!.id)} className="text-xs text-navy hover:underline">Reopen</button>
@@ -3677,11 +3676,11 @@ export default function AccountingPage() {
                     const period = periods.find(p => p.year === year && p.month === month)
                     const isClosed = period?.status === 'closed'
                     return (
-                      <tr key={`${year}-${month}`} className={cn('border-t border-hborder', isClosed ? 'bg-gray-50/60' : 'hover:bg-hbg/40')}>
+                      <tr key={`${year}-${month}`} className={cn('border-t border-hborder', isClosed ? 'bg-hsurface2/50' : 'hover:bg-hbg/40')}>
                         <td className="px-3 py-2 font-medium text-htext whitespace-nowrap truncate">{MONTH_NAMES[month - 1]} {year}</td>
                         <td className="px-3 py-2">
-                          <span className={cn('text-xs px-2 py-0.5 rounded-full font-medium whitespace-nowrap', isClosed ? 'bg-gray-100 text-gray-600' : 'bg-green-100 text-green-700')}>
-                            {isClosed ? '🔒 Closed' : '🔓 Open'}
+                          <span className={cn('inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium whitespace-nowrap', isClosed ? 'bg-hsurface2 text-hmuted' : 'bg-green-100 text-green-700')}>
+                            <Icon name={isClosed ? 'lock' : 'unlock'} className="w-3 h-3" />{isClosed ? 'Closed' : 'Open'}
                           </span>
                         </td>
                         <td className="px-3 py-2 text-xs text-hmuted whitespace-nowrap">{period?.closed_at ? formatDate(period.closed_at) : '—'}</td>
@@ -3718,7 +3717,7 @@ export default function AccountingPage() {
             <div className="flex items-center justify-between mb-4">
               <p className="text-sm text-hmuted">{accounts.length} accounts · {accounts.filter(a => a.is_active).length} active</p>
               <div className="flex gap-2">
-                <Button variant="ghost" onClick={exportCOA}>↓ Export</Button>
+                <Button variant="ghost" onClick={exportCOA}><Icon name="download" className="w-3.5 h-3.5" />Export</Button>
                 <Button onClick={openAddAccount}>+ Add Account</Button>
               </div>
             </div>
@@ -3742,7 +3741,7 @@ export default function AccountingPage() {
                               <p className="font-mono text-xs font-semibold text-navy">{acct.code}</p>
                               <p className="font-medium text-htext truncate" title={acct.name}>{acct.name}</p>
                             </div>
-                            <span className={cn('text-[10px] px-2 py-0.5 rounded-full font-medium whitespace-nowrap', acct.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500')}>
+                            <span className={cn('text-[10px] px-2 py-0.5 rounded-full font-medium whitespace-nowrap', acct.is_active ? 'bg-green-100 text-green-700' : 'bg-hsurface2 text-hmuted')}>
                               {acct.is_active ? 'Active' : 'Inactive'}
                             </span>
                           </div>
@@ -3773,7 +3772,7 @@ export default function AccountingPage() {
                             <td className="px-3 py-2 font-medium text-htext truncate" title={acct.name}>{acct.name}</td>
                             <td className="px-3 py-2 text-xs text-hmuted capitalize whitespace-nowrap truncate">{acct.category.replace(/_/g, ' ')}</td>
                             <td className="px-3 py-2">
-                              <span className={cn('text-[10px] px-2 py-0.5 rounded-full font-medium', acct.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500')}>
+                              <span className={cn('text-[10px] px-2 py-0.5 rounded-full font-medium', acct.is_active ? 'bg-green-100 text-green-700' : 'bg-hsurface2 text-hmuted')}>
                                 {acct.is_active ? 'Active' : 'Inactive'}
                               </span>
                             </td>
@@ -3806,31 +3805,27 @@ export default function AccountingPage() {
           <div>
             {/* ── Stats row ── */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-5">
-              <div className="bg-white border border-hborder rounded-2xl p-5 shadow-card relative overflow-hidden">
-                <div className="absolute top-0 left-0 w-1 h-full rounded-l-2xl bg-gold" />
-                <p className="text-[11px] text-hmuted uppercase tracking-wide font-semibold pl-2">Balance</p>
-                <p className={cn('font-serif text-2xl sm:text-3xl mt-1 pl-2 truncate', pettyCashBalance < 0 ? 'text-red-600' : 'text-dark-navy')} title={formatCurrency(pettyCashBalance)}>
+              <div className="bg-white border border-hborder rounded-2xl p-5 shadow-card">
+                <p className="text-[11px] text-hmuted uppercase tracking-wide font-semibold">Balance</p>
+                <p className={cn('text-2xl sm:text-[28px] font-semibold tracking-tight tabular-nums mt-1.5 truncate', pettyCashBalance < 0 ? 'text-red-600' : 'text-dark-navy')} title={formatCurrency(pettyCashBalance)}>
                   {formatCurrency(pettyCashBalance)}
                 </p>
-                <p className="text-[10px] text-hmuted pl-2 mt-1">{(() => { const a = accounts.find(x => x.code === '1011') ?? accounts.find(x => x.code === '1010'); return a ? `${a.code} — ${a.name}` : '1011 — Petty Cash' })()}</p>
+                <p className="text-[10px] text-hmuted mt-1">{(() => { const a = accounts.find(x => x.code === '1011') ?? accounts.find(x => x.code === '1010'); return a ? `${a.code} — ${a.name}` : '1011 — Petty Cash' })()}</p>
               </div>
-              <div className="bg-white border border-hborder rounded-2xl p-5 shadow-card relative overflow-hidden">
-                <div className="absolute top-0 left-0 w-1 h-full rounded-l-2xl bg-green-400" />
-                <p className="text-[11px] text-hmuted uppercase tracking-wide font-semibold pl-2">Total In</p>
-                <p className="font-serif text-xl sm:text-2xl text-green-700 mt-1 pl-2 truncate" title={`+${formatCurrency(pcTotalIn)}`}>+{formatCurrency(pcTotalIn)}</p>
-                <p className="text-[10px] text-hmuted pl-2 mt-1">Replenishments</p>
+              <div className="bg-white border border-hborder rounded-2xl p-5 shadow-card">
+                <p className="text-[11px] text-hmuted uppercase tracking-wide font-semibold">Total In</p>
+                <p className="text-xl sm:text-2xl font-semibold tracking-tight tabular-nums text-green-700 mt-1.5 truncate" title={`+${formatCurrency(pcTotalIn)}`}>+{formatCurrency(pcTotalIn)}</p>
+                <p className="text-[10px] text-hmuted mt-1">Replenishments</p>
               </div>
-              <div className="bg-white border border-hborder rounded-2xl p-5 shadow-card relative overflow-hidden">
-                <div className="absolute top-0 left-0 w-1 h-full rounded-l-2xl bg-red-400" />
-                <p className="text-[11px] text-hmuted uppercase tracking-wide font-semibold pl-2">Total Out</p>
-                <p className="font-serif text-xl sm:text-2xl text-red-600 mt-1 pl-2 truncate" title={`-${formatCurrency(pcTotalOut)}`}>-{formatCurrency(pcTotalOut)}</p>
-                <p className="text-[10px] text-hmuted pl-2 mt-1">Expenses</p>
+              <div className="bg-white border border-hborder rounded-2xl p-5 shadow-card">
+                <p className="text-[11px] text-hmuted uppercase tracking-wide font-semibold">Total Out</p>
+                <p className="text-xl sm:text-2xl font-semibold tracking-tight tabular-nums text-red-600 mt-1.5 truncate" title={`-${formatCurrency(pcTotalOut)}`}>-{formatCurrency(pcTotalOut)}</p>
+                <p className="text-[10px] text-hmuted mt-1">Expenses</p>
               </div>
-              <div className="bg-white border border-hborder rounded-2xl p-5 shadow-card relative overflow-hidden">
-                <div className="absolute top-0 left-0 w-1 h-full rounded-l-2xl bg-blue-400" />
-                <p className="text-[11px] text-hmuted uppercase tracking-wide font-semibold pl-2">Linked</p>
-                <p className="font-serif text-xl sm:text-2xl text-dark-navy mt-1 pl-2 truncate">{pcLinked}</p>
-                <p className="text-[10px] text-hmuted pl-2 mt-1">of {petty.length} tagged to reservation</p>
+              <div className="bg-white border border-hborder rounded-2xl p-5 shadow-card">
+                <p className="text-[11px] text-hmuted uppercase tracking-wide font-semibold">Linked</p>
+                <p className="text-xl sm:text-2xl font-semibold tracking-tight tabular-nums text-dark-navy mt-1.5 truncate">{pcLinked}</p>
+                <p className="text-[10px] text-hmuted mt-1">of {petty.length} tagged to reservation</p>
               </div>
             </div>
 
@@ -3846,7 +3841,7 @@ export default function AccountingPage() {
                 ))}
               </div>
               <div className="flex items-center gap-2">
-                <Button variant="ghost" onClick={exportPettyCash}>↓ Export</Button>
+                <Button variant="ghost" onClick={exportPettyCash}><Icon name="download" className="w-3.5 h-3.5" />Export</Button>
                 <Button onClick={() => { setPcForm(f => ({ ...f, type: 'out' })); setPcFormOpen(true) }}>+ Record Transaction</Button>
               </div>
             </div>
@@ -3875,7 +3870,7 @@ export default function AccountingPage() {
                         <span className="bg-hsurface2 text-hmuted px-2 py-0.5 rounded-full whitespace-nowrap">{t.category}</span>
                         <span className={cn('inline-flex items-center gap-1 font-semibold px-2 py-0.5 rounded-full whitespace-nowrap',
                           isIn ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'
-                        )}>{isIn ? '↑ In' : '↓ Out'}</span>
+                        )}><Icon name={isIn ? 'arrowUp' : 'arrowDown'} className="w-3 h-3" />{isIn ? 'In' : 'Out'}</span>
                         {t.reference && <span className="font-mono">{t.reference}</span>}
                       </div>
                       {res && (
@@ -3919,7 +3914,7 @@ export default function AccountingPage() {
                           <span className={cn('inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full whitespace-nowrap',
                             isIn ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'
                           )}>
-                            {isIn ? '↑' : '↓'} {isIn ? 'In' : 'Out'}
+                            <Icon name={isIn ? 'arrowUp' : 'arrowDown'} className="w-3 h-3" />{isIn ? 'In' : 'Out'}
                           </span>
                         </td>
                         <td className={cn('px-3 py-2 font-semibold tabular-nums whitespace-nowrap', isIn ? 'text-green-700' : 'text-red-600')}>
@@ -4131,7 +4126,7 @@ export default function AccountingPage() {
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 space-y-4" onClick={e => e.stopPropagation()}>
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-navy/10 flex items-center justify-center flex-shrink-0">
-                <span className="text-xl">🔒</span>
+                <Icon name="lock" className="w-5 h-5 text-navy" />
               </div>
               <div>
                 <h2 className="font-semibold text-htext text-base">
@@ -4249,7 +4244,7 @@ export default function AccountingPage() {
             </div>
             <div className={cn('mt-3 rounded-xl px-4 py-2.5 flex items-center justify-between text-sm', jeBalanced ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200')}>
               <span className={jeBalanced ? 'text-green-700 font-medium' : 'text-red-600 font-medium'}>
-                {jeBalanced ? '✓ Balanced' : '⚠ Debits must equal credits'}
+                {jeBalanced ? 'Balanced' : 'Debits must equal credits'}
               </span>
               <div className="flex gap-6 text-xs">
                 <span className="text-hmuted">DR: <strong>{formatCurrency(jeTotalDebit)}</strong></span>
@@ -4364,7 +4359,7 @@ export default function AccountingPage() {
             return (
               <p className="text-[10px] text-hmuted bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">
                 Auto journal: DR {drs}{Number(billForm.tax_amount) > 0 ? ' (+ tax on first line)' : ''} / CR {credit}
-                {billForm.paid_from && <span className="block mt-0.5 text-green-700">✓ Bill will be marked paid immediately.</span>}
+                {billForm.paid_from && <span className="block mt-0.5 text-green-700">Bill will be marked paid immediately.</span>}
               </p>
             )
           })()}
@@ -4499,7 +4494,7 @@ export default function AccountingPage() {
                     </div>
                   ) : (
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, fontWeight: 700, color: '#1a7a4a', paddingTop: 4 }}>
-                      <span>Balance Due</span><span>Paid in Full ✓</span>
+                      <span>Balance Due</span><span>Paid in Full</span>
                     </div>
                   )}
                 </div>
@@ -4711,7 +4706,7 @@ export default function AccountingPage() {
               const ok = Math.abs(dr - cr) < 0.001
               return (
                 <div className={cn('mt-3 rounded-xl px-4 py-2.5 flex items-center justify-between text-sm', ok ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200')}>
-                  <span className={ok ? 'text-green-700 font-medium' : 'text-red-600 font-medium'}>{ok ? '✓ Balanced' : '⚠ Debits must equal credits'}</span>
+                  <span className={ok ? 'text-green-700 font-medium' : 'text-red-600 font-medium'}>{ok ? 'Balanced' : 'Debits must equal credits'}</span>
                   <div className="flex gap-6 text-xs">
                     <span className="text-hmuted">DR: <strong>{formatCurrency(dr)}</strong></span>
                     <span className="text-hmuted">CR: <strong>{formatCurrency(cr)}</strong></span>
@@ -4825,7 +4820,7 @@ export default function AccountingPage() {
             {(['out', 'in'] as const).map(t => (
               <button key={t} onClick={() => setPcForm(f => ({ ...f, type: t }))}
                 className={cn('flex-1 py-1.5 rounded-lg text-sm font-medium transition-colors', pcForm.type === t ? 'bg-white text-dark-navy shadow-sm' : 'text-hmuted')}
-              >{t === 'out' ? '↓ Cash Out (Expense)' : '↑ Cash In (Replenishment)'}</button>
+              >{t === 'out' ? 'Cash Out (Expense)' : 'Cash In (Replenishment)'}</button>
             ))}
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

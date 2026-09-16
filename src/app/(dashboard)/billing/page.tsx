@@ -749,15 +749,14 @@ export default function BillingPage() {
         {/* Summary */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
           {[
-            { label: 'Revenue Collected', value: formatCurrency(totalRevenue), color: '#1A7A4A' },
-            { label: 'Outstanding Balance', value: formatCurrency(unpaidTotal), color: '#B83232' },
-            { label: 'Partial Payments', value: partialCount, color: '#F05830' },
-            { label: 'Total Invoices', value: invoices.length, color: '#583808' },
+            { label: 'Revenue Collected', value: formatCurrency(totalRevenue) },
+            { label: 'Outstanding Balance', value: formatCurrency(unpaidTotal) },
+            { label: 'Partial Payments', value: partialCount },
+            { label: 'Total Invoices', value: invoices.length },
           ].map(s => (
-            <div key={s.label} className="bg-white border border-hborder rounded-2xl p-4 shadow-card relative overflow-hidden">
-              <div className="absolute top-0 left-0 w-1 h-full rounded-l-2xl" style={{ background: s.color }} />
-              <p className="text-xs text-hmuted uppercase tracking-wide pl-2">{s.label}</p>
-              <p className="font-serif text-xl sm:text-2xl text-dark-navy mt-1 pl-2 truncate" title={String(s.value)}>{s.value}</p>
+            <div key={s.label} className="bg-white border border-hborder rounded-2xl p-4 shadow-card">
+              <p className="text-xs font-semibold text-hmuted uppercase tracking-wide">{s.label}</p>
+              <p className="text-xl sm:text-2xl font-semibold tracking-tight tabular-nums text-dark-navy mt-1.5 truncate" title={String(s.value)}>{s.value}</p>
             </div>
           ))}
         </div>
@@ -942,7 +941,7 @@ export default function BillingPage() {
                 ) : null}
                 {!house && (
                   <div className="col-span-2 text-orange-600 text-[10px] mt-0.5">
-                    ⚠ No house linked to this reservation — enter the rate manually or update the reservation.
+                    No house linked to this reservation — enter the rate manually or update the reservation.
                   </div>
                 )}
               </div>
@@ -1411,7 +1410,7 @@ export default function BillingPage() {
                     </div>
                   ) : (
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, fontWeight: 700, color: '#1a7a4a', paddingTop: 4 }}>
-                      <span>Remaining</span><span>Paid in Full ✓</span>
+                      <span>Remaining</span><span>Paid in Full</span>
                     </div>
                   )}
                 </div>

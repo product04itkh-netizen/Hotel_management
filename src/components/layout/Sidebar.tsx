@@ -6,30 +6,31 @@ import { cn, capitalize, branchLogo, branchBrand } from '@/lib/utils'
 import { useBranch } from '@/context/BranchContext'
 import { useMobileNav } from '@/context/MobileNavContext'
 import { useCurrentStaff } from '@/hooks/useCurrentStaff'
+import { Icon, type IconName } from '@/components/ui/Icon'
 import type { Branch } from '@/types'
 
 // ─── Navigation items ─────────────────────────────────────────────────────────
 
-const navItems = [
+const navItems: Array<{ group: string; items: Array<{ href: string; label: string; icon: IconName }> }> = [
   { group: 'Overview', items: [
-    { href: '/dashboard', label: 'Dashboard', icon: '📊' },
+    { href: '/dashboard', label: 'Dashboard', icon: 'dashboard' },
   ]},
   { group: 'Operations', items: [
-    { href: '/reservations', label: 'Reservations', icon: '📅' },
-    { href: '/front-desk', label: 'Front Desk', icon: '🏨' },
-    { href: '/rooms', label: 'Properties', icon: '🏡' },
-    { href: '/housekeeping', label: 'Housekeeping', icon: '🧹' },
+    { href: '/reservations', label: 'Reservations', icon: 'calendar' },
+    { href: '/front-desk', label: 'Front Desk', icon: 'bell' },
+    { href: '/rooms', label: 'Properties', icon: 'house' },
+    { href: '/housekeeping', label: 'Housekeeping', icon: 'bed' },
   ]},
   { group: 'Finance', items: [
-    { href: '/billing', label: 'Billing', icon: '💳' },
-    { href: '/accounting', label: 'Accounting', icon: '📒' },
-    { href: '/assets', label: 'Fixed Assets', icon: '🏗️' },
-    { href: '/inventory', label: 'Inventory', icon: '📦' },
+    { href: '/billing', label: 'Billing', icon: 'card' },
+    { href: '/accounting', label: 'Accounting', icon: 'ledger' },
+    { href: '/assets', label: 'Fixed Assets', icon: 'building' },
+    { href: '/inventory', label: 'Inventory', icon: 'package' },
   ]},
   { group: 'Management', items: [
-    { href: '/reports', label: 'Reports', icon: '📈' },
-    { href: '/staff', label: 'Staff & Users', icon: '👥' },
-    { href: '/settings', label: 'Settings', icon: '⚙️' },
+    { href: '/reports', label: 'Reports', icon: 'chart' },
+    { href: '/staff', label: 'Staff & Users', icon: 'users' },
+    { href: '/settings', label: 'Settings', icon: 'sliders' },
   ]},
 ]
 
@@ -69,16 +70,18 @@ function BranchSwitcher() {
       {/* Trigger button */}
       <button
         onClick={() => setOpen(v => !v)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
         className={cn(
-          'w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl transition-all duration-150 text-left group',
+          'w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl transition-colors duration-150 text-left',
           open
-            ? 'bg-white/12 ring-1 ring-white/20'
-            : 'bg-white/6 hover:bg-white/10'
+            ? 'bg-white/[0.12] ring-1 ring-white/20'
+            : 'bg-white/[0.06] hover:bg-white/10'
         )}
       >
         {/* Branch icon */}
         <div className="w-7 h-7 rounded-lg bg-gold/20 flex items-center justify-center flex-shrink-0">
-          <span className="text-gold text-[13px]">📍</span>
+          <Icon name="pin" className="w-4 h-4 text-gold" />
         </div>
 
         {/* Branch info */}
@@ -86,67 +89,61 @@ function BranchSwitcher() {
           <p className="text-[12px] font-semibold text-white/90 leading-none truncate">
             {activeBranch.location}
           </p>
-          <p className="text-[10px] text-white/40 mt-0.5 truncate">
+          <p className="text-[10.5px] text-white/50 mt-1 truncate">
             {branchBrand(activeBranch.location)}
           </p>
         </div>
 
         {/* Chevron */}
-        <svg
-          className={cn(
-            'w-3.5 h-3.5 text-white/40 flex-shrink-0 transition-transform duration-200',
-            open && 'rotate-180'
-          )}
-          viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2}
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" d="M4 6l4 4 4-4" />
-        </svg>
+        <Icon
+          name="chevronDown"
+          className={cn('w-3.5 h-3.5 text-white/50 transition-transform duration-200', open && 'rotate-180')}
+          strokeWidth={2}
+        />
       </button>
 
       {/* Dropdown */}
       {open && (
-        <div className="absolute top-full left-0 right-0 mt-1.5 bg-[#0A1628] border border-white/10 rounded-xl shadow-xl z-50 overflow-hidden animate-slide-up">
-          <p className="px-3 pt-2.5 pb-1.5 text-[9px] font-bold text-white/30 uppercase tracking-widest">
-            Switch Branch
+        <div role="listbox" className="absolute top-full left-0 right-0 mt-1.5 bg-[#2A1B04] border border-white/10 rounded-xl shadow-[0_16px_40px_-12px_rgba(0,0,0,0.6)] z-50 overflow-hidden animate-slide-up">
+          <p className="px-3 pt-2.5 pb-1.5 text-[10px] font-semibold text-white/45 uppercase tracking-wider">
+            Switch branch
           </p>
           {branches.map(branch => {
             const isActive = branch.id === activeBranch.id
             return (
               <button
                 key={branch.id}
+                role="option"
+                aria-selected={isActive}
                 onClick={() => handleSelect(branch)}
                 className={cn(
                   'w-full flex items-center gap-2.5 px-3 py-2.5 transition-colors duration-100 text-left',
                   isActive
                     ? 'bg-navy/60 text-white'
-                    : 'text-white/65 hover:bg-white/6 hover:text-white'
+                    : 'text-white/70 hover:bg-white/[0.06] hover:text-white'
                 )}
               >
                 {/* Check indicator */}
                 <span className={cn(
                   'w-4 h-4 rounded-full border flex items-center justify-center flex-shrink-0 transition-colors',
                   isActive
-                    ? 'border-gold bg-gold/20'
-                    : 'border-white/20'
+                    ? 'border-gold bg-gold/20 text-gold'
+                    : 'border-white/25'
                 )}>
-                  {isActive && (
-                    <svg className="w-2.5 h-2.5 text-gold" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth={2.5}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M2 6l3 3 5-5" />
-                    </svg>
-                  )}
+                  {isActive && <Icon name="check" className="w-2.5 h-2.5" strokeWidth={3} />}
                 </span>
 
                 <div className="min-w-0">
                   <p className="text-[12.5px] font-medium leading-none">{branch.location}</p>
-                  <p className="text-[10px] text-white/35 mt-0.5">{branchBrand(branch.location)}</p>
+                  <p className="text-[10.5px] text-white/45 mt-1">{branchBrand(branch.location)}</p>
                 </div>
               </button>
             )
           })}
 
           {/* Divider + label */}
-          <div className="px-3 py-2 border-t border-white/8 mt-0.5">
-            <p className="text-[9px] text-white/20 text-center">
+          <div className="px-3 py-2 border-t border-white/[0.08] mt-0.5">
+            <p className="text-[10.5px] text-white/45 text-center">
               Data is scoped to the selected branch
             </p>
           </div>
@@ -177,7 +174,7 @@ export function Sidebar() {
       {/* Mobile backdrop — tap to close. Never renders at lg+ (drawer is n/a there). */}
       {open && (
         <div
-          className="fixed inset-0 bg-black/50 z-40 lg:hidden"
+          className="fixed inset-0 bg-[#1A1714]/55 z-40 lg:hidden"
           onClick={() => setOpen(false)}
           aria-hidden="true"
         />
@@ -194,10 +191,11 @@ export function Sidebar() {
       >
       {/* Logo */}
       <div className="px-4 py-4 border-b border-white/10 flex items-center justify-center relative">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={branchLogo(activeBranch?.location)}
           alt={activeBranch?.location ?? 'OnlyOne Homestay'}
-          className="h-16 w-auto object-contain rounded-xl bg-white px-2 py-1.5 shadow-sm"
+          className="h-16 w-auto object-contain rounded-xl bg-white px-2 py-1.5"
         />
         {/* Close button — mobile drawer only */}
         <button
@@ -205,9 +203,7 @@ export function Sidebar() {
           className="lg:hidden absolute right-3 top-1/2 -translate-y-1/2 w-8 h-8 rounded-lg text-white/60 hover:text-white hover:bg-white/10 flex items-center justify-center transition-colors"
           aria-label="Close menu"
         >
-          <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-          </svg>
+          <Icon name="x" className="w-5 h-5" strokeWidth={2} />
         </button>
       </div>
 
@@ -215,13 +211,13 @@ export function Sidebar() {
       <BranchSwitcher />
 
       {/* Divider */}
-      <div className="mx-3 h-px bg-white/8" />
+      <div className="mx-3 h-px bg-white/[0.08]" />
 
       {/* Nav */}
       <nav className="flex-1 px-3 py-3 overflow-y-auto">
         {navItems.map((group) => (
           <div key={group.group} className="mb-1">
-            <p className="text-[10px] font-semibold text-white/30 uppercase tracking-widest px-3 pt-4 pb-1">
+            <p className="text-[10px] font-semibold text-white/40 uppercase tracking-wider px-3 pt-4 pb-1.5">
               {group.group}
             </p>
             {group.items.map((item) => {
@@ -231,22 +227,21 @@ export function Sidebar() {
                 <Link
                   key={item.href}
                   href={item.href}
+                  aria-current={active ? 'page' : undefined}
                   onClick={() => { if (!active) setPendingHref(item.href) }}
                   className={cn(
-                    'flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-[13.5px] font-normal transition-all duration-150 mb-0.5',
+                    'flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-[13.5px] font-normal transition-colors duration-150 mb-0.5',
                     active
                       ? 'bg-navy text-white font-medium'
                       : pending
                         ? 'bg-navy/60 text-white/90'
-                        : 'text-white/65 hover:bg-white/8 hover:text-white'
+                        : 'text-white/70 hover:bg-white/[0.08] hover:text-white'
                   )}
                 >
-                  <span className={cn('text-base w-5 text-center flex-shrink-0 transition-transform duration-150', pending && 'scale-110')}>
-                    {item.icon}
-                  </span>
+                  <Icon name={item.icon} className={cn('w-[17px] h-[17px]', active ? 'text-gold' : 'text-white/55')} />
                   {item.label}
                   {pending && (
-                    <span className="ml-auto w-1.5 h-1.5 rounded-full bg-gold animate-pulse flex-shrink-0" />
+                    <span className="ml-auto w-1.5 h-1.5 rounded-full bg-gold flex-shrink-0" />
                   )}
                 </Link>
               )
@@ -262,8 +257,8 @@ export function Sidebar() {
             {userName.split(' ').map(n => n[0]).join('').slice(0, 2)}
           </div>
           <div className="min-w-0">
-            <p className="text-[13px] text-white/80 font-medium truncate">{userName}</p>
-            <p className="text-[11px] text-white/40">{userRole}</p>
+            <p className="text-[13px] text-white/85 font-medium truncate">{userName}</p>
+            <p className="text-[11px] text-white/50">{userRole}</p>
           </div>
         </div>
       </div>

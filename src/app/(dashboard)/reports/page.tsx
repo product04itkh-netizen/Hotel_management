@@ -506,27 +506,25 @@ export default function ReportsPage() {
         {/* KPIs */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
           {[
-            { label: 'Total Revenue', value: formatCurrency(kpis.totalRevenue), accent: '#F05830' },
-            { label: 'Total Guests', value: kpis.totalGuests, accent: '#583808' },
-            { label: 'Avg Stay (nights)', value: kpis.avgStay, accent: '#1A7A4A' },
-            { label: 'Avg Daily Rate', value: formatCurrency(kpis.adr), accent: '#7C3AED' },
-            { label: 'RevPAR (6mo)', value: formatCurrency(kpis.revpar), accent: '#B83232' },
+            { label: 'Total Revenue', value: formatCurrency(kpis.totalRevenue) },
+            { label: 'Total Guests', value: kpis.totalGuests },
+            { label: 'Avg Stay (nights)', value: kpis.avgStay },
+            { label: 'Avg Daily Rate', value: formatCurrency(kpis.adr) },
+            { label: 'RevPAR (6mo)', value: formatCurrency(kpis.revpar) },
           ].map(k => (
-            <div key={k.label} className="bg-white border border-hborder rounded-2xl p-4 shadow-card relative overflow-hidden">
-              <div className="absolute top-0 left-0 w-1 h-full rounded-l-2xl" style={{ background: k.accent }} />
-              <p className="text-[11px] text-hmuted uppercase tracking-wide pl-2">{k.label}</p>
-              <p className="font-serif text-xl sm:text-2xl text-dark-navy mt-1 pl-2 truncate" title={String(k.value)}>{k.value}</p>
+            <div key={k.label} className="bg-white border border-hborder rounded-2xl p-4 shadow-card">
+              <p className="text-[11px] font-semibold text-hmuted uppercase tracking-wide">{k.label}</p>
+              <p className="text-xl sm:text-2xl font-semibold tracking-tight tabular-nums text-dark-navy mt-1.5 truncate" title={String(k.value)}>{k.value}</p>
             </div>
           ))}
           {/* Customer Deposits — clickable drill-down */}
           <button
             onClick={() => setDepositModalOpen(true)}
-            className="bg-white border border-hborder rounded-2xl p-4 shadow-card relative overflow-hidden text-left hover:shadow-lg hover:border-[#0EA5E9]/40 transition-all group"
+            className="bg-white border border-hborder rounded-2xl p-4 shadow-card text-left hover:border-navy/40 transition-colors group"
           >
-            <div className="absolute top-0 left-0 w-1 h-full rounded-l-2xl" style={{ background: '#0EA5E9' }} />
-            <p className="text-[11px] text-hmuted uppercase tracking-wide pl-2">Customer Deposits</p>
-            <p className="font-serif text-xl sm:text-2xl text-dark-navy mt-1 pl-2 truncate">{formatCurrency(customerDeposits)}</p>
-            <span className="pl-2 text-[10px] font-medium text-[#0EA5E9] group-hover:underline">View {depositDetails.length} entr{depositDetails.length === 1 ? 'y' : 'ies'} →</span>
+            <p className="text-[11px] font-semibold text-hmuted uppercase tracking-wide">Customer Deposits</p>
+            <p className="text-xl sm:text-2xl font-semibold tracking-tight tabular-nums text-dark-navy mt-1.5 truncate">{formatCurrency(customerDeposits)}</p>
+            <span className="text-[10px] font-medium text-navy group-hover:underline">View {depositDetails.length} entr{depositDetails.length === 1 ? 'y' : 'ies'} →</span>
           </button>
         </div>
 
@@ -644,7 +642,7 @@ export default function ReportsPage() {
                 <span className="flex items-center gap-3">
                   <span className={`font-bold ${balanced ? 'text-green-800' : 'text-red-800'}`}>{formatCurrency(le)}</span>
                   <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${balanced ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                    {balanced ? '✓ Balanced' : `Out by ${formatCurrency(balance.totalAssets - le)}`}
+                    {balanced ? 'Balanced' : `Out by ${formatCurrency(balance.totalAssets - le)}`}
                   </span>
                 </span>
               </div>
@@ -899,13 +897,13 @@ export default function ReportsPage() {
         <div className="space-y-3">
           <div className="flex items-center justify-between bg-hsurface2 rounded-xl px-4 py-3">
             <span className="text-sm text-hmuted">Current balance — Guest Deposits Received (2200)</span>
-            <span className="font-serif text-xl text-dark-navy">{formatCurrency(customerDeposits)}</span>
+            <span className="text-xl font-semibold tracking-tight tabular-nums text-dark-navy">{formatCurrency(customerDeposits)}</span>
           </div>
           {depositCheck && (
             <div className={`rounded-xl px-4 py-3 text-xs ${depositCheck.ok ? 'bg-green-50 text-green-800' : 'bg-amber-50 text-amber-900'}`}>
               <div className="flex items-center justify-between gap-4">
                 <span className="font-semibold">
-                  {depositCheck.ok ? '✓ Agrees with deposit receipts' : '⚠ Does not agree with deposit receipts'}
+                  {depositCheck.ok ? 'Agrees with deposit receipts' : 'Does not agree with deposit receipts'}
                 </span>
                 <span className="tabular-nums whitespace-nowrap">
                   receipts held {formatCurrency(depositCheck.receiptsHeld)} · ledger {formatCurrency(depositCheck.gl)}

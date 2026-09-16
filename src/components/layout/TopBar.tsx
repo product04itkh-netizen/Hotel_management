@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useBranch } from '@/context/BranchContext'
 import { useMobileNav } from '@/context/MobileNavContext'
 import { branchLogo, branchBrand } from '@/lib/utils'
+import { Icon } from '@/components/ui/Icon'
 
 interface TopBarProps {
   title: string
@@ -51,13 +52,9 @@ export function TopBar({ title, subtitle }: TopBarProps) {
         </div>
       </div>
       <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
-        <span className="hidden lg:inline-flex items-center gap-1.5 px-2.5 py-1 bg-green-50 text-green-700 rounded-full text-xs font-medium">
-          <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-          System Online
-        </span>
         {/* Dynamic branch label */}
-        <span className="hidden md:inline-flex items-center gap-1.5 px-2.5 py-1 bg-[#E8F0FB] text-navy rounded-full text-xs font-medium">
-          <span className="text-[10px]">📍</span>
+        <span className="hidden md:inline-flex items-center gap-1.5 pl-2 pr-2.5 py-1 bg-hsurface2 text-navy rounded-full text-xs font-medium">
+          <Icon name="pin" className="w-3.5 h-3.5 text-gold" />
           {branchLabel}
         </span>
         <img src={branchLogo(activeBranch?.location)} alt={activeBranch?.location ?? 'OnlyOne Homestay'} className="hidden sm:block h-7 w-auto object-contain rounded-md" />

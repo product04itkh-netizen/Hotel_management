@@ -797,7 +797,7 @@ export default function AssetsPage() {
                     <tr
                       key={c.value}
                       className={cn('border-b border-hborder/60 hover:bg-hsurface2 transition-colors cursor-pointer',
-                        i % 2 === 0 ? '' : 'bg-gray-50/40')}
+                        i % 2 === 0 ? '' : 'bg-hsurface2/60/40')}
                       onClick={() => { setTab('register'); setFilterCat(c.value) }}
                     >
                       <td className="px-6 py-3.5">
@@ -895,7 +895,7 @@ export default function AssetsPage() {
                     {filteredAssets.map((a, i) => {
                       const cat = catInfo(a.category)
                       return (
-                        <tr key={a.id} className={cn('border-b border-hborder/60 hover:bg-hsurface2 transition-colors', i % 2 === 0 ? '' : 'bg-gray-50/30')}>
+                        <tr key={a.id} className={cn('border-b border-hborder/60 hover:bg-hsurface2 transition-colors', i % 2 === 0 ? '' : 'bg-hsurface2/60/30')}>
                           <td className="px-3 py-2">
                             <p className="font-medium text-htext leading-snug max-w-[260px]">{a.description}</p>
                             {a.type_brand && <p className="text-xs text-hmuted">{a.type_brand}</p>}
@@ -920,7 +920,7 @@ export default function AssetsPage() {
                             <span className={cn(
                               'text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap',
                               a.status === 'active'      && 'bg-green-100 text-green-700',
-                              a.status === 'disposed'    && 'bg-gray-100 text-gray-500',
+                              a.status === 'disposed'    && 'bg-hsurface2 text-hmuted',
                               a.status === 'maintenance' && 'bg-yellow-100 text-yellow-700',
                             )}>
                               {capitalize(a.status)}
@@ -986,7 +986,7 @@ export default function AssetsPage() {
                   onClick={runDepreciation}
                   disabled={depRunSaving || !!depRuns.find(r => r.run_year === depRunYear && r.run_month === depRunMonth)}
                 >
-                  {depRunSaving ? 'Posting…' : depRuns.find(r => r.run_year === depRunYear && r.run_month === depRunMonth) ? '✓ Already Posted' : 'Run Depreciation'}
+                  {depRunSaving ? 'Posting…' : depRuns.find(r => r.run_year === depRunYear && r.run_month === depRunMonth) ? 'Already posted' : 'Run Depreciation'}
                 </Button>
               </div>
               {/* ── Record a hand-written depreciation entry ── */}
@@ -1031,7 +1031,7 @@ export default function AssetsPage() {
                     disabled={linkSaving || !linkJeId || !!depRuns.find(r => r.run_year === linkYear && r.run_month === linkMonth)}
                   >
                     {linkSaving ? 'Recording…'
-                      : depRuns.find(r => r.run_year === linkYear && r.run_month === linkMonth) ? '✓ Already Recorded'
+                      : depRuns.find(r => r.run_year === linkYear && r.run_month === linkMonth) ? 'Already recorded'
                       : 'Record Against Register'}
                   </Button>
                 </div>
@@ -1068,10 +1068,10 @@ export default function AssetsPage() {
                           <span className="font-semibold text-dark-navy whitespace-nowrap">{formatCurrency(r.total_amount)}</span>
                           {orphaned ? (
                             <span className="text-xs text-red-600 font-medium whitespace-nowrap" title="The linked journal entry is voided or missing — the register is carrying depreciation the ledger no longer has.">
-                              ⚠ Entry voided
+                              Entry voided
                             </span>
                           ) : (
-                            <span className="text-xs text-green-600 font-medium whitespace-nowrap">✓ Posted</span>
+                            <span className="text-xs text-green-600 font-medium whitespace-nowrap">Posted</span>
                           )}
                           <button
                             onClick={() => unrecordRun(r)}
@@ -1155,7 +1155,7 @@ export default function AssetsPage() {
                         </tr>
                         {/* Asset rows */}
                         {rows.map(({ a, months, annual }, i) => (
-                          <tr key={a.id} className={cn('border-b border-hborder/50 hover:bg-hsurface2', i % 2 === 0 ? '' : 'bg-gray-50/30')}>
+                          <tr key={a.id} className={cn('border-b border-hborder/50 hover:bg-hsurface2', i % 2 === 0 ? '' : 'bg-hsurface2/60/30')}>
                             <td className="px-3 py-2 sticky left-0 bg-inherit">
                               <p className="font-medium text-htext max-w-[210px] truncate">{a.description}</p>
                             </td>

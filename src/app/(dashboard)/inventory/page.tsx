@@ -327,14 +327,13 @@ export default function InventoryPage() {
       <div className="p-4 sm:p-6 lg:p-8 flex-1 section-enter">
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-5">
           {[
-            { label: 'Active Items', value: String(activeItems.length), color: '#583808' },
-            { label: 'Low Stock',    value: String(lowStock.length),    color: lowStock.length > 0 ? '#B83232' : '#1A7A4A' },
-            { label: 'Total Value',  value: formatCurrency(totalValue), color: '#F05830' },
+            { label: 'Active Items', value: String(activeItems.length) },
+            { label: 'Low Stock',    value: String(lowStock.length) },
+            { label: 'Total Value',  value: formatCurrency(totalValue) },
           ].map(s => (
-            <div key={s.label} className="bg-white border border-hborder rounded-2xl p-4 shadow-card relative overflow-hidden">
-              <div className="absolute top-0 left-0 w-1 h-full rounded-l-2xl" style={{ background: s.color }} />
-              <p className="text-[11px] text-hmuted uppercase tracking-wide pl-2">{s.label}</p>
-              <p className="font-serif text-xl sm:text-2xl text-dark-navy mt-1 pl-2 truncate" title={s.value}>{s.value}</p>
+            <div key={s.label} className="bg-white border border-hborder rounded-2xl p-4 shadow-card">
+              <p className="text-[11px] font-semibold text-hmuted uppercase tracking-wide">{s.label}</p>
+              <p className="text-xl sm:text-2xl font-semibold tracking-tight tabular-nums text-dark-navy mt-1.5 truncate" title={s.value}>{s.value}</p>
             </div>
           ))}
         </div>
@@ -385,7 +384,7 @@ export default function InventoryPage() {
                     <td className="px-3 py-2 h-[52px] align-middle text-right font-medium text-dark-navy tabular-nums whitespace-nowrap">{formatCurrency(onHand * item.last_unit_cost)}</td>
                     <td className="px-3 py-2 h-[52px] align-middle text-xs text-hmuted font-mono whitespace-nowrap truncate" title={acct?.name}>{item.expense_account_code}{acct ? ` — ${acct.name}` : ''}</td>
                     <td className="px-3 py-2 h-[52px] align-middle">
-                      <span className={cn('text-[10px] px-2 py-0.5 rounded-full font-medium whitespace-nowrap', item.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500')}>
+                      <span className={cn('text-[10px] px-2 py-0.5 rounded-full font-medium whitespace-nowrap', item.is_active ? 'bg-green-100 text-green-700' : 'bg-hsurface2 text-hmuted')}>
                         {item.is_active ? 'Active' : 'Inactive'}
                       </span>
                     </td>

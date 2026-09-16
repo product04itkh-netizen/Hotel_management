@@ -8,8 +8,7 @@ export default function DashboardLoading() {
           <div className="h-3 w-28 sm:w-36 bg-hsurface2 rounded-md animate-pulse" />
         </div>
         <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
-          <div className="hidden lg:block h-6 w-28 bg-hsurface2 rounded-full animate-pulse" />
-          <div className="hidden md:block h-6 w-24 bg-hsurface2 rounded-lg animate-pulse" />
+          <div className="hidden md:block h-6 w-44 bg-hsurface2 rounded-full animate-pulse" />
           <div className="h-7 w-20 bg-hsurface2 rounded-lg animate-pulse" />
         </div>
       </div>
