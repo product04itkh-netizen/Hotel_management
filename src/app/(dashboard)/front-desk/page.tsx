@@ -44,7 +44,7 @@ export default function FrontDeskPage() {
     const years = new Set([year, year + 1])
     years.forEach(async (y) => {
       try {
-        const res = await fetch(`/api/holidays?year=${y}`)
+        const res = await fetch(`/api/holidays?year=${y}&v=2`)
         if (res.ok) {
           const data: Record<string, string> = await res.json()
           setKhHolidays(prev => ({ ...prev, ...data }))
@@ -495,7 +495,7 @@ export default function FrontDeskPage() {
                           title={holiday}
                           className="w-full mb-[3px] px-1 py-[2px] rounded-[3px] text-[9px] font-semibold leading-tight truncate bg-red-50 text-red-700 border border-red-200"
                         >
-                          🇰🇭 {holiday}
+                          {holiday}
                         </div>
                       )}
 

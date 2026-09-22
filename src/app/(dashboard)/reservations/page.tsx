@@ -112,7 +112,8 @@ export default function ReservationsPage() {
       .then(({ data }) => setHousePromotions((data ?? []) as HousePromotion[]))
   }, [form.house_id, activeBranch]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Fetch Cambodian public holidays from Calendarific (once per year, cached 90 days)
+  // Cambodian public holidays for the visible year(s), from /api/holidays.
+  // `v=2` bypasses browsers still holding the old list under a year-long cache.
   useEffect(() => {
     if (viewMode !== 'calendar') return
     const yearsNeeded = new Set<number>()
@@ -126,7 +127,7 @@ export default function ReservationsPage() {
     }
     yearsNeeded.forEach(async (year) => {
       try {
-        const res = await fetch(`/api/holidays?year=${year}`)
+        const res = await fetch(`/api/holidays?year=${year}&v=2`)
         if (res.ok) {
           const data: Record<string, string> = await res.json()
           setKhHolidays(prev => ({ ...prev, ...data }))
@@ -1148,7 +1149,7 @@ export default function ReservationsPage() {
                               title={holiday}
                               className="w-full mb-[3px] px-1 py-[2px] rounded-[3px] text-[9px] font-semibold leading-tight truncate bg-red-50 text-red-700 border border-red-200"
                             >
-                              🇰🇭 {holiday}
+                              {holiday}
                             </div>
                           )}
 
