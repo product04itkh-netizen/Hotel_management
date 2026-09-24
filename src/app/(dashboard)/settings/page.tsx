@@ -14,7 +14,7 @@ import { Icon } from '@/components/ui/Icon'
 
 // v1 audited tables — matches migration 045_audit_logs.sql's trigger list.
 const AUDITED_TABLES = [
-  'journal_entries', 'invoices', 'reservations', 'fixed_assets',
+  'journal_entries', 'journal_entry_lines', 'invoices', 'reservations', 'fixed_assets',
   'bills', 'bill_payments', 'deposit_receipts', 'petty_cash_transactions',
   'payment_transactions', 'chart_of_accounts', 'accounting_periods',
   'staff', 'depreciation_runs', 'depreciation_entries',

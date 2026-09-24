@@ -621,6 +621,74 @@ export default function AccountingPage() {
     setJeFormOpen(true)
   }
 
+  // ── Keeping a document-linked entry and its document in step ───────────────
+  // Editing a bill entry used to move only the ledger: the bill kept its old
+  // amount, so the Bills list and GL 2100 drifted apart. That is exactly how
+  // Srae Ambel went $2.34 out of balance in Sep 2026 — two electric bills were
+  // re-converted at a different KHR rate in the entry and not on the bill.
+  // The amount now moves on both sides, or the edit is refused.
+  type DocSync = { label: string; apply: () => Promise<string | null> }
+
+  // Driven by the actual link, not by the form's Type field — otherwise
+  // switching Type to "manual" would quietly skip the sync and re-open the
+  // same drift.
+  async function planDocumentSync(
+    entryId: string, amount: number,
+  ): Promise<{ error?: string; sync?: DocSync }> {
+    {
+      const { data: bill } = await supabase.from('bills').select('*').eq('journal_entry_id', entryId).maybeSingle()
+      if (bill) {
+        const paid = Number(bill.amount_paid ?? 0)
+        if (amount + 0.001 < paid) {
+          return { error: `${bill.bill_number} already has ${formatCurrency(paid)} paid against it, so the entry cannot drop to ${formatCurrency(amount)}. Reverse the payment first.` }
+        }
+        const status = amount - paid <= 0.001 ? 'paid' : paid > 0.001 ? 'partial' : 'unpaid'
+        return {
+          sync: {
+            label: `bill ${bill.bill_number}`,
+            apply: async () => {
+              const { error } = await supabase.from('bills').update({
+                subtotal: Math.round((amount - Number(bill.tax_amount ?? 0)) * 100) / 100,
+                total: amount,
+                status,
+                updated_at: new Date().toISOString(),
+              }).eq('id', bill.id)
+              return error ? error.message : null
+            },
+          },
+        }
+      }
+    }
+
+    {
+      const { data: pay } = await supabase.from('bill_payments').select('*').eq('journal_entry_id', entryId).maybeSingle()
+      if (!pay) return {}
+      const { data: bill } = await supabase.from('bills').select('*').eq('id', pay.bill_id).maybeSingle()
+      if (!bill) return {}
+      const otherPaid = Math.round((Number(bill.amount_paid ?? 0) - Number(pay.amount)) * 100) / 100
+      const newPaid = Math.round((otherPaid + amount) * 100) / 100
+      if (newPaid > Number(bill.total) + 0.001) {
+        return { error: `That would pay ${formatCurrency(newPaid)} against ${bill.bill_number}, which is only ${formatCurrency(Number(bill.total))}.` }
+      }
+      const status = newPaid >= Number(bill.total) - 0.001 ? 'paid' : newPaid > 0.001 ? 'partial' : 'unpaid'
+      return {
+        sync: {
+          label: `payment on ${bill.bill_number}`,
+          apply: async () => {
+            const { error: payErr } = await supabase.from('bill_payments').update({ amount }).eq('id', pay.id)
+            if (payErr) return payErr.message
+            const { error: billErr } = await supabase.from('bills').update({
+              amount_paid: newPaid, status, updated_at: new Date().toISOString(),
+            }).eq('id', bill.id)
+            return billErr ? billErr.message : null
+          },
+        },
+      }
+    }
+
+    return {}
+  }
+
   async function saveJournalEntry() {
     if (!jeForm.description) { toast('Description required', 'error'); return }
     if (!jeBalanced) { toast('Debits must equal credits', 'error'); return }
@@ -635,7 +703,12 @@ export default function AccountingPage() {
     setJeSaving(true)
 
     if (editJeId) {
-      // Edit existing draft entry
+      // Edit existing draft entry. Validate the linked document BEFORE writing
+      // anything, so a refusal leaves the entry untouched.
+      const creditTotal = Math.round(validLines.reduce((s, l) => s + Number(l.credit || 0), 0) * 100) / 100
+      const { error: syncErr, sync: docSync } = await planDocumentSync(editJeId, creditTotal)
+      if (syncErr) { toast(syncErr, 'error'); setJeSaving(false); return }
+
       const { error: updErr } = await supabase.from('journal_entries').update({
         entry_date: jeForm.date,
         reference: jeForm.reference || null,
@@ -654,7 +727,15 @@ export default function AccountingPage() {
       )
       if (lineErr) { toast('Failed to save lines', 'error'); setJeSaving(false); return }
       setEntryLines(prev => ({ ...prev, [editJeId]: [] }))
-      toast('Entry updated'); setJeSaving(false); setJeFormOpen(false); loadEntries()
+      if (docSync) {
+        const failure = await docSync.apply()
+        if (failure) {
+          toast(`Entry saved, but the linked ${docSync.label} did not update: ${failure}. Fix it before posting — the ledger and the bill now disagree.`, 'error')
+          setJeSaving(false); loadEntries(); loadBills(); return
+        }
+      }
+      toast(docSync ? `Entry and ${docSync.label} updated` : 'Entry updated')
+      setJeSaving(false); setJeFormOpen(false); loadEntries(); if (docSync) loadBills()
     } else {
       // Create new entry as draft
       const { data: je, error: jeErr } = await supabase.from('journal_entries').insert({
