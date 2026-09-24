@@ -44,6 +44,9 @@ export interface Bill {
   notes?: string
   journal_entry_id?: string
   branch_id?: string
+  /** Why the bill was voided — required when voiding, kept for audit. */
+  void_reason?: string
+  voided_at?: string
   created_at: string
   updated_at: string
 }

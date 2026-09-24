@@ -177,7 +177,7 @@ export default function AccountingPage() {
 
   // Bills (AP)
   const [bills, setBills] = useState<Bill[]>([])
-  const [billFilter, setBillFilter] = useState<'all' | 'unpaid' | 'partial' | 'paid'>('unpaid')
+  const [billFilter, setBillFilter] = useState<'all' | 'unpaid' | 'partial' | 'paid' | 'void'>('unpaid')
   const [billFormOpen, setBillFormOpen] = useState(false)
   const [billPayOpen, setBillPayOpen] = useState(false)
   const [selectedBill, setSelectedBill] = useState<Bill | null>(null)
@@ -193,6 +193,13 @@ export default function AccountingPage() {
   const [billPayForm, setBillPayForm] = useState({
     payment_date: todayStr(), amount: '', account_code: '1010', reference: '', notes: '',
   })
+  // Editing / voiding an existing bill. A bill used to be write-once, so a
+  // wrong amount had to be corrected through its journal entry — which is how
+  // the bill and the ledger drifted apart in the first place.
+  const [editBillId, setEditBillId] = useState<string | null>(null)
+  const [billVoidTarget, setBillVoidTarget] = useState<Bill | null>(null)
+  const [billVoidReason, setBillVoidReason] = useState('')
+  const [billVoidSaving, setBillVoidSaving] = useState(false)
 
   // Vendors
   const [vendors, setVendors] = useState<Vendor[]>([])
@@ -973,6 +980,100 @@ export default function AccountingPage() {
     setBillForm(f => ({ ...f, lines: f.lines.map((l, i) => i === idx ? { ...l, [field]: value } : l) }))
   }
 
+  const emptyBillForm = {
+    vendor_id: '', bill_date: todayStr(), due_date: '',
+    description: '', tax_amount: '0', notes: '', paid_from: '',
+    lines: [{ expense_account_id: '', amount: '', description: '' }] as { expense_account_id: string; amount: string; description: string }[],
+  }
+
+  function openNewBill() {
+    setEditBillId(null)
+    setBillForm({ ...emptyBillForm, lines: [{ expense_account_id: '', amount: '', description: '' }] })
+    setBillFormOpen(true)
+  }
+
+  function openEditBill(bill: Bill) {
+    if (bill.status === 'void') { toast('This bill is voided and can no longer be edited.', 'error'); return }
+    const items = (bill.line_items ?? []).length > 0
+      ? bill.line_items!.map(li => ({ expense_account_id: li.account_id, amount: String(li.amount), description: li.description ?? '' }))
+      // Bills recorded before split lines existed carry only expense_account_id.
+      : [{ expense_account_id: bill.expense_account_id ?? '', amount: String(bill.subtotal), description: bill.description }]
+    setEditBillId(bill.id)
+    setBillForm({
+      vendor_id: bill.vendor_id ?? '',
+      bill_date: bill.bill_date,
+      due_date: bill.due_date ?? '',
+      description: bill.description,
+      tax_amount: String(bill.tax_amount ?? 0),
+      notes: bill.notes ?? '',
+      paid_from: '', // settlement account is fixed once recorded; payments change it
+      lines: items,
+    })
+    setBillFormOpen(true)
+  }
+
+  // Voids a bill and reverses its ledger: the recording entry and every payment
+  // entry are marked void, the bill stays on record with a reason. Mirrors how
+  // invoices are voided in Billing.
+  async function confirmVoidBill() {
+    const target = billVoidTarget
+    if (!target) return
+    if (!billVoidReason.trim()) { toast('A reason is required', 'error'); return }
+    setBillVoidSaving(true)
+
+    const { data: live } = await supabase.from('bills').select('*').eq('id', target.id).single()
+    if (!live) { toast('Bill not found', 'error'); setBillVoidSaving(false); return }
+    if (live.status === 'void') {
+      toast(`${live.bill_number} is already voided`, 'error')
+      setBillVoidSaving(false); setBillVoidTarget(null); loadBills(); return
+    }
+
+    const { data: pays } = await supabase.from('bill_payments')
+      .select('id, journal_entry_id, payment_date').eq('bill_id', target.id)
+
+    // Every period the reversal touches has to be open, or the reversal would
+    // land in a closed month.
+    for (const d of [live.bill_date, ...(pays ?? []).map(p => p.payment_date)].filter(Boolean)) {
+      const dt = new Date(d as string)
+      const y = dt.getFullYear(), m = dt.getMonth() + 1
+      if (periods.some(p => p.year === y && p.month === m && p.status === 'closed')) {
+        toast(`${MONTH_NAMES[m - 1]} ${y} is a closed period. Reopen it before voiding this bill.`, 'error')
+        setBillVoidSaving(false); return
+      }
+    }
+
+    // A bill paid at recording shares one entry with its payment — dedupe.
+    const jeIds = Array.from(new Set(
+      [live.journal_entry_id, ...(pays ?? []).map(p => p.journal_entry_id)].filter(Boolean)
+    )) as string[]
+
+    if (jeIds.length > 0) {
+      const { error } = await supabase.from('journal_entries')
+        .update({ is_void: true, voided_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+        .in('id', jeIds)
+      if (error) { toast(error.message, 'error'); setBillVoidSaving(false); return }
+    }
+
+    const { error: billErr } = await supabase.from('bills').update({
+      status: 'void', void_reason: billVoidReason.trim(),
+      voided_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    }).eq('id', target.id)
+    if (billErr) {
+      // Un-void the entries: a bill that still counts must keep its ledger.
+      if (jeIds.length > 0) {
+        await supabase.from('journal_entries').update({ is_void: false, voided_at: null }).in('id', jeIds)
+      }
+      toast(`Could not void the bill: ${billErr.message}. Its journal entries were left in place.`, 'error')
+      setBillVoidSaving(false); return
+    }
+
+    toast(jeIds.length
+      ? `${live.bill_number} voided — ${jeIds.length} journal ${jeIds.length === 1 ? 'entry' : 'entries'} reversed`
+      : `${live.bill_number} voided (it had no journal entry)`)
+    setBillVoidSaving(false); setBillVoidTarget(null); setBillVoidReason('')
+    loadBills(); loadEntries()
+  }
+
   async function saveBill() {
     const validLines = billForm.lines.filter(l => l.expense_account_id && Number(l.amount) > 0)
     if (!billForm.description) { toast('Description is required', 'error'); return }
@@ -1009,6 +1110,86 @@ export default function AccountingPage() {
       const acc = accounts.find(a => a.id === l.expense_account_id)
       return { account_id: l.expense_account_id, account_code: acc?.code, account_name: acc?.name, description: l.description?.trim() || billForm.description, amount: Number(l.amount) }
     })
+
+    // ── Editing an existing bill ────────────────────────────────────────────
+    // The bill row and its journal entry move together, or nothing moves.
+    if (editBillId) {
+      const { data: live } = await supabase.from('bills').select('*').eq('id', editBillId).single()
+      if (!live) { toast('Bill not found', 'error'); setBillSaving(false); return }
+      if (live.status === 'void') { toast('This bill is voided and can no longer be edited.', 'error'); setBillSaving(false); return }
+      if (total + 0.001 < Number(live.amount_paid)) {
+        toast(`${live.bill_number} already has ${formatCurrency(Number(live.amount_paid))} paid against it, so the total cannot drop to ${formatCurrency(total)}. Reverse the payment first.`, 'error')
+        setBillSaving(false); return
+      }
+      // The existing entry sits in the OLD bill date's period; that month has to
+      // be open too, not just the new one.
+      const od = new Date(live.bill_date)
+      const oy = od.getFullYear(), om = od.getMonth() + 1
+      if (periods.some(p => p.year === oy && p.month === om && p.status === 'closed')) {
+        toast(`${MONTH_NAMES[om - 1]} ${oy} is a closed period — reopen it before changing this bill.`, 'error')
+        setBillSaving(false); return
+      }
+
+      let jeSynced = false
+      if (live.journal_entry_id) {
+        const { data: je } = await supabase.from('journal_entries').select('*').eq('id', live.journal_entry_id).maybeSingle()
+        if (je?.is_void) {
+          toast('The journal entry for this bill is voided, so the bill is closed. Record a new bill instead.', 'error')
+          setBillSaving(false); return
+        }
+        if (je) {
+          const { data: oldLines } = await supabase.from('journal_entry_lines').select('*').eq('entry_id', je.id)
+          // Keep crediting whatever the original entry credited, so a bill paid
+          // at recording keeps crediting cash rather than flipping to AP.
+          const settleId = (oldLines ?? []).find(l => Number(l.credit) > 0)?.account_id ?? apAcct.id
+          const jeLines = validLines.map(l => ({
+            entry_id: je.id, account_id: l.expense_account_id,
+            description: l.description?.trim() || billForm.description,
+            debit: Number(l.amount), credit: 0,
+          }))
+          if (taxAmt > 0) jeLines.push({ entry_id: je.id, account_id: validLines[0].expense_account_id, description: `${billForm.description} — Tax/VAT`, debit: taxAmt, credit: 0 })
+          jeLines.push({ entry_id: je.id, account_id: settleId, description: billForm.description, debit: 0, credit: total })
+
+          await supabase.from('journal_entry_lines').delete().eq('entry_id', je.id)
+          const { error: lineErr } = await supabase.from('journal_entry_lines').insert(jeLines)
+          if (lineErr) {
+            // Restore the original lines rather than leave the entry empty.
+            await supabase.from('journal_entry_lines').insert(
+              (oldLines ?? []).map(({ id, created_at, ...rest }) => rest)
+            )
+            toast(`Could not update the journal entry: ${lineErr.message}. The bill was left unchanged.`, 'error')
+            setBillSaving(false); return
+          }
+          await supabase.from('journal_entries').update({
+            entry_date: billForm.bill_date,
+            description: `Bill — ${billForm.description}`,
+            updated_at: new Date().toISOString(),
+          }).eq('id', je.id)
+          jeSynced = true
+        }
+      }
+
+      const paid = Number(live.amount_paid)
+      const { error: upErr } = await supabase.from('bills').update({
+        vendor_id: billForm.vendor_id || null,
+        bill_date: billForm.bill_date,
+        due_date: billForm.due_date || null,
+        expense_account_id: validLines[0].expense_account_id,
+        line_items: lineItems,
+        description: billForm.description,
+        subtotal, tax_amount: taxAmt, total,
+        status: paid >= total - 0.001 ? 'paid' : paid > 0.001 ? 'partial' : 'unpaid',
+        notes: billForm.notes || null,
+        updated_at: new Date().toISOString(),
+      }).eq('id', editBillId)
+      if (upErr) { toast(upErr.message, 'error'); setBillSaving(false); return }
+
+      toast(jeSynced ? 'Bill and its journal entry updated' : 'Bill updated — it has no journal entry')
+      setBillSaving(false); setBillFormOpen(false); setEditBillId(null)
+      setBillForm({ ...emptyBillForm, lines: [{ expense_account_id: '', amount: '', description: '' }] })
+      loadBills(); loadEntries()
+      return
+    }
 
     const billNumber = await generateBillNumber()
 
@@ -1734,8 +1915,10 @@ export default function AccountingPage() {
       'Tax': Number(b.tax_amount),
       'Total': Number(b.total),
       'Paid': Number(b.amount_paid),
-      'Balance': Number(b.total) - Number(b.amount_paid),
+      // A voided bill owes nothing, so its balance must not add into a column total.
+      'Balance': b.status === 'void' ? 0 : Number(b.total) - Number(b.amount_paid),
       'Status': b.status,
+      'Void Reason': b.void_reason ?? '',
     })) }])
   }
 
@@ -2302,7 +2485,7 @@ export default function AccountingPage() {
           <div>
             <div className="flex items-center justify-between mb-4">
               <div className="flex gap-1 bg-hsurface2 rounded-xl p-1">
-                {(['all', 'unpaid', 'partial', 'paid'] as const).map(f => (
+                {(['all', 'unpaid', 'partial', 'paid', 'void'] as const).map(f => (
                   <button key={f} onClick={() => setBillFilter(f)}
                     className={cn('px-4 py-1.5 rounded-lg text-sm font-medium transition-colors capitalize',
                       billFilter === f ? 'bg-white text-dark-navy shadow-sm' : 'text-hmuted hover:text-htext'
@@ -2312,7 +2495,7 @@ export default function AccountingPage() {
               </div>
               <div className="flex gap-2">
                 <Button variant="ghost" onClick={exportBills}><Icon name="download" className="w-3.5 h-3.5" />Export</Button>
-                <Button onClick={() => setBillFormOpen(true)}>+ New Bill</Button>
+                <Button onClick={openNewBill}>+ New Bill</Button>
               </div>
             </div>
             <div className="bg-white border border-hborder rounded-2xl shadow-card overflow-hidden">
@@ -2360,14 +2543,18 @@ export default function AccountingPage() {
                         </div>
                         <span className="font-semibold text-dark-navy">{formatCurrency(balance)}</span>
                       </div>
-                      {b.status !== 'void' && (
+                      {b.status !== 'void' ? (
                         <div className="flex gap-2 pt-0.5">
                           {b.status !== 'paid' && (
                             <Button size="sm" variant="ghost" className="flex-1" onClick={() => { setSelectedBill(b); setBillPayForm(f => ({ ...f, amount: String(balance) })); setBillPayOpen(true) }}>Pay</Button>
                           )}
                           <Button size="sm" variant="ghost" className="flex-1" onClick={() => openBillReceipt(b)}>Receipt</Button>
+                          <Button size="sm" variant="ghost" className="flex-1" onClick={() => openEditBill(b)}>Edit</Button>
+                          <Button size="sm" variant="danger" className="flex-1" onClick={() => { setBillVoidTarget(b); setBillVoidReason('') }}>Void</Button>
                         </div>
-                      )}
+                      ) : b.void_reason ? (
+                        <p className="text-[11px] text-hmuted pt-0.5">Voided — {b.void_reason}</p>
+                      ) : null}
                     </div>
                   )
                 })}
@@ -2399,7 +2586,7 @@ export default function AccountingPage() {
                           <td className="px-3 py-2 text-xs text-hmuted whitespace-nowrap">{b.due_date ? formatDate(b.due_date) : '—'}</td>
                           <td className="px-3 py-2 font-medium text-right whitespace-nowrap">{formatCurrency(b.total)}</td>
                           <td className="px-3 py-2 text-right text-green-700 whitespace-nowrap">{formatCurrency(b.amount_paid)}</td>
-                          <td className="px-3 py-2 font-semibold text-right whitespace-nowrap">{formatCurrency(balance)}</td>
+                          <td className="px-3 py-2 font-semibold text-right whitespace-nowrap">{b.status === 'void' ? '—' : formatCurrency(balance)}</td>
                           <td className="px-3 py-2">
                             <span className={cn('text-[10px] px-2 py-0.5 rounded-full font-medium capitalize',
                               b.status === 'paid'    ? 'bg-green-100 text-green-700' :
@@ -2421,6 +2608,18 @@ export default function AccountingPage() {
                                   onClick={() => openBillReceipt(b)}
                                   className="text-xs text-hmuted hover:text-navy hover:underline font-medium"
                                 >Receipt</button>
+                              )}
+                              {b.status !== 'void' && (
+                                <button
+                                  onClick={() => openEditBill(b)}
+                                  className="text-xs text-hmuted hover:text-navy hover:underline font-medium"
+                                >Edit</button>
+                              )}
+                              {b.status !== 'void' && (
+                                <button
+                                  onClick={() => { setBillVoidTarget(b); setBillVoidReason('') }}
+                                  className="text-xs text-red-600 hover:underline font-medium"
+                                >Void</button>
                               )}
                             </div>
                           </td>
@@ -4341,7 +4540,7 @@ export default function AccountingPage() {
       </Modal>
 
       {/* ── New Bill Modal ── */}
-      <Modal open={billFormOpen} onClose={() => setBillFormOpen(false)} title="Record New Bill" size="md">
+      <Modal open={billFormOpen} onClose={() => { setBillFormOpen(false); setEditBillId(null) }} title={editBillId ? 'Edit Bill' : 'Record New Bill'} size="md">
         <div className="space-y-3">
           <div>
             <label className="block text-xs text-hmuted mb-1">Vendor</label>
@@ -4416,16 +4615,21 @@ export default function AccountingPage() {
               </div>
             ) : null
           })()}
-          <div>
-            <label className="block text-xs text-hmuted mb-1">Pay From Account</label>
-            <select value={billForm.paid_from} onChange={e => setBillForm(f => ({ ...f, paid_from: e.target.value }))} className={input}>
-              <option value="">Accounts Payable — record as unpaid (pay later)</option>
-              {accounts
-                .filter(a => a.is_active && ((a.category ?? '').toLowerCase() === 'bank' || a.code === '2400'))
-                .sort((a, b) => a.code.localeCompare(b.code))
-                .map(a => <option key={a.id} value={a.code}>Pay now from {a.code} — {a.name.trim()}</option>)}
-            </select>
-          </div>
+          {/* Pay From only applies when first recording a bill. On an existing
+              bill the settlement account is already in its journal entry, and
+              payments are made with Pay. */}
+          {!editBillId && (
+            <div>
+              <label className="block text-xs text-hmuted mb-1">Pay From Account</label>
+              <select value={billForm.paid_from} onChange={e => setBillForm(f => ({ ...f, paid_from: e.target.value }))} className={input}>
+                <option value="">Accounts Payable — record as unpaid (pay later)</option>
+                {accounts
+                  .filter(a => a.is_active && ((a.category ?? '').toLowerCase() === 'bank' || a.code === '2400'))
+                  .sort((a, b) => a.code.localeCompare(b.code))
+                  .map(a => <option key={a.id} value={a.code}>Pay now from {a.code} — {a.name.trim()}</option>)}
+              </select>
+            </div>
+          )}
           <div>
             <label className="block text-xs text-hmuted mb-1">Notes</label>
             <input value={billForm.notes} onChange={e => setBillForm(f => ({ ...f, notes: e.target.value }))} placeholder="Optional" className={input} />
@@ -4445,10 +4649,51 @@ export default function AccountingPage() {
             )
           })()}
           <div className="flex justify-end gap-3 pt-1">
-            <Button variant="ghost" onClick={() => setBillFormOpen(false)}>Cancel</Button>
-            <Button onClick={saveBill} disabled={billSaving}>{billSaving ? 'Saving…' : 'Record Bill'}</Button>
+            <Button variant="ghost" onClick={() => { setBillFormOpen(false); setEditBillId(null) }}>Cancel</Button>
+            <Button onClick={saveBill} disabled={billSaving}>
+              {billSaving ? 'Saving…' : editBillId ? 'Save Changes' : 'Record Bill'}
+            </Button>
           </div>
         </div>
+      </Modal>
+
+      {/* ── Void a bill ── */}
+      <Modal
+        open={!!billVoidTarget}
+        onClose={() => { setBillVoidTarget(null); setBillVoidReason('') }}
+        title={`Void ${billVoidTarget?.bill_number ?? ''}`}
+        size="sm"
+      >
+        {billVoidTarget && (
+          <div className="space-y-4">
+            <p className="text-sm text-hmuted">
+              This voids <strong className="text-htext">{billVoidTarget.bill_number}</strong> ({formatCurrency(billVoidTarget.total)}) permanently.
+              It stays on record for audit but stops counting in your books, and its journal
+              {' '}{billVoidTarget.journal_entry_id ? 'entry is reversed' : 'side is unaffected — it has no entry'}.
+            </p>
+            {Number(billVoidTarget.amount_paid) > 0 && (
+              <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                {formatCurrency(Number(billVoidTarget.amount_paid))} has already been paid against this bill. Voiding
+                reverses those payment entries too, which puts the money back in the account it came from.
+              </p>
+            )}
+            <div>
+              <label className="block text-xs text-hmuted mb-1">Reason *</label>
+              <input
+                value={billVoidReason}
+                onChange={e => setBillVoidReason(e.target.value)}
+                placeholder="e.g. duplicate of BILL-202609-002, test record, wrong vendor"
+                className={input}
+              />
+            </div>
+            <div className="flex justify-end gap-3 pt-1">
+              <Button variant="ghost" onClick={() => { setBillVoidTarget(null); setBillVoidReason('') }}>Cancel</Button>
+              <Button variant="danger" onClick={confirmVoidBill} disabled={billVoidSaving || !billVoidReason.trim()}>
+                {billVoidSaving ? 'Voiding…' : 'Void Bill'}
+              </Button>
+            </div>
+          </div>
+        )}
       </Modal>
 
       {/* ── Bill Receipt (printable) ── */}
