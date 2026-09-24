@@ -2544,13 +2544,13 @@ export default function AccountingPage() {
                         <span className="font-semibold text-dark-navy">{formatCurrency(balance)}</span>
                       </div>
                       {b.status !== 'void' ? (
-                        <div className="flex gap-2 pt-0.5">
+                        <div className="flex flex-wrap gap-2 pt-0.5">
                           {b.status !== 'paid' && (
-                            <Button size="sm" variant="ghost" className="flex-1" onClick={() => { setSelectedBill(b); setBillPayForm(f => ({ ...f, amount: String(balance) })); setBillPayOpen(true) }}>Pay</Button>
+                            <Button size="sm" variant="ghost" className="flex-1 min-w-[72px]" onClick={() => { setSelectedBill(b); setBillPayForm(f => ({ ...f, amount: String(balance) })); setBillPayOpen(true) }}>Pay</Button>
                           )}
-                          <Button size="sm" variant="ghost" className="flex-1" onClick={() => openBillReceipt(b)}>Receipt</Button>
-                          <Button size="sm" variant="ghost" className="flex-1" onClick={() => openEditBill(b)}>Edit</Button>
-                          <Button size="sm" variant="danger" className="flex-1" onClick={() => { setBillVoidTarget(b); setBillVoidReason('') }}>Void</Button>
+                          <Button size="sm" variant="ghost" className="flex-1 min-w-[72px]" onClick={() => openBillReceipt(b)}>Receipt</Button>
+                          <Button size="sm" variant="ghost" className="flex-1 min-w-[72px]" onClick={() => openEditBill(b)}>Edit</Button>
+                          <Button size="sm" variant="danger" className="flex-1 min-w-[72px]" onClick={() => { setBillVoidTarget(b); setBillVoidReason('') }}>Void</Button>
                         </div>
                       ) : b.void_reason ? (
                         <p className="text-[11px] text-hmuted pt-0.5">Voided — {b.void_reason}</p>
@@ -2563,7 +2563,9 @@ export default function AccountingPage() {
               <div className="hidden md:block overflow-x-auto">
                 <table className="w-full text-sm table-fixed">
                   <thead><tr className="bg-hsurface2">
-                    {([['Bill #', 'w-[9%]'], ['Vendor', 'w-[11%]'], ['Description', 'w-[20%]'], ['Account', 'w-[7%]'], ['Bill Date', 'w-[8%]'], ['Due Date', 'w-[8%]'], ['Total', 'w-[8%]'], ['Paid', 'w-[8%]'], ['Balance', 'w-[8%]'], ['Status', 'w-[6%]'], ['Actions', 'w-[7%]']] as const).map(([h, w]) => (
+                    {/* Actions carries up to four controls (Pay, Receipt, Edit, Void),
+                        so it needs real room; the rest was trimmed to match. */}
+                    {([['Bill #', 'w-[8%]'], ['Vendor', 'w-[10%]'], ['Description', 'w-[17%]'], ['Account', 'w-[6%]'], ['Bill Date', 'w-[7%]'], ['Due Date', 'w-[7%]'], ['Total', 'w-[7%]'], ['Paid', 'w-[7%]'], ['Balance', 'w-[7%]'], ['Status', 'w-[6%]'], ['Actions', 'w-[18%]']] as const).map(([h, w]) => (
                       <th key={h} className={cn('px-3 py-2.5 text-left text-[11px] font-semibold text-hmuted uppercase tracking-wide whitespace-nowrap', w)}>{h}</th>
                     ))}
                   </tr></thead>
@@ -2596,7 +2598,7 @@ export default function AccountingPage() {
                             )}>{b.status}</span>
                           </td>
                           <td className="px-3 py-2">
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-x-2 gap-y-1 flex-wrap">
                               {b.status !== 'paid' && b.status !== 'void' && (
                                 <button
                                   onClick={() => { setSelectedBill(b); setBillPayForm(f => ({ ...f, amount: String(balance) })); setBillPayOpen(true) }}
