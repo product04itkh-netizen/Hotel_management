@@ -438,9 +438,20 @@ export default function ReservationsPage() {
 
     const validItems = lineItems.filter(i => i.label.trim())
 
-    // Upsert guest
+    // Upsert guest. Name, phone and email live on the guests row, not on the
+    // reservation, so editing a reservation has to write them back — this used
+    // to create a guest only when there was none, which silently dropped any
+    // phone/email/name change made while editing.
     let guestId = form.guest_id
-    if (!guestId && form.guest_name) {
+    if (guestId) {
+      const { error: guestUpdErr } = await supabase.from('guests').update({
+        full_name: form.guest_name,
+        email: form.guest_email || null,
+        phone: form.guest_phone || null,
+        updated_at: new Date().toISOString(),
+      }).eq('id', guestId)
+      if (guestUpdErr) { toast(`Failed to update guest: ${guestUpdErr.message}`, 'error'); setSaving(false); return }
+    } else if (form.guest_name) {
       const { data: newGuest, error: guestErr } = await supabase.from('guests').insert({
         full_name: form.guest_name,
         email: form.guest_email || null,
