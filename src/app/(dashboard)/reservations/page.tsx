@@ -56,6 +56,9 @@ export default function ReservationsPage() {
   const [statusFilter, setStatusFilter] = useState('all')
   const [modalOpen, setModalOpen] = useState(false)
   const [editId, setEditId] = useState<string | null>(null)
+  // Set when the open reservation is closed (stay over + fully paid): the
+  // modal then renders read-only and Save is refused.
+  const [editLocked, setEditLocked] = useState<string | null>(null)
   const [form, setForm] = useState({ ...emptyForm })
   const [lineItems, setLineItems] = useState<LineItemForm[]>([])
   const [deposit, setDeposit] = useState<number | string>(0)
@@ -172,6 +175,7 @@ export default function ReservationsPage() {
   })
 
   function openCreate() {
+    setEditLocked(null)
     setEditId(null)
     setForm({ ...emptyForm })
     setLineItems([])
@@ -187,7 +191,20 @@ export default function ReservationsPage() {
     setModalOpen(true)
   }
 
+  // A stay that is over (check-out date passed) and fully paid is closed:
+  // it opens read-only. "Paid" uses the same rule as the Due column — the
+  // deposit covers the total — so the lock matches what the list shows.
+  function lockReason(res: Pick<Reservation, 'check_out_date' | 'total_amount' | 'deposit'>): string | null {
+    const total = Number(res.total_amount ?? 0)
+    const paid = total > 0 && Number(res.deposit ?? 0) >= total - 0.005
+    const passed = !!res.check_out_date && res.check_out_date < todayISO()
+    return paid && passed
+      ? `This stay ended on ${formatDate(res.check_out_date)} and is fully paid, so it can no longer be edited.`
+      : null
+  }
+
   function openEdit(res: Reservation) {
+    setEditLocked(lockReason(res))
     setEditId(res.id)
     setForm({
       guest_id: res.guest_id ?? '',
@@ -434,7 +451,17 @@ export default function ReservationsPage() {
       toast('Check-out date must be after check-in date', 'error'); return
     }
     if (!activeBranch) { toast('No branch selected', 'error'); return }
+    if (editLocked) { toast(editLocked, 'error'); return }
     setSaving(true)
+
+    // Re-check the LIVE row, not the list snapshot: a payment or a date change
+    // made since the modal opened can close the booking in the meantime.
+    if (editId) {
+      const { data: live } = await supabase.from('reservations')
+        .select('check_out_date, total_amount, deposit').eq('id', editId).single()
+      const liveLock = live ? lockReason(live as any) : null
+      if (liveLock) { setEditLocked(liveLock); toast(liveLock, 'error'); setSaving(false); return }
+    }
 
     const validItems = lineItems.filter(i => i.label.trim())
 
@@ -683,6 +710,16 @@ export default function ReservationsPage() {
 
   async function handleCancelAndVoid(res: any) {
     if (!activeBranch) return
+    // A closed booking (stay over + fully paid) can't be voided: that would void
+    // its invoices and their journal entries. Checked against the LIVE row so a
+    // stale list can't slip one through.
+    const { data: live } = await supabase.from('reservations')
+      .select('check_out_date, total_amount, deposit').eq('id', res.id).single()
+    const closed = live ? lockReason(live as any) : null
+    if (closed) {
+      toast(closed.replace('edited', 'cancelled or voided'), 'error')
+      loadData(); return
+    }
     const guestName = (res.guest as any)?.full_name ?? res.guest_name ?? 'Guest'
 
     const [{ data: invoices }, { data: activeReceipts }, { data: pettyCash }, { data: checkInJes }, { data: depositJes }] = await Promise.all([
@@ -954,12 +991,18 @@ export default function ReservationsPage() {
                         <td className="px-2.5 py-2 h-[52px] align-middle whitespace-nowrap">
                           <div className="flex gap-3 items-center">
                             <div className="flex gap-2.5 items-center flex-shrink-0">
-                              <button onClick={() => openEdit(res)} title="Edit reservation" className="text-hmuted hover:text-navy transition-colors">
-                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-                                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
-                                </svg>
-                              </button>
-                              {!['cancelled', 'checked_out', 'no_show'].includes(res.status) && (
+                              {lockReason(res) ? (
+                                <button onClick={() => openEdit(res)} title="Completed and paid — view only" aria-label="View reservation (read-only)" className="text-hmuted hover:text-navy transition-colors">
+                                  <Icon name="lock" className="w-4 h-4" strokeWidth={1.8} />
+                                </button>
+                              ) : (
+                                <button onClick={() => openEdit(res)} title="Edit reservation" className="text-hmuted hover:text-navy transition-colors">
+                                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
+                                  </svg>
+                                </button>
+                              )}
+                              {!['cancelled', 'checked_out', 'no_show'].includes(res.status) && !lockReason(res) && (
                                 <button onClick={() => handleCancelAndVoid(res)} title="Cancel & void reservation" className="text-hmuted hover:text-red-600 transition-colors">
                                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 105.636 5.636a9 9 0 0012.728 12.728zM5.636 5.636l12.728 12.728" />
@@ -1256,10 +1299,20 @@ export default function ReservationsPage() {
       <Modal
         open={modalOpen}
         onClose={() => setModalOpen(false)}
-        title={editId ? 'Edit Reservation' : 'New Reservation'}
-        subtitle="Fill in guest details, booking dates, and any add-on services"
+        title={editLocked ? 'Reservation (read-only)' : editId ? 'Edit Reservation' : 'New Reservation'}
+        subtitle={editLocked ? 'Completed and fully paid — view only' : 'Fill in guest details, booking dates, and any add-on services'}
         size="xl"
       >
+        {editLocked && (
+          <div className="mb-4 flex items-start gap-2.5 rounded-xl border border-hborder bg-hsurface2 px-4 py-3 text-sm text-htext">
+            <Icon name="lock" className="w-4 h-4 mt-0.5 text-hmuted" />
+            <span>{editLocked}</span>
+          </div>
+        )}
+        {/* A disabled fieldset turns every input, select and button inside it
+            read-only in one place, so no field can be missed. `contents`
+            keeps it out of the layout. */}
+        <fieldset disabled={!!editLocked} className="contents">
         <div className="space-y-4">
 
           {/* ── Guest ── */}
@@ -1744,14 +1797,22 @@ export default function ReservationsPage() {
             </div>
           )}
 
-          {/* Actions */}
-          <div className="flex justify-end gap-3 pt-2">
-            <Button variant="ghost" onClick={() => setModalOpen(false)}>Cancel</Button>
-            <Button onClick={handleSave} disabled={saving}>
-              {saving ? 'Saving…' : editId ? 'Update Reservation' : 'Create Reservation'}
-            </Button>
-          </div>
         </div>
+        </fieldset>
+
+          {/* Actions — outside the fieldset so Close still works when read-only */}
+          <div className="flex justify-end gap-3 pt-6">
+            {editLocked ? (
+              <Button variant="ghost" onClick={() => setModalOpen(false)}>Close</Button>
+            ) : (
+              <>
+                <Button variant="ghost" onClick={() => setModalOpen(false)}>Cancel</Button>
+                <Button onClick={handleSave} disabled={saving}>
+                  {saving ? 'Saving…' : editId ? 'Update Reservation' : 'Create Reservation'}
+                </Button>
+              </>
+            )}
+          </div>
       </Modal>
 
       {/* ── Deposit Receipt Modal ── */}
