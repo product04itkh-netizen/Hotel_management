@@ -83,10 +83,27 @@ export default function StaffPage() {
     setSaving(true)
 
     if (editId) {
+      // A changed email goes through the server so the LOGIN moves with it.
+      // Writing it to the staff table alone left the login on the old address,
+      // so the new one failed with "Invalid login credentials". Done first, and
+      // nothing else is saved if it's refused.
+      const original = staff.find(s => s.id === editId)
+      const newEmail = form.email.trim()
+      let loginMoved = false
+      if ((original?.email ?? '').trim().toLowerCase() !== newEmail.toLowerCase()) {
+        const res = await fetch('/api/staff/update-email', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ staffId: editId, email: newEmail || null }),
+        })
+        const json = await res.json().catch(() => ({ ok: false, error: `Request failed (${res.status})` }))
+        if (!json.ok) { toast(json.error ?? 'Could not change the email', 'error'); setSaving(false); return }
+        loginMoved = !!json.loginMoved
+      }
+
       const payload = {
         full_name: form.full_name,
         role: form.role,
-        email: form.email || null,
+        email: newEmail.toLowerCase() || null,
         phone: form.phone || null,
         status: form.status,
         department: form.department || null,
@@ -95,7 +112,7 @@ export default function StaffPage() {
       }
       const { error } = await supabase.from('staff').update(payload).eq('id', editId)
       if (error) { toast(error.message, 'error'); setSaving(false); return }
-      toast('Staff member updated')
+      toast(loginMoved ? `Staff member updated — they now sign in as ${newEmail.toLowerCase()}` : 'Staff member updated')
       setSaving(false)
       setModalOpen(false)
       loadStaff()
