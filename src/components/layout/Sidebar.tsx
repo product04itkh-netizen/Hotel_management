@@ -160,9 +160,13 @@ export function Sidebar() {
   const { activeBranch } = useBranch()
   const { open, setOpen } = useMobileNav()
   const [pendingHref, setPendingHref] = useState<string | null>(null)
-  const { staff: currentStaff, loading: staffLoading } = useCurrentStaff()
-  const userName = currentStaff?.fullName ?? (staffLoading ? '…' : 'User')
-  const userRole = currentStaff ? capitalize(currentStaff.role) : ''
+  const { staff: currentStaff, email: userEmail, lookupError, loading: staffLoading } = useCurrentStaff()
+  // With no staff record, show the actual signed-in email rather than a
+  // generic "User", so it's obvious which account the browser is on.
+  const userName = currentStaff?.fullName ?? (staffLoading ? '…' : (userEmail ?? 'Not signed in'))
+  const userRole = currentStaff
+    ? capitalize(currentStaff.role)
+    : staffLoading ? '' : lookupError ? 'Could not load role' : userEmail ? 'No staff record' : ''
 
   useEffect(() => {
     setPendingHref(null)
@@ -254,7 +258,7 @@ export function Sidebar() {
       <div className="px-4 py-4 border-t border-white/10">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-full bg-gold flex items-center justify-center text-dark-navy text-xs font-bold flex-shrink-0">
-            {userName.split(' ').map(n => n[0]).join('').slice(0, 2)}
+            {userName.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
           </div>
           <div className="min-w-0">
             <p className="text-[13px] text-white/85 font-medium truncate">{userName}</p>
